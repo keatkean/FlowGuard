@@ -1,41 +1,87 @@
 import React, { useState, useEffect, useRef } from 'react';
+import axios from 'axios';
 import '../css/AIChatPopup.css';
+
+// Stable session ID for this browser tab — resets when user closes the tab.
+function getSessionId() {
+  let id = sessionStorage.getItem('fg_chat_session');
+  if (!id) {
+    id = crypto.randomUUID();
+    sessionStorage.setItem('fg_chat_session', id);
+  }
+  return id;
+}
+
+const INITIAL_MESSAGE = {
+  role: 'ai',
+  text: 'Systems online. I am FlowGuard AI. How can I assist you with facility access or site protocols today?'
+};
 
 const AIChatPopup = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState([
-    { role: 'ai', text: "Systems online. I am FlowGuard AI. How can I assist with facility monitoring today?" }
-  ]);
-  
-  const chatEndRef = useRef(null);
+  const [messages, setMessages] = useState([INITIAL_MESSAGE]);
+  const [loading, setLoading] = useState(false);
+  const [escalated, setEscalated] = useState(false);
+  const [ticketId, setTicketId] = useState(null);
 
-  // Auto-scroll to bottom when new messages arrive
+  const chatEndRef = useRef(null);
+  const sessionId = useRef(getSessionId());
+
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = () => {
-    if (!input.trim()) return;
+  const handleSend = async () => {
+    const text = input.trim();
+    if (!text || loading) return;
 
-    // Add user message
-    const newMessages = [...messages, { role: 'user', text: input }];
-    setMessages(newMessages);
     setInput('');
+    setMessages(prev => [...prev, { role: 'user', text }]);
+    setLoading(true);
 
-    // Mock AI Response (This is where you'd call your AI API later)
-    setTimeout(() => {
-      setMessages(prev => [...prev, { 
-        role: 'ai', 
-        text: "Analyzing site documentation... I've noted your request regarding " + input + ". How else can I help?" 
-      }]);
-    }, 1000);
+    try {
+      const userId   = localStorage.getItem('userId')   || undefined;
+      const tenantName = localStorage.getItem('userName') || undefined;
+      const unitNumber = localStorage.getItem('unitNumber') || undefined;
+
+      const { data } = await axios.post('/api/support/chat', {
+        sessionId: sessionId.current,
+        message: text,
+        userId,
+        tenantName,
+        unitNumber
+      });
+
+      setMessages(prev => [...prev, { role: 'ai', text: data.response }]);
+
+      if (data.escalated) {
+        setEscalated(true);
+        setTicketId(data.ticketId);
+      }
+    } catch (err) {
+      console.error('Chat error:', err);
+      setMessages(prev => [
+        ...prev,
+        { role: 'ai', text: 'I am temporarily unable to process your request. Please try again in a moment or contact the FM office directly.' }
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpen = () => {
+    setIsOpen(true);
+  };
+
+  const handleClose = () => {
+    setIsOpen(false);
   };
 
   return (
     <div className={`chat-popup-wrapper ${isOpen ? 'chat-open' : ''}`}>
       {/* Floating Action Button */}
-      <button className="chat-fab" onClick={() => setIsOpen(!isOpen)}>
+      <button className="chat-fab" onClick={isOpen ? handleClose : handleOpen} aria-label="Toggle AI chat">
         {isOpen ? '✕' : '🤖'}
       </button>
 
@@ -46,25 +92,39 @@ const AIChatPopup = () => {
             <div className="ai-status-dot"></div>
             <h3>FlowGuard AI Assistant</h3>
           </div>
-          
+
+          {escalated && ticketId && (
+            <div className="chat-escalation-banner">
+              Ticket #{ticketId} created — FM team notified
+            </div>
+          )}
+
           <div className="chat-messages">
-            {messages.map((msg, index) => (
-              <div key={index} className={`message-bubble ${msg.role}-bubble`}>
+            {messages.map((msg, i) => (
+              <div key={i} className={`message-bubble ${msg.role}-bubble`}>
                 {msg.text}
               </div>
             ))}
+            {loading && (
+              <div className="message-bubble ai-bubble chat-typing">
+                <span></span><span></span><span></span>
+              </div>
+            )}
             <div ref={chatEndRef} />
           </div>
 
           <div className="chat-input-area">
-            <input 
-              type="text" 
-              placeholder="Ask about site protocols..." 
+            <input
+              type="text"
+              placeholder={escalated ? 'Add more details for the FM team...' : 'Ask about site protocols...'}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSend()}
+              disabled={loading}
             />
-            <button onClick={handleSend}>Send</button>
+            <button onClick={handleSend} disabled={loading || !input.trim()}>
+              Send
+            </button>
           </div>
         </div>
       )}

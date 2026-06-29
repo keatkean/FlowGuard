@@ -1,0 +1,208 @@
+/* ── Tabs ───────────────────────────────────────────────────────────────── */
+.support-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 1.5rem;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  padding: 4px;
+  width: fit-content;
+}
+
+.support-tab {
+  padding: 10px 24px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.support-tab.active {
+  background: #1e293b;
+  color: #f8fafc;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.support-tab:hover:not(.active) {
+  color: #e2e8f0;
+}
+
+/* ── Status badge extras ─────────────────────────────────────────────────── */
+.status-badge.inprogress {
+  background: rgba(59, 130, 246, 0.1);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.status-badge.medium {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+/* ── KB Form Card ────────────────────────────────────────────────────────── */
+.support-kb-form-card {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.support-kb-form-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: linear-gradient(180deg, #60a5fa, #34d399);
+}
+
+.support-kb-form-card h3 {
+  margin: 0 0 20px;
+  font-size: 1.1rem;
+  color: #f8fafc;
+}
+
+.support-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.support-form-row label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.support-form-row input,
+.support-form-row textarea {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #e2e8f0;
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+  font-family: inherit;
+}
+
+.support-form-row input:focus,
+.support-form-row textarea:focus {
+  border-color: #3b82f6;
+}
+
+.support-save-btn {
+  background: #3b82f6 !important;
+  color: white !important;
+  padding: 10px 20px !important;
+}
+
+.support-save-btn:hover:not(:disabled) {
+  background: #2563eb !important;
+}
+
+/* ── Keyword Tags ─────────────────────────────────────────────────────────── */
+.support-keyword-tag {
+  background: rgba(59, 130, 246, 0.1);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+/* ── Transcript Modal ─────────────────────────────────────────────────────── */
+.support-transcript-modal {
+  max-width: 560px;
+  width: 92%;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.support-transcript-messages {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 480px;
+}
+
+.support-msg {
+  padding: 10px 14px;
+  border-radius: 10px;
+  max-width: 82%;
+}
+
+.support-msg-ai {
+  align-self: flex-start;
+  background: #334155;
+}
+
+.support-msg-user {
+  align-self: flex-end;
+  background: #1d4ed8;
+}
+
+.support-msg-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+
+.support-msg-text {
+  color: #f1f5f9;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.support-msg-time {
+  font-size: 0.68rem;
+  color: #64748b;
+  margin-top: 4px;
+  text-align: right;
+}
+
+/* ── Mobile ──────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .support-tabs {
+    width: 100%;
+  }
+
+  .support-tab {
+    flex: 1;
+    text-align: center;
+    padding: 10px 12px;
+    font-size: 0.85rem;
+  }
+
+  .support-kb-form-card {
+    padding: 18px 16px;
+  }
+
+  .support-transcript-modal {
+    width: 96%;
+  }
+}

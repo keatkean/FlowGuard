@@ -28,6 +28,7 @@ import Attendance from './pages/Attendance';
 import GateScanner from './pages/GateScanner';
 import ObjectDetection from './pages/ObjectDetection';
 import SecurityReview from './pages/SecurityReview';
+import SupportDashboard from './pages/SupportDashboard';
 import { ACCESS } from './constants/roles';
 import './App.css';
 
@@ -123,6 +124,11 @@ function App() {
         <Route path="/settings" element={
           <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
             <Settings />
+          </ProtectedRoute>
+        } />
+        <Route path="/support-dashboard" element={
+          <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
+            <SupportDashboard />
           </ProtectedRoute>
         } />
         
