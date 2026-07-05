@@ -109,4 +109,4 @@ erDiagram
 - `faceVector` is a PostgreSQL `FLOAT[]` array (Sequelize `ARRAY(FLOAT)`), not pgvector.
 - Soft-deletable (`paranoid`) tables keep a `deletedAt` timestamp: bookings, detection alerts,
   incident logs, monitoring zones.
-- PNG export (`er-diagram.png`) must be regenerated manually from this Mermaid source.
+- PNG export `design/png/er-diagram.png` must be regenerated manually from this Mermaid source.

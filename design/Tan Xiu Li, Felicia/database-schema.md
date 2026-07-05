@@ -132,4 +132,4 @@ Legacy face store: `id`, `name`, `role`, `face_embedding` (TEXT), `deletedAt`. S
 ---
 
 *Cross-module note: `bookings`, `detection_alerts`, `incident_logs`, `monitoring_zones` live in the
-shared DB and involve teammate modules; see `er-diagram.md` for the full picture.*
+shared DB and involve teammate modules; see `design/md/er-diagram.md` for the full picture.*

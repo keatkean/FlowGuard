@@ -48,4 +48,3 @@ use placeholder names only.
 - **Render free tier** sleeps after ~15 min idle (~30s cold start) — warn the tutor before a demo.
 - **Secrets:** all credentials come from environment variables; nothing real is committed. See each
   tier's `.env.example` for placeholder names.
-```

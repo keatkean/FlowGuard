@@ -2,8 +2,9 @@
 
 FlowGuard is a three-tier app: a React/Vite frontend, a Node.js/Express backend, and a Python
 FastAPI AI microservice, all backed by a shared PostgreSQL database, with WhatsApp Cloud API as an
-external notification service. See `architecture-diagram.md` for the visual, `er-diagram.md` for the
-data model, and the `*-flow.md` files for feature flows.
+external notification service. See `design/md/architecture-diagram.md` for the visual,
+`design/md/er-diagram.md` for the data model, and the `design/md/*-flow.md` files for feature flows.
+PNG exports live in `design/png/`.
 
 ## 1. Frontend — React + Vite
 - `client/src/pages/` — route screens: public site, Login/Register, role Dashboard, V-Patrol,
@@ -44,7 +45,7 @@ data model, and the `*-flow.md` files for feature flows.
 
 ## 6. Role-based access & public surface
 - RBAC enforced on both tiers (React `ProtectedRoute` + Express `requireRole`). Roles: FM, Tenant,
-  Staff, Public. See `rbac-flow.md` for the full matrix.
+  Staff, Public. See `design/md/rbac-flow.md` for the full matrix.
 - The **Driver Pass** page is intentionally public (drivers have no login) and is read-only via the
   public `GET /api/bookings/:ref` lookup.
 

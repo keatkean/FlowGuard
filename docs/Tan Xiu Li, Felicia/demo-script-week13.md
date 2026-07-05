@@ -50,4 +50,3 @@ cd ai-service && uvicorn main:app --host 0.0.0.0 --port 8501 --reload
 - No webcam → use **manual upload** on Face Enrollment; V-Patrol shows a clear "camera unavailable" overlay.
 - AI offline → enrolment returns a clean "service offline" message (no crash).
 - Camera flaky at the gate → Gate Scan accepts the **booking reference** typed manually.
-```

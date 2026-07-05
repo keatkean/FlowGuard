@@ -34,4 +34,3 @@ An honest summary of how AI assistants were used while building my modules
 - Detailed reflection: `flowguard-ai/Tan Xiu Li, Felicia/ai-reflection.md`.
 - Per-change reports: `docs/Tan Xiu Li, Felicia/*.md` (each feature/fix documents what AI helped with,
   what I reviewed, and how I verified it).
-```

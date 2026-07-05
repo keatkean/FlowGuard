@@ -90,4 +90,4 @@ flowchart LR
   service (InsightFace/YOLO) is heavy, so it runs locally for the demo, with cloud hosting as a
   stretch goal. After deploying, `FRONTEND_URL` must be updated so WhatsApp driver-pass links point
   to the live site.
-- PNG exports (`architecture-diagram.png`) must be regenerated manually from this Mermaid source.
+- PNG export `design/png/architecture-diagram.png` must be regenerated manually from this Mermaid source.

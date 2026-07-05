@@ -40,4 +40,3 @@ Some tests log expected console warnings/errors (e.g. simulated WhatsApp "disabl
 deliberate error-path logs, or React act warnings). These are **non-blocking** — every suite still
 reports **passed**. The warnings are diagnostic output from code paths the tests intentionally
 exercise, not test failures.
-```
