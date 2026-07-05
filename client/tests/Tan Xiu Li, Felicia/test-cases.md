@@ -18,16 +18,16 @@
 |---|----------------|------------------|
 | FE-8 | ProtectedRoute blocks unauthenticated access | Redirects to /login when no token present |
 
-## Update — Face Re-enrollment
+## Update — Re-enrolment & access status
 
 | # | What is tested | Expected outcome |
 |---|----------------|------------------|
-| FE-9 | Re-enroll Face button visible in User Management | Button appears for each enrolled user row |
-| FE-10 | Re-enroll Face opens enrollment modal | Clicking the button opens the FaceEnrollment modal for that user |
-| FE-11 | Manual upload mode works during re-enrollment | Selecting an image file populates the angle photo inside the re-enrollment modal |
-| FE-12 | Auto webcam mode works during re-enrollment | Webcam capture advances through front → left → right stages |
-| FE-13 | New face vector overwrites old vector | PUT /user/:id/enroll-face called (not POST); success response updates the table row |
-| FE-14 | Success message appears after re-enrollment | Toast/banner confirms "Face re-enrolled successfully" |
+| FE-9 | Re-enrolment is available via Settings (own Face ID) | Settings shows "Re-enroll My Face ID", opening the enrolment flow |
+| FE-10 | User Management has NO per-row Face ID button | No "Face ID" action on user rows; re-enrol lives in Settings (FM-targeted enrol uses targetUserId where supported) |
+| FE-11 | Manual upload mode works during re-enrolment | Selecting an image file populates the matching angle photo |
+| FE-12 | Auto webcam mode advances stages | Webcam capture advances front → left → right |
+| FE-13 | New face vector overwrites old vector | POST /user/enroll-face called (overwrites the existing vector); success surfaces to the user |
+| FE-14 | Security review status update (FM) | Choosing a status + saving calls PATCH /api/security/logs/:id/review |
 
 ## Delete — User Removal
 
