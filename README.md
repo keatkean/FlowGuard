@@ -144,6 +144,25 @@ account → `admin@harrison.com` / `Admin123!`. Change the password after first 
 
 ---
 
+## 🧪 Testing
+
+```bash
+# Backend (Jest)
+cd server && npm test
+
+# Frontend (Vitest)
+cd client && npm test -- --run
+
+# Frontend production build
+cd client && npm run build
+```
+
+Latest verified status: **backend 79/79 passed**, **frontend 70/70 passed**, **build success**.
+Some tests print expected console warnings (e.g. simulated-WhatsApp or deliberate error paths) —
+these are non-blocking; the suites still pass.
+
+---
+
 ## 🚚 Smart Logistics & Loading Bay Management
 
 FlowGuard includes a Smart Logistics module to help Harrison Food Factory manage congestion across its two loading bays.
