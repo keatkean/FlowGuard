@@ -5,7 +5,10 @@ const { Op } = require("sequelize");
 const axios = require('axios');
 const multer = require('multer');
 const FormData = require('form-data');
+const { verifyToken } = require('../middlewares/auth');
 require('dotenv').config();
+
+const ALLOWED_STATUSES = ['Active', 'Investigating', 'Escalated to Security', 'Cleared'];
 
 // Memory storage for incoming CCTV frames
 const upload = multer({ storage: multer.memoryStorage() });
@@ -59,6 +62,32 @@ router.post("/scan-frame", upload.single('file'), async (req, res) => {
 });
 
 // -------------------------------------------------------------
+// Manual FM incident creation
+// -------------------------------------------------------------
+router.post("/", verifyToken, async (req, res) => {
+    const { camera_location, status, source, severity, person_name, confidence_score, notes } = req.body;
+    if (!camera_location || !status || !source || !severity) {
+        return res.status(400).json({ error: "camera_location, status, source, and severity are required." });
+    }
+    try {
+        const log = await IncidentLog.create({
+            camera_location,
+            status,
+            source,
+            severity,
+            person_name: person_name || null,
+            confidence_score: confidence_score ? parseFloat(confidence_score) : null,
+            notes: notes || '',
+            resolutionStatus: 'Active'
+        });
+        res.status(201).json(log);
+    } catch (err) {
+        console.error("Failed to create incident:", err);
+        res.status(500).json({ error: "Failed to create incident log." });
+    }
+});
+
+// -------------------------------------------------------------
 // STANDARD CRUD: Get all logs for React Dashboard
 // -------------------------------------------------------------
 router.get("/", async (req, res) => {
@@ -92,8 +121,28 @@ router.get("/:id", async (req, res) => {
     res.json(log);
 });
 
+// Update resolution status and/or notes
+router.patch("/:id", verifyToken, async (req, res) => {
+    const log = await IncidentLog.findByPk(req.params.id);
+    if (!log) return res.status(404).json({ error: "Incident not found." });
+    const { resolutionStatus, notes } = req.body;
+    if (resolutionStatus && !ALLOWED_STATUSES.includes(resolutionStatus)) {
+        return res.status(400).json({ error: `resolutionStatus must be one of: ${ALLOWED_STATUSES.join(', ')}.` });
+    }
+    try {
+        await log.update({
+            resolutionStatus: resolutionStatus ?? log.resolutionStatus,
+            notes: notes !== undefined ? notes : log.notes
+        });
+        res.status(200).json(log);
+    } catch (err) {
+        console.error("Failed to update incident:", err);
+        res.status(500).json({ error: "Failed to update incident log." });
+    }
+});
+
 // Delete a log (e.g., clearing false alarms)
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", verifyToken, async (req, res) => {
     let id = req.params.id;
     let log = await IncidentLog.findByPk(id);
     if (!log) {

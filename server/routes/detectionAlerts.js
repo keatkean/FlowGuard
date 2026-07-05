@@ -1,6 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const { DetectionAlert } = require('../models');
+const { DetectionAlert, IncidentLog } = require('../models');
+
+function severityFromDuration(seconds) {
+  if (!seconds || seconds < 120) return 'Low';
+  if (seconds < 300) return 'Medium';
+  if (seconds < 600) return 'High';
+  return 'Critical';
+}
 const { Op } = require('sequelize');
 
 router.get('/', async (req, res) => {
@@ -33,6 +40,20 @@ router.post('/', async (req, res) => {
             person_name: person_name || null
         });
         res.status(201).json(alert);
+
+        // Bridge to IncidentLog — fire-and-forget so the AI always gets its 201
+        IncidentLog.create({
+            camera_location: camera_location,
+            status: 'UNATTENDED_OBJECT',
+            source: 'Object Detection',
+            severity: severityFromDuration(duration_seconds),
+            person_name: (person_name && person_name !== 'UNKNOWN') ? person_name : null,
+            confidence_score: null,
+            resolutionStatus: 'Active',
+            notes: zone_name ? `[Object Detection] Zone: ${zone_name}` : ''
+        }).catch(err =>
+            console.error(`[Bridge] DetectionAlert id=${alert.id} — IncidentLog create failed:`, err.message)
+        );
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

@@ -28,6 +28,7 @@ import Attendance from './pages/Attendance';
 import GateScanner from './pages/GateScanner';
 import ObjectDetection from './pages/ObjectDetection';
 import SecurityReview from './pages/SecurityReview';
+import IncidentDashboard from './pages/IncidentDashboard';
 import { ACCESS } from './constants/roles';
 import './App.css';
 
@@ -115,6 +116,11 @@ function App() {
         <Route path="/security-review" element={
           <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
             <SecurityReview />
+          </ProtectedRoute>
+        } />
+        <Route path="/incidents" element={
+          <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
+            <IncidentDashboard />
           </ProtectedRoute>
         } />
         <Route path="/tenant-management" element={

@@ -84,6 +84,7 @@ const Sidebar = () => {
             <>
               <NavLink to="/users" onClick={() => setIsOpen(false)}>User Management</NavLink>
               <NavLink to="/security-review" onClick={() => setIsOpen(false)}>Security Review</NavLink>
+              <NavLink to="/incidents" onClick={() => setIsOpen(false)}>Incident Dashboard</NavLink>
               <NavLink to="/tenant-management" onClick={() => setIsOpen(false)}>Tenant Onboarding</NavLink>
             </>
           )}
