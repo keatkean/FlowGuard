@@ -130,6 +130,9 @@ cd server && node index.js
 cd ai-service && uvicorn main:app --host 0.0.0.0 --port 8501 --reload
 ```
 
+# Object Detection
+cd ai-service && uvicorn main:app --host 0.0.0.0 --port 8000
+
 > ⚠️ **The AI service must run on port 8501.** `FACE_AI_URL` and the frontend Vite
 > `/ai` proxy both target `http://127.0.0.1:8501`, so the backend reaches
 > `http://127.0.0.1:8501/api/encode-faces` and the browser reaches recognition/YOLO

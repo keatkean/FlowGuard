@@ -1,6 +1,7 @@
 import React from 'react';
 import Sidebar from '../components/Sidebar';
 import '../css/Dashboard.css';
+import CameraFeed from "./CameraFeed";
 
 export default function Cameras() {
   const cameraFeeds = [
@@ -28,25 +29,7 @@ export default function Cameras() {
         <div className="camera-grid">
           {cameraFeeds.map((cam) => (
             <div key={cam.id} className={`camera-card ${cam.alert ? 'camera-alert' : ''}`}>
-              <div className="camera-feed-placeholder">
-                {cam.status === 'Offline' ? (
-                  <span className="feed-offline-text">NO SIGNAL</span>
-                ) : cam.video ? (
-                  <>
-                    <video
-                      src={cam.video}
-                      autoPlay
-                      muted
-                      loop
-                      playsInline
-                      className="camera-video"
-                    />
-                    <span className="feed-live-icon">⏺ REC</span>
-                  </>
-                ) : (
-                  <span className="feed-live-icon">⏺ REC</span>
-                )}
-              </div>
+              <CameraFeed cam={cam} />
 
               <div className="camera-info">
                 <div className="cam-title-row">

@@ -102,7 +102,7 @@ const ObjectDetection = () => {
 
       processingFrameRef.current = true;
       const context = canvas.getContext('2d');
-      const maxWidth = 360;
+      const maxWidth = 960;
       const scale = Math.min(1, maxWidth / video.videoWidth);
       canvas.width = Math.round(video.videoWidth * scale);
       canvas.height = Math.round(video.videoHeight * scale);
