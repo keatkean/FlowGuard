@@ -68,7 +68,7 @@ async function startServer() {
             console.warn("The server will start, but those tables may be missing or outdated.\n");
         }
 
-        let port = process.env.APP_PORT || 5000;
+        let port = process.env.APP_PORT || 5001;
         app.listen(port, '127.0.0.1', () => {
             console.log("--------------------------------------------------");
             console.log(`FlowGuard Server is FULLY READY on port ${port}`);
