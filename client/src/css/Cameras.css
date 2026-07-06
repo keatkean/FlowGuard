@@ -176,7 +176,7 @@
   align-items: end;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 20px;
 }
 
 .camera-section-title h2 {
@@ -303,7 +303,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 20px;
 }
 
 .camera-kicker {
@@ -377,7 +377,7 @@
 .camera-admin-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
-  gap: 20px;
+  gap: 24px;
   align-items: start;
 }
 
@@ -386,14 +386,19 @@
   background: #0f1626;
   border: 1px solid #202c44;
   border-radius: 8px;
-  padding: 18px;
+  padding: 22px;
+  transition: border-color 0.15s ease;
+}
+
+.camera-admin-form.editing {
+  border-color: rgba(34, 211, 238, 0.55);
 }
 
 .camera-inventory-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(160px, 1fr));
-  gap: 14px;
-  margin-bottom: 18px;
+  gap: 16px;
+  margin-bottom: 24px;
 }
 
 .camera-inventory-summary div {
@@ -408,7 +413,7 @@
   background: #0f1626;
   border: 1px solid #202c44;
   border-radius: 8px;
-  padding: 14px 16px;
+  padding: 16px 18px;
   color: #22d3ee;
 }
 
@@ -446,18 +451,24 @@
 
 .camera-table {
   display: grid;
-  gap: 10px;
+  gap: 14px;
 }
 
 .camera-row-card {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.1fr) auto;
-  gap: 14px;
+  gap: 18px;
   align-items: center;
   background: #0a0f1d;
   border: 1px solid #26334d;
   border-radius: 8px;
-  padding: 13px 14px;
+  padding: 16px 18px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.camera-row-card.editing {
+  border-color: rgba(34, 211, 238, 0.55);
+  background: rgba(14, 165, 233, 0.06);
 }
 
 .camera-row-main {
@@ -495,22 +506,21 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .camera-row-meta > span:not(.camera-status-pill) {
-  display: inline-flex;
-  align-items: center;
-  min-height: 26px;
-  border: 1px solid #253149;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.72);
-  color: #9fb0cc;
-  padding: 0 10px;
-  font-size: 0.74rem;
-  font-weight: 800;
+  color: #8fa4c3;
+  font-size: 0.78rem;
+  font-weight: 700;
   text-transform: capitalize;
+}
+
+.camera-row-meta > span:not(.camera-status-pill):not(:last-child)::after {
+  content: "\2022";
+  margin-left: 10px;
+  color: #3a4966;
 }
 
 .camera-row-actions {
@@ -528,12 +538,23 @@
   color: #22d3ee;
   font-weight: 800;
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.camera-row-actions button:hover {
+  background: rgba(14, 165, 233, 0.22);
+  border-color: rgba(34, 211, 238, 0.7);
 }
 
 .camera-row-actions button.danger {
   border-color: rgba(244, 63, 94, 0.42);
   background: rgba(244, 63, 94, 0.1);
   color: #fb7185;
+}
+
+.camera-row-actions button.danger:hover {
+  background: rgba(244, 63, 94, 0.22);
+  border-color: rgba(251, 113, 133, 0.7);
 }
 
 .camera-alert-count {
@@ -670,6 +691,21 @@
   color: #fb7185;
   font-size: 0.78rem;
   margin: 10px 0;
+}
+
+.camera-form-error {
+  min-height: 1.1em;
+  line-height: 1.1em;
+}
+
+.camera-form-error.is-empty {
+  visibility: hidden;
+}
+
+.camera-table .camera-empty {
+  color: #7f93b4;
+  text-align: center;
+  padding: 24px 0;
 }
 
 @media (max-width: 1180px) {

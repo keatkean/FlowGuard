@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import axios from 'axios';
+import '../css/CameraFeed.css';
 
 const RELEVANT_CAMERA_CLASSES = new Set([
   'person',
@@ -144,11 +145,6 @@ export default function CameraFeed({ cam }) {
       </div>
 
       <canvas ref={canvasRef} className="camera-overlay" />
-
-      <span className="feed-live-icon">LIVE</span>
-      <span className={`feed-severity ${cam.status?.toLowerCase() || 'live'}`}>
-        {cam.status || 'Live'}
-      </span>
     </div>
   );
 }

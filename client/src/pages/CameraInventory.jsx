@@ -149,7 +149,10 @@ export default function CameraInventory() {
 
             <div className="camera-table">
               {filteredCameras.map((cam) => (
-                <article key={cam.id} className="camera-row-card">
+                <article
+                  key={cam.id}
+                  className={`camera-row-card${cam.id === editingId ? ' editing' : ''}`}
+                >
                   <div className="camera-row-main">
                     <span className="camera-row-icon">
                       <UiIcon name="camera" />
@@ -175,10 +178,13 @@ export default function CameraInventory() {
                   </div>
                 </article>
               ))}
+              {filteredCameras.length === 0 && (
+                <p className="camera-empty">No cameras match "{query}".</p>
+              )}
             </div>
           </div>
 
-          <form className="camera-crud-card camera-admin-form" onSubmit={saveCamera}>
+          <form className={`camera-crud-card camera-admin-form${editingId ? ' editing' : ''}`} onSubmit={saveCamera}>
             <div className="camera-panel-heading">
               <div>
                 <span className="camera-kicker">Inventory Form</span>
@@ -195,7 +201,7 @@ export default function CameraInventory() {
               <label>Video Source<select value={form.video} onChange={(event) => setForm((prev) => ({ ...prev, video: event.target.value }))}><option value="/videos/loading.mp4">Loading Bay</option><option value="/videos/assembly.mp4">Assembly Line</option><option value="/videos/chemical_storage.mp4">Chemical Storage</option><option value="/videos/command.mp4">Command Center</option><option value="/videos/entrance.mp4">Main Gate</option><option value="/videos/packaging.mp4">Packaging</option></select></label>
               <label>Detections<input type="number" min="0" value={form.detections} onChange={(event) => setForm((prev) => ({ ...prev, detections: event.target.value }))} /></label>
             </div>
-            {formError && <p className="camera-form-error">{formError}</p>}
+            <p className={`camera-form-error${formError ? '' : ' is-empty'}`}>{formError || ' '}</p>
             <button className="camera-primary-btn full" type="submit">
               <UiIcon name="check" />
               {editingId ? 'Save Changes' : 'Create Camera'}
