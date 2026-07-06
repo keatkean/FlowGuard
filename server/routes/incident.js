@@ -121,19 +121,26 @@ router.get("/:id", async (req, res) => {
     res.json(log);
 });
 
-// Update resolution status and/or notes
+const ALLOWED_SEVERITIES = ['Critical', 'High', 'Medium', 'Low'];
+
+// Update resolution status, severity and/or notes
 router.patch("/:id", verifyToken, async (req, res) => {
     const log = await IncidentLog.findByPk(req.params.id);
     if (!log) return res.status(404).json({ error: "Incident not found." });
-    const { resolutionStatus, notes } = req.body;
+    const { resolutionStatus, severity, notes } = req.body;
     if (resolutionStatus && !ALLOWED_STATUSES.includes(resolutionStatus)) {
         return res.status(400).json({ error: `resolutionStatus must be one of: ${ALLOWED_STATUSES.join(', ')}.` });
+    }
+    if (severity && !ALLOWED_SEVERITIES.includes(severity)) {
+        return res.status(400).json({ error: `severity must be one of: ${ALLOWED_SEVERITIES.join(', ')}.` });
     }
     try {
         await log.update({
             resolutionStatus: resolutionStatus ?? log.resolutionStatus,
+            severity: severity ?? log.severity,
             notes: notes !== undefined ? notes : log.notes
         });
+        await log.reload();
         res.status(200).json(log);
     } catch (err) {
         console.error("Failed to update incident:", err);

@@ -51,6 +51,7 @@ section[id] {
   scroll-margin-top: 80px; 
 }
 
-.grecaptcha-badge { 
-    bottom: 20px !important; 
+.grecaptcha-badge {
+    bottom: 20px !important;
+    z-index: 9999 !important;
 }

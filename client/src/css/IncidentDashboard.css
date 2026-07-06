@@ -674,12 +674,74 @@
   color: #fde68a;
 }
 
-/* ---- Table: horizontal scroll on narrow viewports ---- */
+/* ---- Table: horizontal scroll + fixed layout for balanced columns ---- */
 .dashboard-main .table-container {
   overflow-x: auto;
   overflow-y: hidden;
 }
 
 .dashboard-main .management-table {
-  min-width: 900px;
+  min-width: 960px;
+  table-layout: fixed;
+}
+
+/* Column widths — total 100%
+   Order: TIMESTAMP | LOCATION | PERSON | SOURCE | CONFIDENCE | SEVERITY | STATUS | ACTIONS */
+.dashboard-main .management-table th:nth-child(1) { width: 17%; }
+.dashboard-main .management-table th:nth-child(2) { width: 14%; }
+.dashboard-main .management-table th:nth-child(3) { width: 13%; }
+.dashboard-main .management-table th:nth-child(4) { width: 11%; }
+.dashboard-main .management-table th:nth-child(5) { width: 9%;  }
+.dashboard-main .management-table th:nth-child(6) { width: 10%; }
+.dashboard-main .management-table th:nth-child(7) { width: 13%; }
+.dashboard-main .management-table th:nth-child(8) { width: 13%; }
+
+/* Timestamp: single line, clip gracefully rather than wrap */
+.dashboard-main .management-table td:nth-child(1) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Sticky Actions column ---- */
+.dashboard-main .management-table th:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: #1a2d48;
+}
+
+.dashboard-main .management-table .actions-cell {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: #132035;
+  text-align: center;
+}
+
+.dashboard-main .management-table .actions-cell .action-button-group {
+  width: fit-content;
+  margin: 0 auto;
+}
+
+/*
+ * box-shadow on <th>/<td> is silently ignored by all browsers when
+ * border-collapse: collapse is set on the table — use a pseudo-element
+ * instead, which is a regular box and renders the shadow correctly.
+ */
+.dashboard-main .management-table th:last-child::before,
+.dashboard-main .management-table .actions-cell::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -24px;
+  width: 24px;
+  background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.55));
+  border-right: 3px solid #2d4875;
+  pointer-events: none;
+}
+
+.dashboard-main .management-table tr:hover .actions-cell {
+  background: #172640;
 }

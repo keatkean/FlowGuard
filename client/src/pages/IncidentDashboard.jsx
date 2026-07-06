@@ -48,6 +48,43 @@ const sourceLabel = (s) => {
 const truncate = (str, n = 30) =>
   str && str.length > n ? str.slice(0, n) + '…' : str;
 
+// Break a location string into lines: max 2 words OR max 12 chars per line,
+// whichever limit is hit first. Total display capped at 30 chars (word boundary).
+const formatLocation = (str) => {
+  if (!str) return '';
+  let text = str;
+  let ellipsis = false;
+  if (str.length > 30) {
+    const cut = str.slice(0, 30);
+    const lastSpace = cut.lastIndexOf(' ');
+    text = lastSpace > 0 ? cut.slice(0, lastSpace) : cut;
+    ellipsis = true;
+  }
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines = [];
+  let lineWords = [];
+  let lineLen = 0;
+  for (const word of words) {
+    if (lineWords.length === 0) {
+      lineWords = [word];
+      lineLen = word.length;
+    } else {
+      const tentativeLen = lineLen + 1 + word.length;
+      if (tentativeLen > 15) {
+        lines.push(lineWords.join(' '));
+        lineWords = [word];
+        lineLen = word.length;
+      } else {
+        lineWords.push(word);
+        lineLen = tentativeLen;
+      }
+    }
+  }
+  if (lineWords.length > 0) lines.push(lineWords.join(' '));
+  if (ellipsis && lines.length > 0) lines[lines.length - 1] += '…';
+  return lines.join('\n');
+};
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -67,7 +104,7 @@ const IncidentDashboard = () => {
   // --- Detail / edit modal ---
   const [selectedIncident, setSelectedIncident] = useState(null);
   const [editMode, setEditMode]                 = useState(false);
-  const [editForm, setEditForm]                 = useState({ resolutionStatus: '', notes: '' });
+  const [editForm, setEditForm]                 = useState({ resolutionStatus: '', severity: '', notes: '' });
   const [editSaving, setEditSaving]             = useState(false);
 
   // --- Create modal ---
@@ -238,6 +275,7 @@ const IncidentDashboard = () => {
     setEditMode(false);
     setEditForm({
       resolutionStatus: incident.resolutionStatus || 'Active',
+      severity: incident.severity || 'Medium',
       notes: incident.notes || '',
     });
   };
@@ -478,7 +516,11 @@ const IncidentDashboard = () => {
                       <td style={{ fontFamily: 'monospace', color: '#cbd5e1', fontSize: '0.83rem' }}>
                         {new Date(incident.createdAt).toLocaleString('en-SG')}
                       </td>
-                      <td style={{ color: '#e2e8f0' }} title={incident.camera_location}>{truncate(incident.camera_location)}</td>
+                      <td style={{ color: '#e2e8f0' }} title={incident.camera_location}>
+                        <span style={{ whiteSpace: 'pre-line', lineHeight: '1.45', overflowWrap: 'anywhere', wordBreak: 'break-all' }}>
+                          {formatLocation(incident.camera_location)}
+                        </span>
+                      </td>
                       <td>
                         {incident.person_name ? (
                           <div className="inc-person-cell" title={incident.person_name}>
@@ -558,6 +600,7 @@ const IncidentDashboard = () => {
                         setEditMode(true);
                         setEditForm({
                           resolutionStatus: selectedIncident.resolutionStatus || 'Active',
+                          severity: selectedIncident.severity || 'Medium',
                           notes: selectedIncident.notes || '',
                         });
                       }}
@@ -608,9 +651,23 @@ const IncidentDashboard = () => {
                 </div>
                 <div className="inc-detail-item">
                   <span className="inc-detail-label">Severity</span>
-                  <span className={severityClass(selectedIncident.severity)} style={{ marginTop: '2px' }}>
-                    {selectedIncident.severity}
-                  </span>
+                  {editMode ? (
+                    <select
+                      className="inc-select"
+                      value={editForm.severity}
+                      onChange={(e) => setEditForm(f => ({ ...f, severity: e.target.value }))}
+                      style={{ marginTop: '2px' }}
+                    >
+                      <option>Critical</option>
+                      <option>High</option>
+                      <option>Medium</option>
+                      <option>Low</option>
+                    </select>
+                  ) : (
+                    <span className={severityClass(selectedIncident.severity)} style={{ marginTop: '2px' }}>
+                      {selectedIncident.severity}
+                    </span>
+                  )}
                 </div>
                 <div className="inc-detail-item">
                   <span className="inc-detail-label">Resolution Status</span>
