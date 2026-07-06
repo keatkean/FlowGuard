@@ -7,9 +7,17 @@ import CameraFeed from './CameraFeed';
 import '../css/Dashboard.css';
 import '../css/Cameras.css';
 
+const CAMERAS_URL = '/api/cameras';
 const ALERTS_URL = '/api/detection-alerts';
-const statusClass = (status) => String(status || 'Live').toLowerCase();
-const statusLabel = (status) => String(status || 'Live');
+const FALLBACK_VIDEO = '/videos/loading.mp4';
+const statusClass = (status) => String(status || 'Online').toLowerCase();
+const statusLabel = (status) => String(status || 'Online');
+const formatLastActive = (value) => {
+  if (!value) return 'Never';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  return date.toLocaleString('en-SG', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true });
+};
 const formatAlertTime = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Time unavailable';
@@ -23,15 +31,10 @@ const formatAlertTime = (value) => {
 };
 
 export default function Cameras() {
-  const [cameraFeeds] = useState([
-    { id: 'CAM-01', zone: 'Zone A - Loading Bay', status: 'Live', video: '/videos/loading.mp4', model: 'YOLOv9-L', resolution: '1080p', bitrate: '4.2 Mbps', detections: 1, uptime: '23h 14m', lastEvent: 'Forklift lane clear' },
-    { id: 'CAM-02', zone: 'Zone B - Warehouse Floor', status: 'Warning', video: '/videos/assembly.mp4', model: 'YOLOv9-L', resolution: '1080p', bitrate: '4.8 Mbps', detections: 2, uptime: '47h 22m', lastEvent: 'PPE violation detected' },
-    { id: 'CAM-03', zone: 'Zone C - Restricted Storage', status: 'Critical', video: '/videos/chemical_storage.mp4', model: 'YOLOv9-L', resolution: '1080p', bitrate: '5.1 Mbps', detections: 1, uptime: '12h 06m', lastEvent: 'Unauthorized object detected' },
-    { id: 'CAM-04', zone: 'Zone D - Exit Corridor', status: 'Critical', video: '/videos/command.mp4', model: 'YOLOv9-L', resolution: '1080p', bitrate: '4.6 Mbps', detections: 1, uptime: '31h 40m', lastEvent: 'Emergency exit blocked' },
-    { id: 'CAM-05', zone: 'Zone E - Main Gate', status: 'Live', video: '/videos/entrance.mp4', model: 'YOLOv8-N', resolution: '720p', bitrate: '2.9 Mbps', detections: 0, uptime: '68h 11m', lastEvent: 'Access lane normal' },
-    { id: 'CAM-06', zone: 'Zone F - Packaging', status: 'Live', video: '/videos/packaging.mp4', model: 'YOLOv8-N', resolution: '1080p', bitrate: '3.7 Mbps', detections: 0, uptime: '19h 03m', lastEvent: 'Operator viewport opened' },
-  ]);
-  const [selectedId, setSelectedId] = useState('CAM-02');
+  const [cameraFeeds, setCameraFeeds] = useState([]);
+  const [camerasLoading, setCamerasLoading] = useState(true);
+  const [camerasOffline, setCamerasOffline] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
   const [query, setQuery] = useState('');
   const [alerts, setAlerts] = useState([]);
   const [alertsOffline, setAlertsOffline] = useState(false);
@@ -48,16 +51,28 @@ export default function Cameras() {
     String(alert.object_class || '').toLowerCase().includes('critical')
   ));
   const filteredCameras = cameraFeeds.filter((cam) => (
-    `${cam.id} ${cam.zone} ${cam.status}`.toLowerCase().includes(query.toLowerCase())
+    `${cam.camera_code} ${cam.camera_name} ${cam.location} ${cam.status}`.toLowerCase().includes(query.toLowerCase())
   ));
 
   const metrics = useMemo(() => {
-    const online = cameraFeeds.filter((cam) => cam.status !== 'Offline').length;
-    const warnings = cameraFeeds.filter((cam) => cam.status === 'Warning').length;
-    const critical = cameraFeeds.filter((cam) => cam.status === 'Critical').length;
-    const detections = cameraFeeds.reduce((total, cam) => total + Number(cam.detections || 0), 0);
-    return { online, warnings, critical, detections };
+    const online = cameraFeeds.filter((cam) => cam.status === 'Online').length;
+    const maintenance = cameraFeeds.filter((cam) => cam.status === 'Maintenance').length;
+    const down = cameraFeeds.filter((cam) => ['Offline', 'Disabled'].includes(cam.status)).length;
+    return { online, maintenance, down };
   }, [cameraFeeds]);
+
+  const fetchCameras = () => {
+    setCamerasLoading(true);
+    axios.get(CAMERAS_URL, { headers })
+      .then((res) => {
+        const list = Array.isArray(res.data) ? res.data : [];
+        setCameraFeeds(list);
+        setCamerasOffline(false);
+        setSelectedId((prev) => (list.some((cam) => cam.id === prev) ? prev : list[0]?.id ?? null));
+      })
+      .catch(() => setCamerasOffline(true))
+      .finally(() => setCamerasLoading(false));
+  };
 
   const fetchAlerts = () => {
     axios.get(ALERTS_URL, { headers })
@@ -69,6 +84,7 @@ export default function Cameras() {
   };
 
   useEffect(() => {
+    fetchCameras();
     fetchAlerts();
     const interval = setInterval(fetchAlerts, 15000);
     return () => clearInterval(interval);
@@ -92,8 +108,6 @@ export default function Cameras() {
           <div className="header-titles">
             <h1>Camera Network</h1>
             <p>Live CCTV telemetry, AI inference status, and camera inventory control</p>
-          </div>
-          <div className="camera-header-actions">
             <label className="camera-search">
               <UiIcon name="search" />
               <input
@@ -102,12 +116,20 @@ export default function Cameras() {
                 placeholder="Search cameras, zones, status..."
               />
             </label>
+          </div>
+          <div className="camera-header-actions">
             <Link className="camera-primary-btn" to="/camera-inventory">
               <UiIcon name="inventory" />
               Manage Inventory
             </Link>
           </div>
         </header>
+
+        {camerasOffline && (
+          <div className="camera-system-banner">
+            Node.js server offline - run <strong>node index.js</strong> in /server (port 5001)
+          </div>
+        )}
 
         <section className="camera-metrics" aria-label="Camera network metrics">
           <div className="camera-metric-card">
@@ -122,13 +144,13 @@ export default function Cameras() {
           </div>
           <div className="camera-metric-card warning">
             <UiIcon name="warning" className="camera-metric-svg" />
-            <span>Warnings</span>
-            <strong>{activeWarningAlerts.length}</strong>
+            <span>Maintenance</span>
+            <strong>{metrics.maintenance}</strong>
           </div>
           <div className="camera-metric-card critical">
             <UiIcon name="grid" className="camera-metric-svg" />
-            <span>Critical</span>
-            <strong>{activeCriticalAlerts.length}</strong>
+            <span>Offline / Disabled</span>
+            <strong>{metrics.down}</strong>
           </div>
         </section>
 
@@ -137,31 +159,38 @@ export default function Cameras() {
             <div className="camera-section-title">
               <div>
                 <h2>Real-Time Camera Grid</h2>
-                <p>{filteredCameras.length} feeds visible - {metrics.detections} active detections - 2x3 grid</p>
+                <p>{filteredCameras.length} feeds visible - {activeAlerts.length} active alerts</p>
               </div>
               <span><UiIcon name="grid" /> 1080p - H.264</span>
             </div>
 
             <div className="camera-grid">
+              {camerasLoading && <p className="camera-loading-state">Loading cameras...</p>}
+              {!camerasLoading && filteredCameras.length === 0 && !camerasOffline && (
+                <p className="camera-empty">
+                  No cameras in inventory yet. <Link to="/camera-inventory">Add one in Camera Inventory.</Link>
+                </p>
+              )}
+
               {filteredCameras.map((cam) => (
                 <article
                   key={cam.id}
                   className={`camera-card camera-card-${statusClass(cam.status)}`}
                   onClick={() => setSelectedId(cam.id)}
                 >
-                  <CameraFeed cam={cam} />
+                  <CameraFeed cam={{ id: cam.camera_code, video: cam.stream_url || FALLBACK_VIDEO }} />
 
                   <div className="camera-info">
                     <div className="cam-title-row">
                       <div>
-                        <h3>{cam.id}</h3>
-                        <p>{cam.zone}</p>
+                        <h3>{cam.camera_code}</h3>
+                        <p>{cam.location}</p>
                       </div>
                       <span className={`camera-status-pill ${statusClass(cam.status)}`}>{statusLabel(cam.status)}</span>
                     </div>
                     <div className="camera-card-footer">
-                      <span>{cam.detections} {cam.detections === 1 ? 'detection' : 'detections'}</span>
-                      <span>{cam.resolution}</span>
+                      <span>{cam.camera_type || 'Unspecified type'}</span>
+                      <span>{cam.zone?.zone_name || 'Unassigned zone'}</span>
                     </div>
                   </div>
                 </article>
@@ -222,7 +251,7 @@ export default function Cameras() {
               <div className="camera-panel-heading">
                 <div>
                   <span className="camera-kicker">Selected Feed</span>
-                  <h2>{selectedCamera?.id || 'No Camera'}</h2>
+                  <h2>{selectedCamera?.camera_code || 'No Camera'}</h2>
                 </div>
                 {selectedCamera && (
                   <span className={`camera-status-pill ${statusClass(selectedCamera.status)}`}>
@@ -232,14 +261,13 @@ export default function Cameras() {
               </div>
               {selectedCamera ? (
                 <>
-                  <p className="camera-zone-name">{selectedCamera.zone}</p>
+                  <p className="camera-zone-name">{selectedCamera.location}</p>
                   <dl className="camera-telemetry">
-                    <div><dt>AI Model</dt><dd>{selectedCamera.model}</dd></div>
-                    <div><dt>Resolution</dt><dd>{selectedCamera.resolution}</dd></div>
-                    <div><dt>Bitrate</dt><dd>{selectedCamera.bitrate}</dd></div>
-                    <div><dt>Uptime</dt><dd>{selectedCamera.uptime}</dd></div>
-                    <div><dt>Events</dt><dd>{selectedCamera.detections}</dd></div>
-                    <div><dt>Last Event</dt><dd>{selectedCamera.lastEvent}</dd></div>
+                    <div><dt>Camera Name</dt><dd>{selectedCamera.camera_name}</dd></div>
+                    <div><dt>Type</dt><dd>{selectedCamera.camera_type || 'Unspecified'}</dd></div>
+                    <div><dt>Zone</dt><dd>{selectedCamera.zone?.zone_name || 'Unassigned'}</dd></div>
+                    <div><dt>Last Active</dt><dd>{formatLastActive(selectedCamera.last_active_at)}</dd></div>
+                    <div><dt>Notes</dt><dd>{selectedCamera.notes || 'None'}</dd></div>
                   </dl>
                   <div className="camera-panel-actions">
                     <Link to="/camera-inventory">

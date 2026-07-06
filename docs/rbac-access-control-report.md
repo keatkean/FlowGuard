@@ -92,8 +92,13 @@ only route wrappers, sidebar visibility, shared auth middleware, and tests were 
 | `GET /api/bookings/:ref` | ✅ | – | – | – | 🟡 | Public **by design** (driver portal) |
 | `POST /api/bookings/create`, `GET /api/bookings/all` | ✅ | – | – | – | 🔴 | Teammate (logistics) — no auth |
 | `GET/POST/DELETE /api/incident/*` | ✅ | – | – | – | 🔴 | Teammate (incident) — no auth |
-| `GET/POST/PUT /api/detection-alerts` | ✅ | – | – | – | 🔴 | Teammate (object-detection); POST used by Python AI |
-| `GET/POST/PUT/DELETE /api/zones` | ✅ | – | – | – | 🔴 | Teammate (object-detection) — no auth |
+| `GET /api/cameras`, `GET /api/cameras/:id` | ❌ | ✅ | ✅ | ❌ | 🟢 | **Added 2026-07-06** — Camera Inventory (view) |
+| `POST/PUT/DELETE /api/cameras` | ❌ | ✅ | ❌ | ❌ | 🟢 | **Added 2026-07-06** — Camera Inventory (FM-only writes) |
+| `GET /api/zones` | ❌ | ✅ | ✅ | ❌ | 🟢 | **FIXED 2026-07-06** — Detection Setup (view) |
+| `POST/PUT/DELETE /api/zones` | ❌ | ✅ | ❌ | ❌ | 🟢 | **FIXED 2026-07-06** — Detection Setup (FM-only writes; was previously fully open) |
+| `GET /api/detection-alerts` | ❌ | ✅ | ✅ | ❌ | 🟢 | **FIXED 2026-07-06** — was previously fully open |
+| `POST /api/detection-alerts` | ✅* | ✅ | ✅ | ❌ | 🟢 | **FIXED 2026-07-06** — `x-service-key` (AI engine) OR FM/Staff JWT; no key + no/wrong JWT → 401/403 |
+| `PUT /api/detection-alerts/:id` | ❌ | ✅ | ✅ | ❌ | 🟢 | **FIXED 2026-07-06** — was previously fully open |
 
 ---
 
@@ -181,11 +186,12 @@ cd client && npx vite build → ✓ built (149 modules) ✅
 
 ## J. Remaining risks / not implemented yet
 
-1. **Teammate backend routes are unauthenticated** (🔴 in §D): `/api/incident/*`, `/api/zones/*`,
-   `/api/detection-alerts` (GET/PUT), `/api/bookings/create` + `/all`. These are owned by other
-   modules and were **intentionally not changed** to avoid breaking their demos. Recommended fix:
-   add `verifyToken` + `requireRole('FM','Staff')` (and a service key for the AI's
-   `POST /api/detection-alerts`). **Until then, those APIs are reachable without a login.**
+1. **Teammate backend routes are unauthenticated** (🔴 in §D): `/api/incident/*`,
+   `/api/bookings/create` + `/all`. These are owned by other modules and were **intentionally not
+   changed** to avoid breaking their demos. Recommended fix: add `verifyToken` +
+   `requireRole('FM','Staff')`. **Until then, those APIs are reachable without a login.**
+   `/api/zones/*` and `/api/detection-alerts` were previously listed here too — **this is now
+   fixed**, see §L below.
 2. **Tenant data isolation is only partial.** `/api/attendance/logs` genuinely scopes a Tenant to
    their own staff (server-side `where managerId`). But the **Dashboard tenant view uses hardcoded
    mock numbers**, and `/logistics` / `/staff` pages are role-gated at the route level only — true
@@ -200,7 +206,29 @@ cd client && npx vite build → ✓ built (149 modules) ✅
 
 ---
 
-## K. Suggested git commit message
+## K. Addendum — 2026-07-06: object-detection module auth gap closed
+
+This section's own §D/§J previously flagged `/api/zones/*` and `/api/detection-alerts` (GET/PUT) as
+🔴 unauthenticated, with the recommendation: "add `verifyToken` + `requireRole` and a service key
+for the AI's POST." That recommendation has now been implemented as part of the Camera Inventory +
+Detection Setup build-out:
+
+- `/api/zones` (Detection Setup): `GET` → FM+Staff; `POST`/`PUT`/`DELETE` → FM-only.
+- `/api/detection-alerts`: `GET`/`PUT` → FM+Staff; `POST` → a new `verifyServiceOrRole` middleware
+  (`server/middlewares/auth.js`) that accepts either a shared `x-service-key` header (matching
+  `AI_SERVICE_KEY`, used by `ai-service/main.py::_fire_alert`) or an FM/Staff JWT — falling through
+  to normal `401`/`403` if neither is present.
+- New `/api/cameras` (Camera Inventory) ships with the same pattern from day one: `GET` →
+  FM+Staff, `POST`/`PUT`/`DELETE` → FM-only.
+
+Full endpoint-by-endpoint detail (request/response examples, error shapes) lives in
+`docs/camera-inventory-detection-setup-api.md`. §D above has been updated in place to reflect the
+new 🟢 status; the rows are kept (rather than deleted) so the history of what was fixed and when
+stays visible.
+
+---
+
+## L. Suggested git commit message
 
 ```
 feat(rbac): normalize roles, fix route/sidebar/API access control

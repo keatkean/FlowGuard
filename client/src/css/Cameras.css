@@ -30,6 +30,10 @@
   color: #6f86a8;
 }
 
+.header-titles .camera-search {
+  margin-top: 14px;
+}
+
 .camera-search input {
   width: 100%;
   min-width: 220px;
@@ -283,6 +287,18 @@
   background: #111827;
 }
 
+.camera-status-pill.maintenance {
+  border-color: rgba(129, 140, 248, 0.45);
+  color: #a5b4fc;
+  background: rgba(129, 140, 248, 0.1);
+}
+
+.camera-status-pill.disabled {
+  border-color: #3f3f46;
+  color: #71717a;
+  background: #18181b;
+}
+
 .camera-side-panel {
   display: flex;
   flex-direction: column;
@@ -455,14 +471,14 @@
 }
 
 .camera-row-card {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.1fr) auto;
-  gap: 18px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: 10px 14px;
   background: #0a0f1d;
   border: 1px solid #26334d;
   border-radius: 8px;
-  padding: 16px 18px;
+  padding: 12px 14px;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
@@ -474,32 +490,44 @@
 .camera-row-main {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
+  flex: 1 1 200px;
 }
 
 .camera-row-icon {
-  width: 38px;
-  height: 38px;
+  width: 32px;
+  height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  border-radius: 8px;
+  border-radius: 7px;
   background: rgba(14, 165, 233, 0.1);
   color: #22d3ee;
   border: 1px solid rgba(14, 165, 233, 0.26);
 }
 
+.camera-row-main > div {
+  min-width: 0;
+}
+
 .camera-row-card h3 {
-  margin: 0 0 3px;
+  margin: 0 0 2px;
   color: #f8fafc;
+  font-size: 0.92rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .camera-row-card p {
   margin: 0;
   color: #8fa4c3;
-  font-size: 0.84rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .camera-row-meta {
@@ -508,6 +536,8 @@
   justify-content: flex-start;
   gap: 10px;
   flex-wrap: wrap;
+  flex: 2 1 240px;
+  min-width: 0;
 }
 
 .camera-row-meta > span:not(.camera-status-pill) {
@@ -525,20 +555,28 @@
 
 .camera-row-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .camera-row-actions button {
-  width: 38px;
-  min-width: 38px;
-  height: 38px;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
   border: 1px solid rgba(14, 165, 233, 0.4);
-  border-radius: 8px;
+  border-radius: 7px;
   background: rgba(14, 165, 233, 0.1);
   color: #22d3ee;
   font-weight: 800;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.camera-row-actions button svg {
+  width: 15px;
+  height: 15px;
 }
 
 .camera-row-actions button:hover {
@@ -708,6 +746,23 @@
   padding: 24px 0;
 }
 
+.camera-system-banner {
+  border-radius: 8px;
+  padding: 10px 16px;
+  margin-bottom: 14px;
+  font-size: 0.82rem;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
+.camera-loading-state {
+  color: #7f93b4;
+  text-align: center;
+  padding: 24px 0;
+  font-size: 0.85rem;
+}
+
 @media (max-width: 1180px) {
   .camera-console {
     grid-template-columns: 1fr;
@@ -732,11 +787,13 @@
     flex-direction: column;
   }
 
-  .camera-row-card {
-    grid-template-columns: 1fr;
+  .camera-row-main,
+  .camera-row-meta {
+    flex-basis: 100%;
   }
 
   .camera-row-actions {
     justify-content: flex-end;
+    margin-left: 0;
   }
 }

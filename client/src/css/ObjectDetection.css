@@ -331,6 +331,32 @@
     display: none;
 }
 
+.od-camera-picker {
+    width: auto;
+    min-width: 200px;
+    margin-left: auto;
+}
+
+.od-monitoring-label {
+    margin: 0;
+    padding: 8px 20px;
+    color: #8fa4c3;
+    font-size: 0.8rem;
+    border-bottom: 1px solid #202c44;
+    background: rgba(8, 13, 24, 0.62);
+}
+
+.od-monitoring-label strong {
+    color: #e5edf8;
+}
+
+.od-limitation-note {
+    margin: 8px 0 0;
+    color: #f59e0b;
+    font-size: 0.76rem;
+    line-height: 1.4;
+}
+
 .od-video-stage,
 .od-stream-placeholder {
     position: relative;
@@ -699,6 +725,20 @@
 
 .od-input::placeholder {
     color: #566982;
+}
+
+.od-checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #b8c6dc;
+    font-size: 0.84rem;
+    padding: 4px 2px;
+}
+
+.od-checkbox-row input {
+    width: 16px;
+    height: 16px;
 }
 
 .od-btn-primary,

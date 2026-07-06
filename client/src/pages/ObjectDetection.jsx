@@ -6,6 +6,7 @@ import '../css/Dashboard.css';
 import '../css/ObjectDetection.css';
 
 const ZONES_URL = '/api/zones';
+const CAMERAS_URL = '/api/cameras';
 const ALERTS_URL = '/api/detection-alerts';
 const PEOPLE_URL = '/ai/api/yolo/people-count';
 const ANALYZE_FRAME_URL = '/ai/api/yolo/analyze-frame';
@@ -16,6 +17,8 @@ const Icon = ({ name }) => <span className={`od-icon od-icon-${name}`} aria-hidd
 
 const ObjectDetection = () => {
   const [zones, setZones] = useState([]);
+  const [cameras, setCameras] = useState([]);
+  const [selectedCameraId, setSelectedCameraId] = useState('');
   const [alerts, setAlerts] = useState([]);
   const [peopleCount, setPeopleCount] = useState(0);
   const [detectionActive, setDetectionActive] = useState(false);
@@ -62,6 +65,16 @@ const ObjectDetection = () => {
       .catch(() => setNodeOffline(true));
   }, []);
 
+  const fetchCameras = useCallback(() => {
+    axios.get(CAMERAS_URL, { headers })
+      .then(res => {
+        const list = Array.isArray(res.data) ? res.data : [];
+        setCameras(list);
+        setSelectedCameraId((prev) => (list.some((cam) => String(cam.id) === String(prev)) ? prev : (list[0]?.id ?? '')));
+      })
+      .catch(() => setCameras([]));
+  }, []);
+
   const fetchAlerts = useCallback(() => {
     axios.get(ALERTS_URL, { headers })
       .then(res => { setAlerts(res.data); setNodeOffline(false); })
@@ -89,6 +102,7 @@ const ObjectDetection = () => {
 
   useEffect(() => {
     fetchZones();
+    fetchCameras();
     fetchAlerts();
     fetchPeopleCount();
 
@@ -286,6 +300,7 @@ const ObjectDetection = () => {
   }, [latestOpenAlert]);
   const selectedResponderId = latestOpenAlert ? alertAssignments[latestOpenAlert.id] || '' : '';
   const selectedResponder = responders.find((responder) => String(responder.id) === String(selectedResponderId));
+  const monitoredCamera = cameras.find((cam) => String(cam.id) === String(selectedCameraId));
 
   return (
     <div className="dashboard-layout">
@@ -369,7 +384,23 @@ const ObjectDetection = () => {
                 Upload Video
                 <input type="file" accept="video/*" onChange={handleVideoUpload} />
               </label>
+              <select
+                className="od-input od-camera-picker"
+                value={selectedCameraId}
+                onChange={(event) => setSelectedCameraId(event.target.value)}
+              >
+                {cameras.length === 0 && <option value="">No cameras in inventory</option>}
+                {cameras.map((cam) => (
+                  <option key={cam.id} value={cam.id}>{cam.camera_code} - {cam.camera_name}</option>
+                ))}
+              </select>
             </div>
+
+            <p className="od-monitoring-label">
+              {monitoredCamera
+                ? <>Currently Monitoring: <strong>{monitoredCamera.camera_code}</strong> &middot; {monitoredCamera.zone?.zone_name || 'Unassigned zone'}</>
+                : 'No camera selected from inventory - add one in Camera Inventory.'}
+            </p>
 
             <canvas ref={canvasRef} style={{ display: 'none' }} />
 
@@ -513,6 +544,9 @@ const ObjectDetection = () => {
               </div>
               <p>
                 Zone thresholds and response-team records now live on a dedicated setup page, so this console stays focused on the current incident.
+              </p>
+              <p className="od-limitation-note">
+                Stock-YOLO limitation: the AI engine analyzes one active source at a time (the browser camera or an uploaded file above) and does not yet switch physical camera streams per inventory selection. The camera picker labels which inventory record the current feed represents; a future custom-trained, multi-stream pipeline would be needed to route each camera's own live stream into detection.
               </p>
               <div className="od-ops-actions">
                 <Link className="od-btn-primary od-link-button" to="/detection-settings">Open Detection Setup</Link>

@@ -21,6 +21,8 @@ const incidentRoute = require('./routes/incident');
 app.use("/api/incident", incidentRoute);
 const zonesRoute = require('./routes/zones');
 app.use("/api/zones", zonesRoute);
+const camerasRoute = require('./routes/cameras');
+app.use("/api/cameras", camerasRoute);
 const detectionAlertsRoute = require('./routes/detectionAlerts');
 app.use("/api/detection-alerts", detectionAlertsRoute);
 const userRoute = require('./routes/user');

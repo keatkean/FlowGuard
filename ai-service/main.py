@@ -319,7 +319,7 @@ def _refresh_zone_info():
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
-            SELECT zone_name, time_threshold
+            SELECT zone_name, time_threshold, unattended_threshold_seconds
             FROM monitoring_zones
             WHERE "deletedAt" IS NULL
             ORDER BY time_threshold ASC
@@ -330,7 +330,9 @@ def _refresh_zone_info():
         conn.close()
         if row:
             _zone_name_cache = row[0]
-            _zone_threshold_sec = int(row[1]) * 60
+            # Detection Setup's seconds-based threshold takes precedence when configured;
+            # otherwise fall back to the legacy minutes-based time_threshold.
+            _zone_threshold_sec = row[2] if row[2] is not None else int(row[1]) * 60
     except Exception as e:
         print(f"Zone info fetch error: {e}")
     _threshold_fetched_at = now
@@ -361,6 +363,7 @@ def _fire_alert(class_name, zone_name, duration_sec, person_name=None):
                 "duration_seconds": duration_sec,
                 "person_name": person_name
             },
+            headers={"x-service-key": os.getenv("AI_SERVICE_KEY", "")},
             timeout=5
         )
         print(f"🚨 Alert sent: {class_name} unattended {duration_sec}s in {zone_name} (last seen: {person_name})")
