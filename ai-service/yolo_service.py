@@ -93,7 +93,7 @@ def analyze_frame(payload: FrameRequest):
 
     detections = []
     people_count = 0
-    suspicious_count = 0
+    watch_count = 0
 
     for result in results:
         for box in result.boxes:
@@ -122,10 +122,7 @@ def analyze_frame(payload: FrameRequest):
             if label_name == "person":
                 people_count += 1
                 det_type = "person"
-
-                if payload.cam_id == "CAM-03":
-                    status = "suspicious"
-                    suspicious_count += 1
+                display_label = "Person Detected"
 
             elif label_name in {"orange", "apple", "banana"}:
                 det_type = "food_item"
@@ -134,7 +131,7 @@ def analyze_frame(payload: FrameRequest):
             elif label_name in {"backpack", "handbag", "suitcase", "bottle"}:
                 det_type = "package"
                 status = "watch"
-                suspicious_count += 1
+                watch_count += 1
 
                 if label_name == "suitcase":
                     display_label = "package-like object"
@@ -151,7 +148,7 @@ def analyze_frame(payload: FrameRequest):
                 "box": [x1, y1, x2, y2]
             })
 
-    risk_level = "medium" if suspicious_count > 0 else "low"
+    risk_level = "medium" if watch_count > 0 else "low"
 
     return {
         "frame_width": width,

@@ -220,16 +220,24 @@ _UNATTENDED_CLASSES = {
     'bottle', 'cup', 'book', 'backpack', 'handbag',
     'suitcase', 'cell phone', 'laptop', 'bag'
 }
-_YOLO_CLASS_IDS = [0, 24, 26, 28, 39, 41, 63, 67, 73]
+_FOOD_CLASSES = {'banana', 'apple', 'orange'}
+_VEHICLE_CLASSES = {'truck'}
+# COCO ids: 0 person, 7 truck, 24 backpack, 26 handbag, 28 suitcase, 39 bottle,
+# 41 cup, 46 banana, 47 apple, 49 orange, 63 laptop, 67 cell phone, 73 book
+_YOLO_CLASS_IDS = os.getenv("YOLO_CLASS_IDS", "").strip()
+_YOLO_CLASS_IDS = [int(x.strip()) for x in _YOLO_CLASS_IDS.split(",") if x.strip()] or None
 _CAMERA_WIDTH = int(os.getenv("CAMERA_WIDTH", "640"))
 _CAMERA_HEIGHT = int(os.getenv("CAMERA_HEIGHT", "360"))
-_YOLO_IMG_SIZE = int(os.getenv("YOLO_IMG_SIZE", "416"))
+_YOLO_IMG_SIZE = int(os.getenv("YOLO_IMG_SIZE", "640"))
+_YOLO_CONFIDENCE = float(os.getenv("YOLO_CONFIDENCE", "0.25"))
 _YOLO_FPS = float(os.getenv("YOLO_FPS", "8"))
 _STREAM_FPS = float(os.getenv("STREAM_FPS", "12"))
 _FACE_RECOG_EVERY_N_FRAMES = int(os.getenv("FACE_RECOG_EVERY_N_FRAMES", "5"))
 _FACE_RECOG_MAX_PEOPLE = int(os.getenv("FACE_RECOG_MAX_PEOPLE", "2"))
+_PERSON_CRITICAL_COUNT = int(os.getenv("PERSON_CRITICAL_COUNT", "2"))
+_PERSON_ALERT_COOLDOWN = int(os.getenv("PERSON_ALERT_COOLDOWN", "30"))
 _PROXIMITY_PX = 160      # centroid distance threshold (pixels at 640-wide frame)
-_NODE_URL = os.getenv("NODE_SERVER_URL", "http://localhost:5000")
+_NODE_URL = os.getenv("NODE_SERVER_URL", "http://localhost:5001")
 
 # Shared state written by detection thread, read by endpoints
 _frame_lock = threading.Lock()
@@ -243,6 +251,10 @@ _camera_status = "starting"
 # value: {person_last_seen, unattended_since, alerted}
 _tracked_objects: dict = {}
 _person_name_cache = defaultdict(lambda: ("UNKNOWN", 0.0))
+_person_alert_state = {
+    "level": None,
+    "last_sent_at": 0.0,
+}
 
 # Zone threshold cache — refreshed from DB every 60 s
 _zone_threshold_sec = 300   # default 5 min
@@ -307,7 +319,7 @@ def _refresh_zone_info():
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
-            SELECT zone_name, time_threshold
+            SELECT zone_name, time_threshold, unattended_threshold_seconds
             FROM monitoring_zones
             WHERE "deletedAt" IS NULL
             ORDER BY time_threshold ASC
@@ -318,7 +330,9 @@ def _refresh_zone_info():
         conn.close()
         if row:
             _zone_name_cache = row[0]
-            _zone_threshold_sec = int(row[1]) * 60
+            # Detection Setup's seconds-based threshold takes precedence when configured;
+            # otherwise fall back to the legacy minutes-based time_threshold.
+            _zone_threshold_sec = row[2] if row[2] is not None else int(row[1]) * 60
     except Exception as e:
         print(f"Zone info fetch error: {e}")
     _threshold_fetched_at = now
@@ -349,11 +363,38 @@ def _fire_alert(class_name, zone_name, duration_sec, person_name=None):
                 "duration_seconds": duration_sec,
                 "person_name": person_name
             },
+            headers={"x-service-key": os.getenv("AI_SERVICE_KEY", "")},
             timeout=5
         )
         print(f"🚨 Alert sent: {class_name} unattended {duration_sec}s in {zone_name} (last seen: {person_name})")
     except Exception as e:
         print(f"Alert POST failed: {e}")
+
+
+def _maybe_fire_person_alert(person_count, zone_name):
+    """Create one warning/critical alert per cooldown window based on detected people."""
+    if person_count <= 0:
+        _person_alert_state["level"] = None
+        return
+
+    now = time.time()
+    level = "Critical" if person_count >= _PERSON_CRITICAL_COUNT else "Warning"
+    recently_sent = now - _person_alert_state["last_sent_at"] < _PERSON_ALERT_COOLDOWN
+    if recently_sent and _person_alert_state["level"] == level:
+        return
+
+    _person_alert_state["level"] = level
+    _person_alert_state["last_sent_at"] = now
+    label = (
+        f"{level}: {person_count} People Detected"
+        if person_count > 1
+        else f"{level}: Person Detected"
+    )
+    threading.Thread(
+        target=_fire_alert,
+        args=(label, zone_name, None, None),
+        daemon=True
+    ).start()
 
 
 def _recognize_person_crop(frame, x1, y1, x2, y2):
@@ -390,7 +431,7 @@ def _annotate_detection_frame(frame, recognize_faces=True):
     results = _yolo_model(
         frame,
         imgsz=_YOLO_IMG_SIZE,
-        conf=0.35,
+        conf=_YOLO_CONFIDENCE,
         iou=0.45,
         classes=_YOLO_CLASS_IDS,
         verbose=False
@@ -412,14 +453,13 @@ def _annotate_detection_frame(frame, recognize_faces=True):
         if class_name == 'person':
             people_count += 1
             recog_name = "UNKNOWN"
-            display_label = "SUSPICIOUS PERSON"
-            box_color = (0, 0, 200)
-            label_color = (0, 0, 200)
+            display_label = "Person Detected"
+            box_color = (0, 200, 200)
+            label_color = (0, 200, 200)
 
             if recognize_faces and people_count <= _FACE_RECOG_MAX_PEOPLE:
                 recog_name, best_sim = _recognize_person_crop(frame, x1, y1, x2, y2)
                 if recog_name != "UNKNOWN":
-                    display_label = f"{recog_name} {best_sim:.2f}"
                     box_color = (0, 200, 80)
                     label_color = (0, 200, 80)
 
@@ -428,7 +468,7 @@ def _annotate_detection_frame(frame, recognize_faces=True):
                 "label": display_label,
                 "confidence": round(conf, 3),
                 "box": [x1, y1, x2, y2],
-                "status": "authorized" if recog_name != "UNKNOWN" else "suspicious"
+                "status": "person"
             })
             person_boxes.append(([x1, y1, x2, y2], recog_name))
             cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
@@ -452,6 +492,45 @@ def _annotate_detection_frame(frame, recognize_faces=True):
             cv2.putText(frame, f"{class_name} {conf:.2f}",
                         (x1, max(y1 - 8, 12)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 140, 0), 2)
+
+        elif class_name in _FOOD_CLASSES:
+            detections.append({
+                "type": "food_item",
+                "label": f"{class_name} {conf:.2f}",
+                "confidence": round(conf, 3),
+                "box": [x1, y1, x2, y2],
+                "status": "normal"
+            })
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 200, 200), 2)
+            cv2.putText(frame, f"{class_name} {conf:.2f}",
+                        (x1, max(y1 - 8, 12)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 200), 2)
+
+        elif class_name in _VEHICLE_CLASSES:
+            detections.append({
+                "type": "vehicle",
+                "label": f"{class_name} {conf:.2f}",
+                "confidence": round(conf, 3),
+                "box": [x1, y1, x2, y2],
+                "status": "normal"
+            })
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (200, 200, 0), 2)
+            cv2.putText(frame, f"{class_name} {conf:.2f}",
+                        (x1, max(y1 - 8, 12)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 0), 2)
+
+        else:
+            detections.append({
+                "type": "object",
+                "label": f"{class_name} {conf:.2f}",
+                "confidence": round(conf, 3),
+                "box": [x1, y1, x2, y2],
+                "status": "normal"
+            })
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (120, 180, 255), 2)
+            cv2.putText(frame, f"{class_name} {conf:.2f}",
+                        (x1, max(y1 - 8, 12)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (120, 180, 255), 2)
 
     seen_keys = set()
     for (key, box, class_name, cx, cy) in object_detections:
@@ -491,6 +570,7 @@ def _annotate_detection_frame(frame, recognize_faces=True):
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 220), 2)
 
     _tracked_objects = {k: v for k, v in _tracked_objects.items() if k in seen_keys}
+    _maybe_fire_person_alert(people_count, zone_name)
     cv2.putText(frame, f"People: {people_count}", (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
     _people_count = people_count
@@ -552,7 +632,7 @@ def _yolo_detection_loop():
         results = _yolo_model(
             frame,
             imgsz=_YOLO_IMG_SIZE,
-            conf=0.35,
+            conf=_YOLO_CONFIDENCE,
             iou=0.45,
             classes=_YOLO_CLASS_IDS,
             verbose=False
@@ -575,9 +655,9 @@ def _yolo_detection_loop():
 
                 # --- Face recognition on this person's bounding-box crop ---
                 recog_name = "UNKNOWN"
-                box_color = (0, 0, 200)    # red  = unidentified
-                label_color = (0, 0, 200)
-                display_label = "SUSPICIOUS PERSON"
+                box_color = (0, 200, 200)
+                label_color = (0, 200, 200)
+                display_label = "Person Detected"
 
                 track_key = (x1 // 80, y1 // 80)
                 cached_name, cached_sim = _person_name_cache[track_key]
@@ -609,7 +689,6 @@ def _yolo_detection_loop():
 
                 if cached_name != "UNKNOWN":
                     recog_name = cached_name
-                    display_label = f"{cached_name} {cached_sim:.2f}"
                     box_color = (0, 200, 80)   # green = identified
                     label_color = (0, 200, 80)
 
@@ -628,6 +707,12 @@ def _yolo_detection_loop():
                 cv2.putText(frame, f"{class_name} {conf:.2f}",
                             (x1, max(y1 - 8, 12)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 140, 0), 2)
+
+            else:
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (120, 180, 255), 2)
+                cv2.putText(frame, f"{class_name} {conf:.2f}",
+                            (x1, max(y1 - 8, 12)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (120, 180, 255), 2)
 
         # --- Unattended object timer logic ---
         seen_keys = set()
@@ -672,6 +757,7 @@ def _yolo_detection_loop():
 
         # Evict objects that left the frame
         _tracked_objects = {k: v for k, v in _tracked_objects.items() if k in seen_keys}
+        _maybe_fire_person_alert(people_count, zone_name)
 
         # People count HUD
         cv2.putText(frame, f"People: {people_count}", (10, 30),

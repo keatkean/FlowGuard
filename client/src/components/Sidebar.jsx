@@ -1,21 +1,19 @@
 // client/src/components/Sidebar.jsx
-import React, { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import LogoIcon from './LogoIcon';
 import { ROLES, roleLabel } from '../constants/roles';
 
 const Sidebar = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState({ name: 'Guest', role: ROLES.TENANT });
-  const [isOpen, setIsOpen] = useState(false);
-
-  useEffect(() => {
+  const [user] = useState(() => {
     const storedName = localStorage.getItem("userName");
     const storedRole = localStorage.getItem("userRole");
-    if (storedName && storedRole) {
-      setUser({ name: storedName, role: storedRole });
-    }
-  }, []);
+    return storedName && storedRole
+      ? { name: storedName, role: storedRole }
+      : { name: 'Guest', role: ROLES.TENANT };
+  });
+  const [isOpen, setIsOpen] = useState(false);
 
   // Visibility helpers — keep these in lock-step with the route wrappers in App.jsx
   // so a user never sees a link that would only bounce them to the 403 page.
@@ -58,8 +56,10 @@ const Sidebar = () => {
           {isFM && (
             <>
               <NavLink to="/cameras" onClick={() => setIsOpen(false)}>Cameras</NavLink>
+              <NavLink to="/camera-inventory" onClick={() => setIsOpen(false)}>Camera Inventory</NavLink>
               <NavLink to="/vpatrol" onClick={() => setIsOpen(false)}>V-Patrol</NavLink>
               <NavLink to="/object-detection" onClick={() => setIsOpen(false)}>Object Detection</NavLink>
+              <NavLink to="/detection-settings" onClick={() => setIsOpen(false)}>Detection Setup</NavLink>
               <NavLink to="/gate-scanner" onClick={() => setIsOpen(false)}>Gate Scanner</NavLink>
             </>
           )}

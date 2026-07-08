@@ -44,4 +44,16 @@ const requireRole = (...allowedRoles) => (req, res, next) => {
     next();
 };
 
-module.exports = { verifyToken, requireRole, ROLES };
+// Allows a trusted internal service (the Python AI engine) to call an endpoint using a
+// shared secret header instead of a user JWT, OR a logged-in user with an allowed role.
+//   router.post('/detection-alerts', verifyServiceOrRole('FM', 'Staff'), handler)
+// Used only where a backend service posts data server-to-server (e.g. AI-generated alerts).
+const verifyServiceOrRole = (...allowedRoles) => (req, res, next) => {
+    const serviceKey = req.headers['x-service-key'];
+    if (serviceKey && process.env.AI_SERVICE_KEY && serviceKey === process.env.AI_SERVICE_KEY) {
+        return next();
+    }
+    return verifyToken(req, res, () => requireRole(...allowedRoles)(req, res, next));
+};
+
+module.exports = { verifyToken, requireRole, verifyServiceOrRole, ROLES };

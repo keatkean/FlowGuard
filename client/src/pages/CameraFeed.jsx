@@ -1,5 +1,23 @@
-import { useRef, useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import axios from 'axios';
+import '../css/CameraFeed.css';
+
+const RELEVANT_CAMERA_CLASSES = new Set([
+  'person',
+  'backpack',
+  'handbag',
+  'suitcase',
+  'bottle',
+  'cup',
+  'laptop',
+  'cell',
+  'phone',
+  'truck',
+  'book',
+  'orange',
+  'apple',
+  'banana',
+]);
 
 export default function CameraFeed({ cam }) {
   const videoRef = useRef(null);
@@ -8,7 +26,7 @@ export default function CameraFeed({ cam }) {
   useEffect(() => {
     const interval = setInterval(() => {
       analyzeFrame();
-    }, 2000); // every 2 seconds
+    }, 2000);
 
     return () => clearInterval(interval);
   }, []);
@@ -17,11 +35,7 @@ export default function CameraFeed({ cam }) {
     try {
       const video = videoRef.current;
 
-      if (
-        !video ||
-        video.readyState < 2 ||
-        video.videoWidth === 0
-      ) {
+      if (!video || video.readyState < 2 || video.videoWidth === 0) {
         return;
       }
 
@@ -30,25 +44,13 @@ export default function CameraFeed({ cam }) {
       captureCanvas.height = video.videoHeight;
 
       const captureCtx = captureCanvas.getContext('2d');
-
-      captureCtx.drawImage(
-        video,
-        0,
-        0,
-        captureCanvas.width,
-        captureCanvas.height
-      );
+      captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
 
       const image = captureCanvas.toDataURL('image/jpeg', 0.75);
-
-      const response = await axios.post(
-        'http://localhost:8000/api/yolo/analyze-frame',
-        {
-           image,
-           cam_id:cam.id
-           }
-
-      );
+      const response = await axios.post('/ai/api/yolo/analyze-frame', {
+        image,
+        cam_id: cam.id,
+      });
 
       drawDetections(response.data);
     } catch (err) {
@@ -66,12 +68,10 @@ export default function CameraFeed({ cam }) {
     canvas.height = video.clientHeight;
 
     const ctx = canvas.getContext('2d');
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const frameWidth = data.frame_width || video.videoWidth;
     const frameHeight = data.frame_height || video.videoHeight;
-
     const videoRatio = frameWidth / frameHeight;
     const canvasRatio = canvas.width / canvas.height;
 
@@ -93,20 +93,27 @@ export default function CameraFeed({ cam }) {
     const scaleX = renderWidth / frameWidth;
     const scaleY = renderHeight / frameHeight;
 
-    data.detections.forEach((det) => {
+    data.detections
+      .filter((det) => {
+        if (det.type === 'person') return (det.confidence ?? 1) >= 0.45;
+        const className = String(det.label || '').toLowerCase().split(' ')[0];
+        if (det.type === 'food_item') return (det.confidence ?? 0) >= 0.3 && RELEVANT_CAMERA_CLASSES.has(className);
+        return (det.confidence ?? 0) >= 0.5 && RELEVANT_CAMERA_CLASSES.has(className);
+      })
+      .forEach((det) => {
       const [x1, y1, x2, y2] = det.box;
-
-      let color = '#00ff00';
+      let color = '#22c55e';
 
       if (det.status === 'suspicious') {
-        color = '#ff0000';
+        color = '#f43f5e';
+      } else if (det.type === 'food_item') {
+        color = '#facc15';
       } else if (det.type === 'object') {
-        color = '#ff9800';
+        color = '#f59e0b';
       }
 
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
-
       ctx.strokeRect(
         offsetX + x1 * scaleX,
         offsetY + y1 * scaleY,
@@ -115,23 +122,9 @@ export default function CameraFeed({ cam }) {
       );
 
       ctx.fillStyle = color;
-      ctx.font = '12px Arial';
-
-      ctx.fillText(
-        det.label,
-        offsetX + x1 * scaleX,
-        Math.max(15, offsetY + y1 * scaleY - 5)
-      );
+      ctx.font = 'bold 12px Arial';
+      ctx.fillText(det.label, offsetX + x1 * scaleX, Math.max(16, offsetY + y1 * scaleY - 6));
     });
-
-    // people counter
-    ctx.fillStyle = '#00ffff';
-    ctx.font = 'bold 14px Arial';
-    ctx.fillText(
-      `People: ${data.count}`,
-      10,
-      20
-    );
   };
 
   return (
@@ -146,14 +139,12 @@ export default function CameraFeed({ cam }) {
         className="camera-video"
       />
 
-      <canvas
-        ref={canvasRef}
-        className="camera-overlay"
-      />
+      <div className="camera-feed-hud">
+        <span>2024-01-15 14:29:44 UTC</span>
+        <span>{cam.id}</span>
+      </div>
 
-      <span className="feed-live-icon">
-        ⏺ REC
-      </span>
+      <canvas ref={canvasRef} className="camera-overlay" />
     </div>
   );
 }

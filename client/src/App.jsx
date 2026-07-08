@@ -17,6 +17,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import ErrorBoundary from './components/ErrorBoundary';
 import VPatrol from './pages/VPatrol';
 import Cameras from './pages/Cameras';
+import CameraInventory from './pages/CameraInventory';
 import DriverPass from './pages/DriverPass';
 import TenantLogistics from './pages/TenantLogistics';
 import DriverPortal from './pages/DriverPortal';
@@ -27,6 +28,7 @@ import FaceEnrollment from './pages/FaceEnrollment';
 import Attendance from './pages/Attendance';
 import GateScanner from './pages/GateScanner';
 import ObjectDetection from './pages/ObjectDetection';
+import DetectionSettings from './pages/DetectionSettings';
 import SecurityReview from './pages/SecurityReview';
 import IncidentDashboard from './pages/IncidentDashboard';
 import SupportDashboard from './pages/SupportDashboard';
@@ -72,9 +74,19 @@ function App() {
             <Cameras />
           </ProtectedRoute>
         } />
+        <Route path="/camera-inventory" element={
+          <ProtectedRoute allowedRoles={ACCESS.FM_STAFF}>
+            <CameraInventory />
+          </ProtectedRoute>
+        } />
         <Route path="/object-detection" element={
           <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
             <ObjectDetection />
+          </ProtectedRoute>
+        } />
+        <Route path="/detection-settings" element={
+          <ProtectedRoute allowedRoles={ACCESS.FM_STAFF}>
+            <DetectionSettings />
           </ProtectedRoute>
         } />
         <Route path="/vpatrol" element={
