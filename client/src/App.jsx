@@ -29,6 +29,7 @@ import GateScanner from './pages/GateScanner';
 import ObjectDetection from './pages/ObjectDetection';
 import SecurityReview from './pages/SecurityReview';
 import IncidentDashboard from './pages/IncidentDashboard';
+import SupportDashboard from './pages/SupportDashboard';
 import { ACCESS } from './constants/roles';
 import './App.css';
 
@@ -138,6 +139,11 @@ function App() {
         <Route path="/settings" element={
           <ProtectedRoute>
             <Settings />
+          </ProtectedRoute>
+        } />
+        <Route path="/support-dashboard" element={
+          <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
+            <SupportDashboard />
           </ProtectedRoute>
         } />
         
