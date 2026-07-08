@@ -16,17 +16,20 @@ PNG exports live in `design/png/`.
 - Vite dev proxy forwards `/user`, `/api` to the backend and `/ai` to the AI service.
 
 ## 2. Backend — Node.js + Express
-- `server/routes/` — domain routers: `user` (auth, face enrol, manual create, logs),
-  `security`, `attendance`, `booking` (logistics + gate scan), `incident`, `zones`,
-  `detectionAlerts`.
+- `server/routes/` — domain routers (all mounted in `index.js`):
+  - `user` (auth, face enrol, manual create, logs) — mounted at `/user`
+  - `security`, `attendance`, `booking` (logistics + gate scan) — under `/api/...`
+  - `incident`, `cameras`, `zones`, `detectionAlerts` (object detection) — under `/api/...`
+  - `support` (AI helpdesk: transcripts, tickets, knowledge base) — under `/api/support`
 - `server/middlewares/auth.js` — `verifyToken` (JWT) + `requireRole(...)` RBAC; plus
   `errorHandlers.js` (404 + safe global 500).
 - `server/services/whatsappService.js` — env-gated, mock-safe WhatsApp Cloud API client.
 - `server/models/` — Sequelize models + associations; `index.js` wires them; `seed.js` seeds FM.
 
 ## 3. Database — PostgreSQL + Sequelize
-- Single shared instance. Tables: users, bookings, attendance, security_logs, detection_alerts,
-  incident_logs, monitoring_zones, invites.
+- Single shared instance. Tables: `users`, `bookings`, `attendance`, `security_logs`, `invites`,
+  `cameras`, `monitoring_zones`, `detection_alerts`, `incident_logs`, `chat_transcripts`,
+  `support_tickets`, `knowledge_base`.
 - Face embeddings stored as a native `FLOAT[]` array column (`faceVector`); **pgvector is not
   required** for local development.
 
