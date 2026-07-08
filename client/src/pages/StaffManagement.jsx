@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Sidebar from '../components/Sidebar';
-import '../css/Dashboard.css'; 
-import '../css/Management.css'; 
+import PasswordInput from '../components/PasswordInput';
+import '../css/Dashboard.css';
+import '../css/Management.css';
 
 const StaffManagement = () => {
   const navigate = useNavigate();
@@ -21,6 +22,33 @@ const StaffManagement = () => {
 
   const token = localStorage.getItem("accessToken");
   const userName = localStorage.getItem("userName");
+  const role = localStorage.getItem("userRole");
+
+  // Manual "Add Staff" modal (Tenant only)
+  const [addOpen, setAddOpen] = useState(false);
+  const [newStaff, setNewStaff] = useState({ name: '', email: '', password: '' });
+  const [addSubmitting, setAddSubmitting] = useState(false);
+  const [addError, setAddError] = useState('');
+
+  const onNewField = (e) => setNewStaff(prev => ({ ...prev, [e.target.name]: e.target.value }));
+  const openAdd = () => { setAddError(''); setNewStaff({ name: '', email: '', password: '' }); setAddOpen(true); };
+  const closeAdd = () => setAddOpen(false);
+
+  const createStaff = async (e) => {
+    e.preventDefault();
+    setAddSubmitting(true);
+    setAddError('');
+    try {
+      await axios.post('/user/manual-create', newStaff, { headers: { Authorization: `Bearer ${token}` } });
+      setAddOpen(false);
+      triggerNotify(`Staff account created for ${newStaff.name}.`, "success");
+      fetchData();
+    } catch (err) {
+      setAddError(err.response?.data?.errors?.[0] || err.response?.data?.message || 'Failed to create account.');
+    } finally {
+      setAddSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     fetchData();
@@ -141,7 +169,43 @@ const StaffManagement = () => {
             <h1>Staff Management</h1>
             <p>Unit Controller: <strong>{userName}</strong></p>
           </div>
+          {role === 'Tenant' && (
+            <button className="add-user-btn" onClick={openAdd}>+ Add Staff</button>
+          )}
         </header>
+
+        {/* Manual Add Staff modal (Tenant only) */}
+        {addOpen && (
+          <div className="modal-overlay" onClick={closeAdd}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <span className="modal-icon">➕</span>
+                <h3>Add Staff Account</h3>
+              </div>
+              {addError && <div className="add-user-error">⚠️ {addError}</div>}
+              <form className="add-user-form" onSubmit={createStaff}>
+                <div>
+                  <label>Full Name</label>
+                  <input name="name" value={newStaff.name} onChange={onNewField} placeholder="e.g., Ahmad bin Ali" required />
+                </div>
+                <div>
+                  <label>Email</label>
+                  <input name="email" type="email" value={newStaff.email} onChange={onNewField} placeholder="name@company.com" required />
+                </div>
+                <div>
+                  <label>Temporary Password</label>
+                  <PasswordInput variant="dark" name="password" value={newStaff.password} onChange={onNewField} placeholder="min 8 characters" required />
+                </div>
+                <div className="modal-actions">
+                  <button type="button" className="cancel-btn" onClick={closeAdd}>Cancel</button>
+                  <button type="submit" className="add-user-btn" disabled={addSubmitting}>
+                    {addSubmitting ? 'Creating...' : 'Create Staff'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         <div className="management-container">
           <div className="code-generator-card">
@@ -151,7 +215,7 @@ const StaffManagement = () => {
                     <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: '20px' }}>
                         {isExpired 
                           ? "SECURITY ALERT: This key has expired. Generate a new one to resume onboarding." 
-                          : `Expires 48h after generation. Limited to ${usage.max} total uses.`}
+                          : `Expires 48h after generation. Limited to ${usage.max} total uses. Share this code for secure self-registration, or add staff manually above.`}
                     </p>
                 </div>
                 <div style={{ textAlign: 'right' }}>

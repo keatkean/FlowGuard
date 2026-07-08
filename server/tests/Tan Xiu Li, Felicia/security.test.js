@@ -103,3 +103,41 @@ describe("Security log routes", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("GET /logs/user/:id — ownership", () => {
+  const { sequelize } = require("../../models"); // the mocked sequelize.query
+  beforeEach(() => jest.clearAllMocks());
+
+  test("FM can view any user's logs (200)", async () => {
+    sequelize.query.mockResolvedValueOnce([{ id: 5, name: "Worker", managerId: 99, role: "Staff" }]);
+    mockSecurityLog.findAll.mockResolvedValue([]);
+    const res = await request(app).get("/api/security/logs/user/5").set("Authorization", `Bearer ${tokenFor("FM")}`);
+    expect(res.status).toBe(200);
+  });
+
+  test("Tenant can view logs for their OWN staff (200)", async () => {
+    // tenant token id = 1; staff.managerId = 1 → owned
+    sequelize.query.mockResolvedValueOnce([{ id: 5, name: "Worker", managerId: 1, role: "Staff" }]);
+    mockSecurityLog.findAll.mockResolvedValue([]);
+    const res = await request(app).get("/api/security/logs/user/5").set("Authorization", `Bearer ${tokenFor("Tenant")}`);
+    expect(res.status).toBe(200);
+  });
+
+  test("Tenant CANNOT view another tenant's staff logs (403)", async () => {
+    sequelize.query.mockResolvedValueOnce([{ id: 5, name: "Worker", managerId: 2, role: "Staff" }]);
+    const res = await request(app).get("/api/security/logs/user/5").set("Authorization", `Bearer ${tokenFor("Tenant")}`);
+    expect(res.status).toBe(403);
+  });
+
+  test("Staff CANNOT view other users' logs (403)", async () => {
+    sequelize.query.mockResolvedValueOnce([{ id: 5, name: "Worker", managerId: 1, role: "Staff" }]);
+    const res = await request(app).get("/api/security/logs/user/5").set("Authorization", `Bearer ${tokenFor("Staff")}`);
+    expect(res.status).toBe(403);
+  });
+
+  test("missing user returns 404", async () => {
+    sequelize.query.mockResolvedValueOnce([]);
+    const res = await request(app).get("/api/security/logs/user/999").set("Authorization", `Bearer ${tokenFor("FM")}`);
+    expect(res.status).toBe(404);
+  });
+});

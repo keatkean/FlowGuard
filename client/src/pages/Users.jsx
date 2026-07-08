@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Sidebar from '../components/Sidebar';
-import '../css/Dashboard.css'; 
-import '../css/Users.css'; 
+import PasswordInput from '../components/PasswordInput';
+import '../css/Dashboard.css';
+import '../css/Users.css';
 
 const Users = () => {
   const navigate = useNavigate();
@@ -14,7 +15,34 @@ const Users = () => {
   const [notification, setNotification] = useState(location.state?.notice || "");
 
   const token = localStorage.getItem("accessToken");
-  const currentUserId = localStorage.getItem("userId"); 
+  const currentUserId = localStorage.getItem("userId");
+  const role = localStorage.getItem("userRole");
+
+  // Manual "Add Tenant" modal (FM only)
+  const [addOpen, setAddOpen] = useState(false);
+  const [newUser, setNewUser] = useState({ name: '', email: '', password: '' });
+  const [addSubmitting, setAddSubmitting] = useState(false);
+  const [addError, setAddError] = useState('');
+
+  const onNewField = (e) => setNewUser(prev => ({ ...prev, [e.target.name]: e.target.value }));
+  const openAdd = () => { setAddError(''); setNewUser({ name: '', email: '', password: '' }); setAddOpen(true); };
+  const closeAdd = () => setAddOpen(false);
+
+  const createTenant = async (e) => {
+    e.preventDefault();
+    setAddSubmitting(true);
+    setAddError('');
+    try {
+      await axios.post('/user/manual-create', newUser, { headers: { Authorization: `Bearer ${token}` } });
+      setAddOpen(false);
+      setNotification(`Tenant account created for ${newUser.name}.`);
+      fetchUsers();
+    } catch (err) {
+      setAddError(err.response?.data?.errors?.[0] || err.response?.data?.message || 'Failed to create account.');
+    } finally {
+      setAddSubmitting(false);
+    }
+  };
 
   const fetchUsers = async () => {
     setLoading(true); 
@@ -52,25 +80,6 @@ const Users = () => {
 
   const closeModal = () => {
     setModal({ isOpen: false, user: null, action: null });
-  };
-
-  const handleReEnroll = (user) => {
-    const params = new URLSearchParams({
-      userId: user.id,
-      name: user.name,
-      returnTo: '/users'
-    });
-    navigate(`/enrollment?${params.toString()}`);
-  };
-
-  const handleSelfReEnroll = () => {
-    const self = users.find(u => String(u.id) === String(currentUserId));
-    const params = new URLSearchParams({
-      userId: currentUserId,
-      name: self?.name || localStorage.getItem("userName") || "My profile",
-      returnTo: '/users'
-    });
-    navigate(`/enrollment?${params.toString()}`);
   };
 
   const handleConfirmAction = async () => {
@@ -135,6 +144,39 @@ const Users = () => {
           </div>
         )}
 
+        {/* Manual Add Tenant modal (FM only) */}
+        {addOpen && (
+          <div className="modal-overlay" onClick={closeAdd}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <span className="modal-icon">➕</span>
+                <h3>Add Tenant Account</h3>
+              </div>
+              {addError && <div className="add-user-error">⚠️ {addError}</div>}
+              <form className="add-user-form" onSubmit={createTenant}>
+                <div>
+                  <label>Full Name</label>
+                  <input name="name" value={newUser.name} onChange={onNewField} placeholder="e.g., Jane Tan" required />
+                </div>
+                <div>
+                  <label>Email</label>
+                  <input name="email" type="email" value={newUser.email} onChange={onNewField} placeholder="name@company.com" required />
+                </div>
+                <div>
+                  <label>Temporary Password</label>
+                  <PasswordInput variant="dark" name="password" value={newUser.password} onChange={onNewField} placeholder="min 8 characters" required />
+                </div>
+                <div className="modal-actions">
+                  <button type="button" className="cancel-btn" onClick={closeAdd}>Cancel</button>
+                  <button type="submit" className="add-user-btn" disabled={addSubmitting}>
+                    {addSubmitting ? 'Creating...' : 'Create Tenant'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {notification && (
           <div className="users-toast">
             {notification}
@@ -148,9 +190,9 @@ const Users = () => {
               <h1>User Access Management</h1>
               <p>Security oversight for personnel roles and factory presence</p>
             </div>
-            <button className="self-enroll-btn" onClick={handleSelfReEnroll}>
-              Re-enroll My Face ID
-            </button>
+            {role === 'FM' && (
+              <button className="add-user-btn" onClick={openAdd}>+ Add Tenant</button>
+            )}
           </header>
 
           <div className="table-wrapper">
@@ -221,15 +263,6 @@ const Users = () => {
                               </button>
 
                               <button
-                                className={`action-btn action-bio ${isSelf ? 'disabled-action' : ''}`}
-                                onClick={() => !isSelf && handleReEnroll(u)}
-                                disabled={isSelf}
-                                title={isSelf ? "Use the page header to re-enroll your own Face ID" : `Re-enroll Face ID for ${u.name}`}
-                              >
-                                Face ID
-                              </button>
-                              
-                              <button 
                                 className={`action-btn ${u.isActive === false ? 'action-restore' : 'action-warning'} ${isSelf ? 'disabled-action' : ''}`}
                                 onClick={() => !isSelf && openModal(u, 'suspend')}
                                 disabled={isSelf}

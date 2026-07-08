@@ -24,10 +24,26 @@ module.exports = (sequelize, DataTypes) => {
         person_name: {
             type: DataTypes.STRING(255),
             allowNull: true
+        },
+        // Best-effort links resolved from zone_name/camera_location at alert-creation time.
+        // Nullable — the AI engine's existing string-only payload keeps working unchanged.
+        camera_id: {
+            type: DataTypes.INTEGER,
+            allowNull: true
+        },
+        zone_id: {
+            type: DataTypes.INTEGER,
+            allowNull: true
         }
     }, {
         tableName: 'detection_alerts',
         paranoid: true
     });
+
+    DetectionAlert.associate = (models) => {
+        DetectionAlert.belongsTo(models.Camera, { foreignKey: 'camera_id', as: 'camera' });
+        DetectionAlert.belongsTo(models.MonitoringZone, { foreignKey: 'zone_id', as: 'zone' });
+    };
+
     return DetectionAlert;
 };

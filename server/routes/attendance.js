@@ -44,9 +44,16 @@ router.get('/logs', verifyToken, async (req, res) => {
       });
     } 
     
-    // 3. STAFF DASHBOARD VIEW: Explicit denial to prevent administrative leakage
+    // 3. STAFF VIEW: own attendance records only — never the aggregate roster (PDPA-safe).
     else {
-      return res.status(403).json({ error: "Access Denied: Staff cannot view aggregate rosters." });
+      attendanceRecords = await Attendance.findAll({
+        where: { userId: loggedInUserId },
+        include: [{
+          model: User,
+          attributes: ['id', 'name', 'role']
+        }],
+        order: [['timestamp', 'DESC']]
+      });
     }
 
     res.status(200).json(attendanceRecords);

@@ -1,52 +1,133 @@
-# Use Cases — Facial Recognition & Access Management (Felicia)
+# Use Cases — Felicia (Facial Recognition & Access Management + Smart Logistics)
 
-## UC-1: Enrol a face (auto scan + manual upload)
-- **Actor:** New user (Tenant/Staff), guided by the system after first login.
-- **Trigger:** User has `isEnrolled = false` and is routed to the enrolment screen.
-- **Main flow (auto):**
-  1. System opens the webcam and prompts for front, left, right angles.
-  2. User captures each angle; client encodes images as base64.
-  3. Backend forwards images to the AI service (`/api/encode-faces`).
-  4. AI returns a 512-d vector; backend stores it and sets `isEnrolled = true`.
-  5. User is admitted to the dashboard.
-- **Alternative flow (manual upload):** If the scan repeatedly fails (no face detected,
-  poor lighting, camera denied), the user switches to "upload a photo" and selects an
-  image file; the same encode/store path runs on the uploaded photo.
-- **Edge cases:** no face detected → 400 + retry prompt; multiple faces → rejected;
-  camera permission denied → fall back to manual upload.
+Format for each: Actor · Trigger · Preconditions · Main flow · Alternate/edge flow · Outcome.
 
-## UC-2: Recognise a person at the gate
-- **Actor:** Person approaching the gate terminal; observed by FM/security.
-- **Trigger:** A live frame is sent to `/user/recognize`.
-- **Main flow:** AI compares the live embedding to enrolled vectors → returns name,
-  status, confidence, bounding box, and liveness ratio; an "Access Granted" event is
-  logged and an IN/OUT attendance record is created.
-- **Alternative flow:** No match above threshold → status `DENIED`, an
-  "Intrusion/Tailgating" security log is created and surfaced on the V-Patrol dashboard.
-- **Edge cases:** invalid image data → error; low confidence near threshold → flagged.
+---
 
-## UC-3: Monitor access on the V-Patrol dashboard
+## A. Facial Recognition & Access Management
+
+### UC-A1 Face enrolment
+- **Actor:** New user (Tenant/Staff), or FM enrolling on their behalf.
+- **Trigger:** User has `isEnrolled = false` and lands on the enrolment screen (or Settings → Re-enroll).
+- **Preconditions:** Logged in; camera available or image files ready.
+- **Main flow:** Capture front/left/right (or upload) → `POST /user/enroll-face` → AI (InsightFace)
+  encodes → `faceVector` saved, `isEnrolled = true` → AI cache refreshed.
+- **Alternate/edge:** No face detected → 400 + retry; camera denied/no webcam → switch to manual
+  upload; AI offline → 503 "service offline", enrolment not saved.
+- **Outcome:** User has a biometric profile usable at the gate.
+
+### UC-A2 Face re-enrolment / update
+- **Actor:** User (self) or FM.
+- **Trigger:** Recognition becomes unreliable.
+- **Preconditions:** Logged in; FM required to re-enrol another user.
+- **Main flow:** Settings → Re-enroll → `POST /user/enroll-face` overwrites the existing vector →
+  AI cache refreshed.
+- **Alternate/edge:** Same failure handling as UC-A1.
+- **Outcome:** Fresh `faceVector` replaces the old one.
+
+### UC-A3 AI recognition at gate / V-Patrol
+- **Actor:** Person at the gate; observed by FM.
+- **Trigger:** A live frame is sent to the AI recognise endpoint.
+- **Preconditions:** Enrolled vectors loaded in the AI service.
+- **Main flow:** AI matches embedding → returns name/status/confidence/box → recognised person gets
+  an IN/OUT attendance record and an "Access Granted" security log.
+- **Alternate/edge:** No match above threshold → status DENIED.
+- **Outcome:** Authorised entry logged automatically.
+
+### UC-A4 Unauthorized face logging
+- **Actor:** Unknown person; FM/security review later.
+- **Trigger:** Recognition returns no confident match.
+- **Main flow:** An intrusion/tailgating **security log** is created (severity non-safe) and shown
+  on V-Patrol; it may also seed the incident dashboard.
+- **Alternate/edge:** Invalid image → error, no log spam.
+- **Outcome:** Unauthorized access is captured for review.
+
+### UC-A5 FM security review
 - **Actor:** Facilities Manager.
-- **Trigger:** FM opens the dashboard.
-- **Main flow:** System queries `security_logs` to show a daily timeline of access events
-  alongside active intrusion/tailgating alerts; FM can filter by personnel or user.
+- **Trigger:** Non-safe security logs appear in the review queue.
+- **Preconditions:** FM role.
+- **Main flow:** Security Review page → filter by status → set `reviewStatus`
+  (Pending Review / False Positive / Escalated / Resolved) + notes via `PATCH /api/security/logs/:id/review`.
+- **Alternate/edge:** Non-FM blocked (403).
+- **Outcome:** Each suspicious event is triaged with an audit trail.
 
-## UC-4: Manage access permissions
+### UC-A6 Off-boarding (PDPA delete)
 - **Actor:** Facilities Manager.
-- **Trigger:** FM needs to change a user's access.
-- **Main flow:** FM updates a user's role/permission, suspends a user (`/user/suspend/:id`),
-  or re-enrols a clearer face vector if recognition struggles.
-- **Edge cases:** suspending self / last FM should be prevented.
+- **Trigger:** A lease/employment ends.
+- **Main flow:** `DELETE /user/:id` → wipe `faceVector`, delete attendance trail, anonymise security
+  logs (`personnelName = null`), remove the user.
+- **Alternate/edge:** Self-deletion blocked; Tenant may delete only their own staff.
+- **Outcome:** No biometric-linked identity remains; audit events preserved anonymised.
 
-## UC-5: Off-board a tenant (PDPA delete)
+### UC-A7 View own staff access logs (Tenant)
+- **Actor:** Tenant.
+- **Trigger:** Tenant clicks "Logs" for one of their staff.
+- **Main flow:** `GET /api/security/logs/user/:id` — server confirms the target's `managerId` is the
+  Tenant, then returns that person's access logs.
+- **Alternate/edge:** Tenant requesting another tenant's staff → 403; Staff → 403; FM → any.
+- **Outcome:** Tenants get visibility of their own unit only.
+
+---
+
+## B. Smart Logistics & Loading Bay Management
+
+### UC-B1 Create a loading-bay booking
+- **Actor:** FM, Tenant, or Staff.
+- **Trigger:** A delivery needs a bay slot.
+- **Preconditions:** Logged in (FM/Tenant/Staff).
+- **Main flow:** + New Booking → `POST /api/bookings/create` → validate fields → generate
+  `booking_ref`, status Pending, link `tenantId` (Tenant self / Staff → managerId) → WhatsApp
+  driver-pass link sent (simulated if disabled).
+- **Alternate/edge:** Missing/invalid fields → 400; overlapping slot for the same bay → 409.
+- **Outcome:** A pending booking exists with a driver pass link.
+
+### UC-B2 WhatsApp driver pass link
+- **Actor:** System → Driver.
+- **Trigger:** Booking created (and on status changes).
+- **Main flow:** `whatsappService` sends a message containing the booking ref, company, plate, bay,
+  slot, and the `/driver-pass/:ref` link.
+- **Alternate/edge:** WhatsApp disabled → simulated result returned; send failure → non-fatal, the
+  booking still succeeds.
+- **Outcome:** Driver receives (or the system simulates) the pass link.
+
+### UC-B3 Driver opens the QR pass
+- **Actor:** Driver (public, no login).
+- **Trigger:** Driver opens `/driver-pass/:ref`.
+- **Main flow:** Page fetches `GET /api/bookings/:ref` and shows details + a QR encoding the booking
+  ref; status badge shown.
+- **Alternate/edge:** Unknown ref → clean "Pass not found"; Cancelled/Completed → warning banner;
+  QR component unavailable → "use booking reference at gate" fallback (no crash).
+- **Outcome:** Driver has a scannable entry pass on their phone.
+
+### UC-B4 FM gate scan — entry
 - **Actor:** Facilities Manager.
-- **Trigger:** A lease ends.
-- **Main flow:** FM deletes the user (`DELETE /user/:id`), removing profile, access
-  history, and biometric vector to ensure PDPA compliance.
-- **Edge cases:** confirmation required; cascading deletes for related attendance records.
+- **Trigger:** Driver arrives at the bay.
+- **Preconditions:** FM role.
+- **Main flow:** Gate Scan → enter booking ref (+ optional observed plate) →
+  `PATCH /api/bookings/:ref/gate-scan {action:"entry"}` → status Arrived → WhatsApp arrival note.
+- **Alternate/edge:** Cancelled/Completed booking → 409; plate mismatch → flagged (warn, not block);
+  Tenant/Staff → 403.
+- **Outcome:** Arrival recorded.
 
-## UC-6: Onboard a tenant via invitation code
-- **Actor:** Facilities Manager (issues), Tenant (redeems).
-- **Main flow:** FM generates an invite/registration code (`/user/invite-tenant`,
-  `/user/generate-code`); tenant registers with it before it expires (48h) or hits max usage.
-- **Edge cases:** expired or over-used code → rejected.
+### UC-B5 FM gate scan — exit + next-in-line
+- **Actor:** Facilities Manager.
+- **Trigger:** Vehicle leaves the bay.
+- **Main flow:** Gate Scan → `{action:"exit"}` → status Completed → find next non-cancelled booking
+  for the same bay → WhatsApp "you may proceed" to that driver.
+- **Alternate/edge:** Already Completed → idempotent, no duplicate; Cancelled → 409.
+- **Outcome:** Bay freed and the next driver is invited immediately.
+
+### UC-B6 Cancel a booking
+- **Actor:** FM or the owning Tenant.
+- **Trigger:** Delivery no longer needed.
+- **Main flow:** Cancel → `PATCH /api/bookings/:id/cancel` → status Cancelled (soft delete) →
+  WhatsApp cancellation note.
+- **Alternate/edge:** Non-owner Tenant / Staff → 403.
+- **Outcome:** Booking cancelled but retained for audit.
+
+### UC-B7 RBAC restrictions (logistics)
+- **Actor:** Tenant / Staff.
+- **Trigger:** They attempt a facility-level action.
+- **Main flow:** Gate Scan and Mark Arrived/Completed are FM-only — the controls are hidden and the
+  backend returns 403.
+- **Outcome:** Staff/Tenant can book and view their unit, but cannot control the gate.

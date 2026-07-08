@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import Home from './pages/home'; 
 import SystemHealth from './pages/SystemHealth';
 import Contact from './pages/Contact';
@@ -17,6 +17,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import ErrorBoundary from './components/ErrorBoundary';
 import VPatrol from './pages/VPatrol';
 import Cameras from './pages/Cameras';
+import CameraInventory from './pages/CameraInventory';
 import DriverPass from './pages/DriverPass';
 import TenantLogistics from './pages/TenantLogistics';
 import DriverPortal from './pages/DriverPortal';
@@ -27,11 +28,18 @@ import FaceEnrollment from './pages/FaceEnrollment';
 import Attendance from './pages/Attendance';
 import GateScanner from './pages/GateScanner';
 import ObjectDetection from './pages/ObjectDetection';
+import DetectionSettings from './pages/DetectionSettings';
 import SecurityReview from './pages/SecurityReview';
+import IncidentDashboard from './pages/IncidentDashboard';
+import SupportDashboard from './pages/SupportDashboard';
 import { ACCESS } from './constants/roles';
 import './App.css';
 
 function App() {
+  const location = useLocation();
+  // Public driver pass is a standalone ticket view — no internal floating assistant.
+  const hideFloatingWidgets = location.pathname.startsWith('/driver-pass');
+
   return (
     <div className="App bg-[#0f172a] min-h-screen text-slate-200 selection:bg-blue-500/30">
       <ErrorBoundary>
@@ -39,7 +47,7 @@ function App() {
         {/* --- Public Routes --- */}
         <Route path="/" element={<Home />} />
         <Route path="/system-health" element={<SystemHealth />} />
-        <Route path="/driver-pass/:bookingId" element={<DriverPass />} />
+        <Route path="/driver-pass/:ref" element={<DriverPass />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
@@ -60,41 +68,54 @@ function App() {
           </ProtectedRoute>
         } />
 
-        {/* --- Live monitoring / operations (FM + Security Staff) --- */}
+        {/* --- Live monitoring / AI & security — FM only --- */}
         <Route path="/cameras" element={
-          <ProtectedRoute allowedRoles={ACCESS.FM_STAFF}>
+          <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
             <Cameras />
           </ProtectedRoute>
         } />
-        <Route path="/object-detection" element={
+        <Route path="/camera-inventory" element={
           <ProtectedRoute allowedRoles={ACCESS.FM_STAFF}>
+            <CameraInventory />
+          </ProtectedRoute>
+        } />
+        <Route path="/object-detection" element={
+          <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
             <ObjectDetection />
           </ProtectedRoute>
         } />
-        <Route path="/vpatrol" element={
+        <Route path="/detection-settings" element={
           <ProtectedRoute allowedRoles={ACCESS.FM_STAFF}>
+            <DetectionSettings />
+          </ProtectedRoute>
+        } />
+        <Route path="/vpatrol" element={
+          <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
             <VPatrol />
           </ProtectedRoute>
         } />
         <Route path="/gate-scanner" element={
-          <ProtectedRoute allowedRoles={ACCESS.FM_STAFF}>
+          <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
             <GateScanner />
           </ProtectedRoute>
         } />
 
-        {/* --- FM + Tenant (attendance, own staff, own logistics) --- */}
+        {/* Attendance: FM (all) + Tenant (own staff) + Staff (own records — scoped server-side) */}
         <Route path="/attendance" element={
-          <ProtectedRoute allowedRoles={ACCESS.FM_TENANT}>
+          <ProtectedRoute allowedRoles={ACCESS.ANY}>
             <Attendance />
           </ProtectedRoute>
         } />
+
+        {/* --- FM + Tenant (own staff, own logistics) --- */}
         <Route path="/staff" element={
           <ProtectedRoute allowedRoles={ACCESS.FM_TENANT}>
             <StaffManagement />
           </ProtectedRoute>
         } />
+        {/* Logistics: FM + Tenant can book; Staff gets operational view + status updates. */}
         <Route path="/logistics" element={
-          <ProtectedRoute allowedRoles={ACCESS.FM_TENANT}>
+          <ProtectedRoute allowedRoles={ACCESS.ANY}>
             <TenantLogistics />
           </ProtectedRoute>
         } />
@@ -110,19 +131,31 @@ function App() {
             <SecurityReview />
           </ProtectedRoute>
         } />
+        <Route path="/incidents" element={
+          <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
+            <IncidentDashboard />
+          </ProtectedRoute>
+        } />
         <Route path="/tenant-management" element={
           <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
             <TenantManagement />
           </ProtectedRoute>
         } />
+        {/* FM (any staff) + Tenant (own staff only — enforced server-side) */}
         <Route path="/user-logs/:id" element={
-          <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
+          <ProtectedRoute allowedRoles={ACCESS.FM_TENANT}>
             <UserLogs />
           </ProtectedRoute>
         } />
+        {/* Settings: any authenticated user (content inside is role-gated) */}
         <Route path="/settings" element={
-          <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
+          <ProtectedRoute>
             <Settings />
+          </ProtectedRoute>
+        } />
+        <Route path="/support-dashboard" element={
+          <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
+            <SupportDashboard />
           </ProtectedRoute>
         } />
         
@@ -168,7 +201,7 @@ function App() {
       </Routes>
       </ErrorBoundary>
 
-      <AIChatPopup />
+      {!hideFloatingWidgets && <AIChatPopup />}
     </div>
   );
 }

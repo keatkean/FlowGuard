@@ -19,5 +19,5 @@ export const ACCESS = Object.freeze({
 export const roleLabel = (role) =>
   role === ROLES.FM ? 'Facilities Manager'
     : role === ROLES.TENANT ? 'Tenant'
-      : role === ROLES.STAFF ? 'Security Staff'
+      : role === ROLES.STAFF ? 'Staff'
         : 'Guest';

@@ -440,3 +440,50 @@
     opacity: 0.6;
     text-decoration: line-through;
 }
+
+/* =========================================
+   SECURITY REVIEW TABLE POLISH (scoped — does not affect other management tables)
+   ========================================= */
+.review-table-container { overflow-x: auto; } /* scroll only if the laptop window is very narrow */
+
+.security-review-table { min-width: 900px; }   /* gives the 6 columns room; fits a 1366px laptop without scroll */
+.security-review-table td { vertical-align: top; }
+.security-review-table .status-badge { white-space: nowrap; } /* "Pending Review" stays on one line */
+
+.review-status-cell { min-width: 150px; }
+.review-status-cell .review-current-status { display: inline-block; margin-top: 8px; }
+
+.review-resolution-cell { min-width: 240px; }
+.review-resolution { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.review-save-btn { margin: 0; align-self: flex-start; }
+.review-reviewer { color: #64748b; font-size: 0.75rem; }
+
+.review-select,
+.review-textarea {
+    width: 100%;
+    background: #0b0f1a;
+    border: 1px solid #334155;
+    color: #f8fafc;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 0.85rem;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.review-select:focus,
+.review-textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
+.review-select option { background: #0b0f1a; color: #f8fafc; }
+.review-textarea { resize: vertical; min-height: 52px; font-family: inherit; }
+
+/* Phones: keep the existing card behavior; drop min-widths so nothing overflows. */
+@media (max-width: 768px) {
+    .security-review-table { min-width: 0; }
+    .review-status-cell,
+    .review-resolution-cell { min-width: 0; }
+    .security-review-table td.review-status-cell,
+    .security-review-table td.review-resolution-cell {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+}

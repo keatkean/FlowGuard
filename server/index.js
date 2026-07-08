@@ -21,6 +21,8 @@ const incidentRoute = require('./routes/incident');
 app.use("/api/incident", incidentRoute);
 const zonesRoute = require('./routes/zones');
 app.use("/api/zones", zonesRoute);
+const camerasRoute = require('./routes/cameras');
+app.use("/api/cameras", camerasRoute);
 const detectionAlertsRoute = require('./routes/detectionAlerts');
 app.use("/api/detection-alerts", detectionAlertsRoute);
 const userRoute = require('./routes/user');
@@ -31,6 +33,8 @@ const securityRoutes = require('./routes/security');
 app.use('/api/security', securityRoutes);
 const attendanceRoutes = require('./routes/attendance');
 app.use('/api/attendance', attendanceRoutes);
+const supportRoutes = require('./routes/support');
+app.use('/api/support', supportRoutes);
 
 // Fallback handlers — MUST stay last, after every route is mounted.
 const { notFound, errorHandler } = require('./middlewares/errorHandlers');
@@ -39,6 +43,7 @@ app.use(errorHandler);   // anything thrown/forwarded → 500 JSON (no stack lea
 
 // Sync DB and Start Server
 const db = require('./models');
+const startCleanupCron = require('./cron/cleanupTranscripts');
 
 async function startServer() {
     try {
@@ -67,6 +72,9 @@ async function startServer() {
             console.warn(`\nWARNING: ${failedModels.length} model(s) failed to sync: ${failedModels.join(', ')}`);
             console.warn("The server will start, but those tables may be missing or outdated.\n");
         }
+
+        // Start PDPA 90-day transcript cleanup cron
+        startCleanupCron(db);
 
         let port = process.env.APP_PORT || 5000;
         app.listen(port, '127.0.0.1', () => {

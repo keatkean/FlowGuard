@@ -5,6 +5,7 @@ import { useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 import NavBar from '../components/NavBar';
 import Footer from '../components/Footer';
 import LogoIcon from '../components/LogoIcon';
+import PasswordInput from '../components/PasswordInput';
 import '../css/Login.css';
 
 const Register = () => {
@@ -102,13 +103,12 @@ const Register = () => {
 
               <div className="input-group">
                 <label>Create Access Key</label>
-                <input 
-                  type="password" 
-                  placeholder="Minimum 8 characters" 
+                <PasswordInput
+                  placeholder="Minimum 8 characters"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  required 
-                  minLength="8" 
+                  required
+                  minLength="8"
                 />
               </div>
 

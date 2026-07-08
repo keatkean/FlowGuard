@@ -57,9 +57,9 @@ router.get('/logs/personnel/:name', async (req, res) => {
 // 3. GET Route: Fetch logs by User ID instead of name (For UserLogs.jsx)
 router.get('/logs/user/:id', async (req, res) => {
   try {
-    // RAW SQL BRIDGE: Hits the 'users' table directly to find the name
+    // Look up the target user (name for log matching + managerId/role for ownership).
     const users = await sequelize.query(
-      'SELECT name FROM users WHERE id = ?',
+      'SELECT id, name, "managerId", role FROM users WHERE id = ?',
       {
         replacements: [req.params.id],
         type: sequelize.QueryTypes.SELECT
@@ -70,7 +70,16 @@ router.get('/logs/user/:id', async (req, res) => {
       return res.status(404).json({ error: "Personnel member not found." });
     }
 
-    const userName = users[0].name;
+    const target = users[0];
+
+    // Ownership: FM sees anyone; a Tenant may only view logs for their own staff.
+    const isFM = req.user.role === 'FM';
+    const isOwnerTenant = req.user.role === 'Tenant' && String(target.managerId) === String(req.user.id);
+    if (!isFM && !isOwnerTenant) {
+      return res.status(403).json({ error: "You can only view logs for your own staff." });
+    }
+
+    const userName = target.name;
 
     const logs = await SecurityLog.findAll({
       where: { personnelName: userName },

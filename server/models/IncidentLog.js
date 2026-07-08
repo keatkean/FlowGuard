@@ -15,6 +15,26 @@ module.exports = (sequelize, DataTypes) => {
         confidence_score: {
             type: DataTypes.DECIMAL(5, 4),
             allowNull: true
+        },
+        severity: {
+            type: DataTypes.STRING(20),
+            allowNull: true,
+            defaultValue: 'Medium'
+        },
+        source: {
+            type: DataTypes.STRING(50),
+            allowNull: true,
+            defaultValue: 'Facial Recognition'
+        },
+        resolutionStatus: {
+            type: DataTypes.STRING(50),
+            allowNull: false,
+            defaultValue: 'Active'
+        },
+        notes: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+            defaultValue: ''
         }
     }, {
         tableName: 'incident_logs',
