@@ -115,4 +115,3 @@ flowchart LR
   goal. After deploying, `FRONTEND_URL` must be updated so WhatsApp driver-pass links point to the live site.
 - **After editing these diagrams, regenerate** `design/png/architecture-diagram.png` (and optionally
   `design/png/planned-deployment.png`) from this Mermaid source.
-```

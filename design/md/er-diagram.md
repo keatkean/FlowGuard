@@ -169,4 +169,3 @@ erDiagram
 - Soft-deletable (`paranoid`) tables keep a `deletedAt` timestamp: bookings, cameras, monitoring
   zones, detection alerts, incident logs.
 - **After editing this diagram, regenerate `design/png/er-diagram.png`** from this Mermaid source.
-```

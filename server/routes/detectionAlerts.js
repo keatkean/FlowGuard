@@ -1,14 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const { DetectionAlert, IncidentLog } = require('../models');
-
+// const { DetectionAlert, IncidentLog } = require('../models');
+const { DetectionAlert, IncidentLog, MonitoringZone, Camera } = require('../models');
 function severityFromDuration(seconds) {
   if (!seconds || seconds < 120) return 'Low';
   if (seconds < 300) return 'Medium';
   if (seconds < 600) return 'High';
   return 'Critical';
 }
-const { DetectionAlert, MonitoringZone, Camera } = require('../models');
+// const { DetectionAlert, MonitoringZone, Camera } = require('../models');
 const { Op } = require('sequelize');
 const { verifyToken, requireRole, verifyServiceOrRole } = require('../middlewares/auth');
 

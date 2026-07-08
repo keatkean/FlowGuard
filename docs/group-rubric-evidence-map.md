@@ -60,4 +60,3 @@ Biometric access + security/attendance logging (not just user-account management
 > This is a group-level summary. Individual per-feature evidence for Felicia is in
 > `docs/Tan Xiu Li, Felicia/rubric-evidence-map.md`. Charlisa / Lucas / Gladwin CRUD claims are
 > documented from the merged models/routes; each owner should confirm their optional-improvement notes.
-```
