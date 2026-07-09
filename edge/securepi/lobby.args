@@ -1,0 +1,19 @@
+--mode
+imx500
+--headless
+--zone-name
+Loading Bay
+--camera-location
+Loading Bay Camera 01
+--device-id
+securepi-loading-bay-01
+--unattended-time
+60
+--proximity-px
+150
+--alert-cooldown
+30
+--snapshot-dir
+alerts/loading-bay
+--severity
+High

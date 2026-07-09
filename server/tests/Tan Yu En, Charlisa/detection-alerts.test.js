@@ -78,6 +78,15 @@ describe("POST /api/detection-alerts (AI engine service key)", () => {
     expect(mockDetectionAlert.create).not.toHaveBeenCalled();
   });
 
+  test("edge token header cannot bypass the normal protected alert route", async () => {
+    const res = await request(app)
+      .post("/api/detection-alerts")
+      .set("Authorization", "Bearer test-edge-token")
+      .send(alertPayload);
+    expect(res.status).toBe(403);
+    expect(mockDetectionAlert.create).not.toHaveBeenCalled();
+  });
+
   test("FM/Staff JWT can also create a manual alert (201)", async () => {
     mockMonitoringZone.findOne.mockResolvedValue(null);
     mockCamera.findOne.mockResolvedValue(null);
@@ -121,6 +130,28 @@ describe("PUT /api/detection-alerts/:id", () => {
       .set("Authorization", `Bearer ${staffToken}`)
       .send({ status: "Cleared" });
     expect(res.status).toBe(200);
+  });
+
+  test("Staff can mark an alert investigating (200)", async () => {
+    const instance = { id: 1, update: jest.fn().mockResolvedValue() };
+    mockDetectionAlert.findByPk.mockResolvedValue(instance);
+    const res = await request(app)
+      .put("/api/detection-alerts/1")
+      .set("Authorization", `Bearer ${staffToken}`)
+      .send({ status: "Investigating" });
+    expect(res.status).toBe(200);
+    expect(instance.update).toHaveBeenCalledWith({ status: "Investigating" });
+  });
+
+  test("invalid alert status is rejected (400)", async () => {
+    const instance = { id: 1, update: jest.fn().mockResolvedValue() };
+    mockDetectionAlert.findByPk.mockResolvedValue(instance);
+    const res = await request(app)
+      .put("/api/detection-alerts/1")
+      .set("Authorization", `Bearer ${staffToken}`)
+      .send({ status: "Waiting Around" });
+    expect(res.status).toBe(400);
+    expect(instance.update).not.toHaveBeenCalled();
   });
 
   test("Tenant cannot act on alerts (403)", async () => {

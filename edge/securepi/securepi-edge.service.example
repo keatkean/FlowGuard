@@ -1,0 +1,16 @@
+[Unit]
+Description=FlowGuard SecurePi Edge Node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/FlowGuard-1/edge/securepi/upstream
+EnvironmentFile=/home/pi/FlowGuard-1/edge/securepi/.env
+ExecStart=/usr/bin/python3 /home/pi/FlowGuard-1/edge/securepi/upstream/securePi.py @flowguard-loading-bay.args --headless --stream --stream-host 0.0.0.0 --stream-port 8001
+Restart=always
+RestartSec=5
+User=pi
+
+[Install]
+WantedBy=multi-user.target

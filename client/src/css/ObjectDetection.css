@@ -379,6 +379,13 @@
     border-top: 1px dashed #2d364f;
 }
 
+.od-stream-placeholder-stack {
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+    padding: 20px;
+}
+
 .od-stream-img {
     width: 100%;
     height: 100%;
@@ -584,6 +591,15 @@
     text-transform: none;
 }
 
+.od-snapshot-link {
+    display: inline-flex;
+    margin-top: 12px;
+    color: #22d3ee;
+    font-size: 0.8rem;
+    font-weight: 750;
+    text-decoration: none;
+}
+
 .od-incident-empty {
     min-height: 112px;
     margin-top: 16px;
@@ -656,6 +672,7 @@
 }
 
 .od-resolution-actions .green,
+.od-resolution-actions .resolve,
 .od-dispatch-actions .resolve {
     border-color: rgba(34, 197, 94, 0.42);
     color: #22c55e;
@@ -665,6 +682,17 @@
     background: #f43f5e;
     border-color: #f43f5e;
     color: #fff;
+}
+
+.od-resolution-actions .dispatch {
+    border-color: rgba(245, 158, 11, 0.42);
+    color: #f59e0b;
+}
+
+.od-resolution-actions .escalate {
+    background: rgba(244, 63, 94, 0.13);
+    border-color: rgba(244, 63, 94, 0.48);
+    color: #fb7185;
 }
 
 .od-workflow-note {
@@ -892,6 +920,50 @@
     line-height: 1.45;
 }
 
+.od-live-alert-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.od-live-alert-item {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 10px;
+    border: 1px solid #26334d;
+    border-left: 3px solid #fb7185;
+    border-radius: 8px;
+    background: #0a0f1d;
+    color: inherit;
+    padding: 10px 12px;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+}
+
+.od-live-alert-item:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.od-live-alert-item span {
+    color: #f8fafc;
+    font-size: 0.84rem;
+    font-weight: 800;
+}
+
+.od-live-alert-item strong {
+    color: #fb7185;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+}
+
+.od-live-alert-item small {
+    grid-column: 1 / -1;
+    color: #8fa4c3;
+    font-size: 0.76rem;
+}
+
 .od-ops-card p {
     margin: 0;
     color: #8fa4c3;
@@ -912,12 +984,94 @@
     align-items: start;
 }
 
+.od-settings-grid-single {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 .od-settings-card {
-    min-height: 620px;
+    min-height: 0;
 }
 
 .od-zone-list.relaxed {
-    max-height: 430px;
+    max-height: none;
+}
+
+.od-rule-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 18px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid #202c44;
+}
+
+.od-rule-form .od-checkbox-row,
+.od-rule-form .od-advanced-details,
+.od-rule-form .od-form-error,
+.od-rule-form .od-btn-primary {
+    grid-column: 1 / -1;
+}
+
+.od-advanced-details {
+    border: 1px solid #26334d;
+    border-radius: 8px;
+    background: rgba(8, 13, 24, 0.68);
+}
+
+.od-advanced-details summary {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    color: #9fb0cc;
+    font-size: 0.78rem;
+    font-weight: 850;
+    cursor: pointer;
+}
+
+.od-advanced-details .od-input {
+    margin: 0 12px 10px;
+    width: calc(100% - 24px);
+}
+
+.od-zone-summary-list {
+    gap: 12px;
+}
+
+.od-zone-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.od-zone-summary-grid span {
+    color: #7086a6;
+    font-size: 0.72rem;
+    font-weight: 750;
+    text-transform: uppercase;
+}
+
+.od-zone-summary-grid strong {
+    display: block;
+    margin-top: 3px;
+    color: #e5edf8;
+    font-size: 0.82rem;
+    font-weight: 750;
+    text-transform: none;
+}
+
+.od-inline-map {
+    grid-template-columns: minmax(0, 1fr) 96px;
+    margin-top: 12px;
+}
+
+.od-zone-details {
+    margin-top: 12px;
+}
+
+.od-zone-details .od-zone-meta {
+    padding: 0 12px 10px;
 }
 
 .od-alert-count {
@@ -1074,7 +1228,10 @@
     .od-incident-meta,
     .od-resolution-actions,
     .od-dispatch-actions,
-    .od-alert-tabs {
+    .od-alert-tabs,
+    .od-rule-form,
+    .od-zone-summary-grid,
+    .od-inline-map {
         grid-template-columns: 1fr;
     }
 

@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { DetectionAlert, MonitoringZone, Camera } = require('../models');
 const { Op } = require('sequelize');
-const { verifyToken, requireRole, verifyServiceOrRole } = require('../middlewares/auth');
+
 const SEVERITIES = ['Low', 'Medium', 'High', 'Critical'];
 const VALID_STATUSES = ['Active', 'Acknowledged', 'Investigating', 'Dispatched', 'Escalated', 'Cleared'];
 
@@ -32,23 +32,18 @@ const parseOccurredAt = (value) => {
     return Number.isNaN(date.getTime()) ? null : date;
 };
 
-router.get('/', verifyToken, requireRole('FM', 'Staff'), async (req, res) => {
-    try {
-        const where = {};
-        if (req.query.status) where.status = req.query.status;
-        const alerts = await DetectionAlert.findAll({
-            where,
-            order: [['createdAt', 'DESC']],
-            limit: 50
-        });
-        res.json(alerts);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+const verifyEdgeIngestToken = (req, res, next) => {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    if (!process.env.EDGE_INGEST_TOKEN) {
+        return res.status(503).json({ error: 'Edge ingest is not configured.' });
     }
-});
+    if (!token || token !== process.env.EDGE_INGEST_TOKEN) {
+        return res.status(401).json({ error: 'Invalid edge ingest token.' });
+    }
+    return next();
+};
 
-// Resolves best-effort zone_id/camera_id from the free-text zone_name/camera_location the
-// AI engine (or a manual caller) sends — additive enrichment, never blocks alert creation.
 async function resolveLinks(zone_name, camera_location) {
     const links = {};
     try {
@@ -65,14 +60,12 @@ async function resolveLinks(zone_name, camera_location) {
             if (camera) links.camera_id = camera.id;
         }
     } catch {
-        // Enrichment is best-effort only — never fail alert creation because of it.
+        // Edge ingestion should still work even if enrichment cannot resolve links.
     }
     return links;
 }
 
-// AI engine posts here server-to-server via a shared service key; FM/Staff may also
-// create a manual test alert using their own JWT.
-router.post('/', verifyServiceOrRole('FM', 'Staff'), async (req, res) => {
+router.post('/detection-alerts', verifyEdgeIngestToken, async (req, res) => {
     try {
         const {
             zone_name,
@@ -91,7 +84,10 @@ router.post('/', verifyServiceOrRole('FM', 'Staff'), async (req, res) => {
             timestamp,
             occurred_at
         } = req.body;
-        if (!zone_name || !camera_location) {
+
+        const cleanedZone = cleanText(zone_name, 255);
+        const cleanedCamera = cleanText(camera_location, 255);
+        if (!cleanedZone || !cleanedCamera) {
             return res.status(400).json({ error: 'zone_name and camera_location are required.' });
         }
         if (status && !VALID_STATUSES.includes(status)) {
@@ -100,57 +96,28 @@ router.post('/', verifyServiceOrRole('FM', 'Staff'), async (req, res) => {
         if (severity && !SEVERITIES.includes(severity)) {
             return res.status(400).json({ error: `severity must be one of: ${SEVERITIES.join(', ')}.` });
         }
-        const links = await resolveLinks(zone_name, camera_location);
+
+        const links = await resolveLinks(cleanedZone, cleanedCamera);
         const alert = await DetectionAlert.create({
-            zone_name: cleanText(zone_name, 255),
-            camera_location: cleanText(camera_location, 255),
+            zone_name: cleanedZone,
+            camera_location: cleanedCamera,
             status: status || 'Active',
-            object_class: cleanText(object_class, 100),
+            object_class: cleanText(object_class, 100) || 'package-like object',
             duration_seconds: parsePositiveInt(duration_seconds),
             person_name: cleanText(person_name, 255),
-            alert_type: cleanText(alert_type, 100),
+            alert_type: cleanText(alert_type, 100) || 'Unattended Object',
             severity: severity || 'High',
-            source: cleanText(source, 100) || 'Object Detection',
+            source: cleanText(source, 100) || 'SecurePi Edge Node',
             confidence: parseConfidence(confidence),
             snapshot_url: cleanText(snapshot_url || snapshot_path, 500),
             device_id: cleanText(device_id, 100),
             occurred_at: parseOccurredAt(timestamp || occurred_at),
             ...links
         });
-        res.status(201).json(alert);
+        return res.status(201).json(alert);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        return res.status(500).json({ error: err.message });
     }
 });
-
-router.put('/:id', verifyToken, requireRole('FM', 'Staff'), async (req, res) => {
-    try {
-        const alert = await DetectionAlert.findByPk(req.params.id);
-        if (!alert) return res.sendStatus(404);
-        if (req.body.status && !VALID_STATUSES.includes(req.body.status)) {
-            return res.status(400).json({ error: `status must be one of: ${VALID_STATUSES.join(', ')}.` });
-        }
-        await alert.update({ status: req.body.status });
-        res.json(alert);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// Purge detection alerts older than 30 days — runs once daily
-function purgeStaleLogs() {
-    if (typeof DetectionAlert.destroy !== 'function') return;
-    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    DetectionAlert.destroy({
-        where: { createdAt: { [Op.lt]: cutoff } },
-        force: true
-    })
-    .then(n => { if (n > 0) console.log(`[Purge] Removed ${n} stale detection alerts.`); })
-    .catch(e => console.error('[Purge] Error:', e));
-}
-
-setInterval(purgeStaleLogs, 24 * 60 * 60 * 1000);
-// Delay the first run by 20s to let Sequelize finish syncing tables on startup
-setTimeout(purgeStaleLogs, 20000);
 
 module.exports = router;

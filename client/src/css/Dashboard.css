@@ -258,6 +258,110 @@
 .activity-card h2 { font-size: 2rem; margin: 10px 0; }
 .activity-card p { font-size: 0.8rem; color: #707a91; margin: 0; }
 
+.dashboard-alert-section {
+  margin-bottom: 30px;
+}
+
+.dashboard-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.dashboard-section-heading h3 {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 1rem;
+}
+
+.dashboard-section-heading p {
+  margin: 4px 0 0;
+  color: #707a91;
+  font-size: 0.82rem;
+}
+
+.dashboard-section-heading a {
+  color: #60a5fa;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  border-radius: 8px;
+  padding: 8px 12px;
+  text-decoration: none;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.dashboard-alert-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.dashboard-alert-card,
+.dashboard-alert-empty {
+  min-height: 132px;
+  background: #1e2539;
+  border: 1px solid #2d364f;
+  border-left: 4px solid #f87171;
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.dashboard-alert-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.dashboard-alert-card span {
+  width: fit-content;
+  border-radius: 6px;
+  background: rgba(248, 113, 113, 0.12);
+  color: #f87171;
+  padding: 4px 8px;
+  font-size: 0.68rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.dashboard-alert-card h2,
+.dashboard-alert-empty h2 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1rem;
+}
+
+.dashboard-alert-card p,
+.dashboard-alert-card small,
+.dashboard-alert-empty p,
+.dashboard-alert-offline {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+.dashboard-alert-card small {
+  margin-top: auto;
+  color: #60a5fa;
+}
+
+.dashboard-alert-empty {
+  grid-column: 1 / -1;
+  border-left-color: #34d399;
+}
+
+.dashboard-alert-empty p {
+  margin-top: 8px;
+}
+
+.dashboard-alert-offline {
+  margin-bottom: 12px;
+  color: #f87171;
+}
+
 /* --- CHARTS (2-Column Bottom) --- */
 .charts-section {
   display: grid;
@@ -527,7 +631,8 @@
 
 @media (max-width: 1024px) {
   .top-summary-row { grid-template-columns: repeat(2, 1fr); }
-  .activity-cards-grid { grid-template-columns: repeat(2, 1fr); }
+  .activity-cards-grid,
+  .dashboard-alert-grid { grid-template-columns: repeat(2, 1fr); }
   .charts-section { grid-template-columns: 1fr; }
 }
 
@@ -610,7 +715,12 @@
   }
 
   .top-summary-row, 
-  .activity-cards-grid {
+  .activity-cards-grid,
+  .dashboard-alert-grid {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-section-heading {
+    flex-direction: column;
   }
 }
