@@ -4,6 +4,7 @@ import Sidebar from '../components/Sidebar';
 import '../css/Dashboard.css';
 import '../css/Management.css';
 import '../css/Booking.css';
+import { API_BASE_URL } from '../constants/api';
 
 const BAYS = ['Bay A', 'Bay B'];
 const STATUSES = ['Pending', 'Confirmed', 'Arrived', 'Completed', 'Cancelled'];
@@ -50,7 +51,7 @@ const TenantLogistics = () => {
     setLoading(true);
     setError('');
     try {
-      const res = await axios.get('/api/bookings/', authHeader);
+      const res = await axios.get(`${API_BASE_URL}/api/bookings/`, authHeader);
       setBookings(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error('Failed to fetch bookings:', err);
@@ -85,7 +86,7 @@ const TenantLogistics = () => {
     setSubmitting(true);
     setError('');
     try {
-      const res = await axios.post('/api/bookings/create', form, authHeader);
+      const res = await axios.post(`${API_BASE_URL}/api/bookings/create`, form, authHeader);
       setNotice(`Booking created (status: Pending).${describeWhatsapp(res.data?.whatsapp)}`);
       setForm(emptyForm);
       setIsFormOpen(false);
@@ -100,7 +101,7 @@ const TenantLogistics = () => {
 
   const updateStatus = async (id, status) => {
     try {
-      const res = await axios.patch(`/api/bookings/${id}/status`, { status }, authHeader);
+      const res = await axios.patch(`${API_BASE_URL}/api/bookings/${id}/status`, { status }, authHeader);
       setNotice(`Booking ${status}.${describeWhatsapp(res.data?.whatsapp)}`);
       fetchBookings();
     } catch (err) {
@@ -110,7 +111,7 @@ const TenantLogistics = () => {
 
   const cancelBooking = async (id) => {
     try {
-      const res = await axios.patch(`/api/bookings/${id}/cancel`, {}, authHeader);
+      const res = await axios.patch(`${API_BASE_URL}/api/bookings/${id}/cancel`, {}, authHeader);
       setNotice(`Booking cancelled.${describeWhatsapp(res.data?.whatsapp)}`);
       fetchBookings();
     } catch (err) {
@@ -128,7 +129,7 @@ const TenantLogistics = () => {
     setGateError('');
     try {
       const res = await axios.patch(
-        `/api/bookings/${encodeURIComponent(ref)}/gate-scan`,
+        `${API_BASE_URL}/api/bookings/${encodeURIComponent(ref)}/gate-scan`,
         { action, observedPlate: gatePlate.trim() || undefined },
         authHeader
       );
@@ -153,14 +154,6 @@ const TenantLogistics = () => {
     catch { return b.slot_start; }
   };
 
-  // --- Summary stats (from the full list) ---
-  const stats = {
-    total: bookings.length,
-    pending: bookings.filter(b => b.status === 'Pending').length,
-    bayA: bookings.filter(b => b.loading_bay === 'Bay A' && !CLOSED.includes(b.status)).length,
-    bayB: bookings.filter(b => b.loading_bay === 'Bay B' && !CLOSED.includes(b.status)).length,
-  };
-
   // Local YYYY-MM-DD of a booking's slot start (matches the date input + displayed Slot).
   const slotDateKey = (b) => {
     if (!b.slot_start) return '';
@@ -168,6 +161,15 @@ const TenantLogistics = () => {
     if (isNaN(d.getTime())) return String(b.slot_start).slice(0, 10);
     const p = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  };
+
+  // --- Compact summary stats ---
+  const todayKey = slotDateKey({ slot_start: new Date().toISOString() });
+  const stats = {
+    today: bookings.filter(b => slotDateKey(b) === todayKey).length,
+    open: bookings.filter(b => b.status === 'Pending' || b.status === 'Confirmed').length,
+    inProgress: bookings.filter(b => b.status === 'Arrived').length,
+    closed: bookings.filter(b => CLOSED.includes(b.status)).length,
   };
 
   // --- Frontend filtering ---
@@ -204,23 +206,23 @@ const TenantLogistics = () => {
         {notice && <div className="toast-notification">{notice}</div>}
         {error && !isFormOpen && <div className="error-banner" style={{ margin: '0 0 16px' }}>⚠️ {error}</div>}
 
-        {/* Summary cards */}
+        {/* Compact summary — today's load and the booking pipeline at a glance */}
         <div className="logistics-stats">
           <div className="logistics-stat-card">
-            <div className="stat-value">{stats.total}</div>
+            <div className="stat-value">{stats.today}</div>
             <div className="stat-label">Today's Bookings</div>
           </div>
           <div className="logistics-stat-card">
-            <div className="stat-value">{stats.pending}</div>
-            <div className="stat-label">Pending</div>
+            <div className="stat-value">{stats.open}</div>
+            <div className="stat-label">Pending / Confirmed</div>
           </div>
           <div className="logistics-stat-card">
-            <div className="stat-value">{stats.bayA}</div>
-            <div className="stat-label">Bay A Active</div>
+            <div className="stat-value">{stats.inProgress}</div>
+            <div className="stat-label">Arrived / In Progress</div>
           </div>
           <div className="logistics-stat-card">
-            <div className="stat-value">{stats.bayB}</div>
-            <div className="stat-label">Bay B Active</div>
+            <div className="stat-value">{stats.closed}</div>
+            <div className="stat-label">Completed / Cancelled</div>
           </div>
         </div>
 

@@ -393,11 +393,17 @@ router.post('/enroll-face', verifyToken, async (req, res) => {
         // 1. Send the images to the Python face AI service (with a timeout so we never hang).
         //    FACE_AI_URL is a BASE url (e.g. http://127.0.0.1:8501); endpoint paths are appended.
         const faceAiUrl = process.env.FACE_AI_URL || 'http://127.0.0.1:8501';
+        //    Images live only in request memory (browser → Node → FastAPI); they are
+        //    never written to the DB, disk, cloud storage, or logs. Only the resulting
+        //    protected biometric template is stored against the User ID.
         const pythonResponse = await axios.post(`${faceAiUrl}/api/encode-faces`, {
             front: images.front,
             left: images.left,
             right: images.right
-        }, { timeout: 20000 });
+        }, {
+            timeout: 20000,
+            headers: { 'X-AI-Service-Key': process.env.AI_SERVICE_KEY || '' }
+        });
 
         const faceVector = pythonResponse.data?.vector; // The 512-number array
 
@@ -417,7 +423,10 @@ router.post('/enroll-face', verifyToken, async (req, res) => {
         //    restart needed. A refresh failure must NOT fail the enrolment (the cache
         //    reloads on the next AI-service restart anyway).
         try {
-            await axios.get(`${faceAiUrl}/refresh`, { timeout: 5000 });
+            await axios.get(`${faceAiUrl}/refresh`, {
+                timeout: 5000,
+                headers: { 'X-AI-Service-Key': process.env.AI_SERVICE_KEY || '' }
+            });
             return res.status(200).json({ message: "Biometric enrollment successful" });
         } catch (refreshErr) {
             console.warn("AI face-cache refresh failed (enrolment still saved):", refreshErr.message);

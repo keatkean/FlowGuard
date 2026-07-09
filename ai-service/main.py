@@ -7,7 +7,7 @@ import base64
 import threading
 import time
 from collections import defaultdict
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from insightface.app import FaceAnalysis
@@ -32,6 +32,21 @@ except Exception as _yolo_err:
 
 load_dotenv()
 app = FastAPI()
+
+# --- Service-to-service authentication -------------------------------------
+# The Node backend (and only the Node backend) may call the facial-recognition
+# endpoints. It sends the shared secret in an X-AI-Service-Key header.
+# For local development the key may be left unset (a warning is printed and the
+# check is skipped) — never deploy without AI_SERVICE_KEY configured.
+_AI_SERVICE_KEY = os.getenv("AI_SERVICE_KEY", "")
+if not _AI_SERVICE_KEY:
+    print("⚠️  AI_SERVICE_KEY not set — face endpoints are UNPROTECTED (dev mode only).")
+
+def require_service_key(x_ai_service_key: str = Header(default=None, alias="X-AI-Service-Key")):
+    if not _AI_SERVICE_KEY:
+        return  # dev mode — no key configured
+    if x_ai_service_key != _AI_SERVICE_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing AI service key.")
 
 # 1. Initialize AI
 print("Loading InsightFace Engine...")
@@ -64,13 +79,15 @@ def load_authorized_faces():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('SELECT name, "faceVector" FROM users WHERE "faceVector" IS NOT NULL')
+        # Cache keys on the unique user ID; name is retained ONLY for developer
+        # logging — matching and API responses use user_id, never the name.
+        cur.execute('SELECT id, name, "faceVector" FROM users WHERE "faceVector" IS NOT NULL')
         rows = cur.fetchall()
-        
-        for name, embedding_json in rows:
+
+        for user_id, name, embedding_json in rows:
             raw_embedding = json.loads(embedding_json) if isinstance(embedding_json, str) else embedding_json
             embedding = np.array(raw_embedding, dtype=np.float32)
-            known_faces.append({"name": name, "embedding": embedding})
+            known_faces.append({"user_id": user_id, "name": name, "embedding": embedding})
             
         cur.close()
         conn.close()
@@ -96,7 +113,7 @@ def base64_to_cv2(base64_string):
     nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
     return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-@app.post("/api/encode-faces")
+@app.post("/api/encode-faces", dependencies=[Depends(require_service_key)])
 async def encode_faces(images: FaceImages):
     """Takes 3 images from React, extracts vectors, and averages them."""
     try:
@@ -128,12 +145,22 @@ async def encode_faces(images: FaceImages):
         raise HTTPException(status_code=500, detail="Failed to process facial images.")
 
 
+# CORS: the frontend no longer calls the face endpoints directly (they go through
+# the Node backend), but the YOLO stream endpoints are still browser-fetched in
+# development. Origins are restricted to an env-configured allowlist — never a
+# wildcard combined with credentials.
+_allowed_origins = [
+    o.strip() for o in os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",") if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],  
-    allow_headers=["*"],  
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # --- Phase 3 - The CCTV Scan Endpoint (With Head Turn Liveness) ---
@@ -159,30 +186,33 @@ def calculate_head_turn(kps):
 class RecognitionRequest(BaseModel):
     image: str
 
-@app.post("/user/recognize")
+@app.post("/user/recognize", dependencies=[Depends(require_service_key)])
 async def recognize(request: RecognitionRequest):
+    """Matches a temporary frame against the known-face cache and returns ONLY the
+    matched user ID + biometric telemetry. Role, account status, and the access
+    decision are resolved by the Node backend from PostgreSQL — the database is
+    the source of truth, not this cache."""
     try:
         header, encoded = request.image.split(",", 1)
         data = base64.b64decode(encoded)
         nparr = np.frombuffer(data, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     except Exception as e:
-        return {"error": "Invalid image data"}
+        raise HTTPException(status_code=400, detail="Invalid image data")
 
     live_faces = face_app.get(img)
-    
+
     for face in live_faces:
-        best_name = "UNAUTHORIZED"
+        best_match = None
         highest_similarity = 0.0
         live_embedding = face.embedding / np.linalg.norm(face.embedding)
-        
+
         for known in known_faces:
-            sim = np.dot(live_embedding, known["embedding"])
+            sim = float(np.dot(live_embedding, known["embedding"]))
             if sim > highest_similarity:
-                highest_similarity = float(sim)
-                if sim > 0.45: 
-                    best_name = known["name"]
-        
+                highest_similarity = sim
+                best_match = known if sim > 0.45 else None
+
         bbox = face.bbox
         x = int(bbox[0])
         y = int(bbox[1])
@@ -192,21 +222,22 @@ async def recognize(request: RecognitionRequest):
         # 🎯 Calculate the Head Turn Ratio
         liveness_ratio = calculate_head_turn(face.kps)
 
-        # Return both the user, the box, and the 3D liveness ratio
+        # Name stays in the developer log only — never in the response.
+        if best_match:
+            print(f"Recognize: matched user #{best_match['user_id']} ({best_match['name']}) sim={highest_similarity:.3f}")
+
         return {
-            "user": {
-                "name": best_name,
-                "status": "AUTHORIZED" if best_name != "UNAUTHORIZED" else "DENIED",
-                "confidence": round(highest_similarity, 4)
-            },
+            "matchedUserId": best_match["user_id"] if best_match else None,
+            "confidence": round(highest_similarity, 4),
             "box": [x, y, width, height],
-            "liveness_ratio": liveness_ratio 
+            "liveness_ratio": liveness_ratio,
+            "faceDetected": True
         }
-        
-    return {"user": None, "box": None, "liveness_ratio": 0.5}
+
+    return {"matchedUserId": None, "confidence": 0.0, "box": None, "liveness_ratio": 0.5, "faceDetected": False}
 
 # Helper to refresh the list manually if a new staff joins
-@app.get("/refresh")
+@app.get("/refresh", dependencies=[Depends(require_service_key)])
 def refresh():
     load_authorized_faces()
     return {"message": "Staff list updated from database"}

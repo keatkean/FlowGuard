@@ -5,7 +5,7 @@ const { Op } = require('sequelize');
 
 // 🎯 IMPORT YOUR AUTH MIDDLEWARE HERE
 // (Change this path/name if your project uses a different filename like verifyToken.js)
-const { verifyToken } = require('../middlewares/auth'); 
+const { verifyToken, verifyServiceOrRole } = require('../middlewares/auth');
 
 // 1. GET Route: Fetch attendance log data dynamically based on RBAC
 // URL: GET /api/attendance/logs
@@ -65,18 +65,28 @@ router.get('/logs', verifyToken, async (req, res) => {
 
 // 2. POST Route: Automatic IoT Clock-In / Clock-Out Trigger
 // URL: POST /api/attendance/scan
-// (This remains public/unprotected because it is called autonomously by the camera engine)
-router.post('/scan', async (req, res) => {
+// Secured: requires an authorised FM session (the Gate Scanner kiosk runs under
+// one) or the trusted AI/edge service key — never an unauthenticated request.
+// Identity comes from a server-verified unique userId (produced by the Node
+// facial-recognition route), NEVER from a client-submitted name: duplicate
+// names must not be able to select the wrong account.
+router.post('/scan', verifyServiceOrRole('FM'), async (req, res) => {
   try {
-    const { name } = req.body; 
+    const { userId: scannedUserId } = req.body;
 
-    if (!name) {
-      return res.status(400).json({ error: "Missing required parameter: name" });
+    if (scannedUserId == null || !Number.isInteger(Number(scannedUserId))) {
+      return res.status(400).json({ error: "Missing required parameter: userId" });
     }
 
-    const user = await User.findOne({ where: { name: name } });
+    const user = await User.findByPk(scannedUserId);
     if (!user) {
-      return res.status(404).json({ error: `User '${name}' not recognized in system registry.` });
+      return res.status(404).json({ error: "User not recognized in system registry." });
+    }
+    if (!user.isEnrolled) {
+      return res.status(403).json({ error: "User has no enrolled Face ID." });
+    }
+    if (!user.isActive) {
+      return res.status(403).json({ error: "Account suspended. Gate access denied." });
     }
 
     const userId = user.id;
@@ -129,10 +139,12 @@ router.post('/scan', async (req, res) => {
       }
     }
 
+    // Safe fields only — never the biometric template.
     return res.status(200).json({
       status: "SUCCESS",
       action: actionTaken,
       worker: user.name,
+      role: user.role,
       timestamp: finalLog.timestamp,
       openTurnstile: true
     });

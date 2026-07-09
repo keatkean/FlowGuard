@@ -6,10 +6,11 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Temporarily open CORS to allow phone/local-network testing.
-app.use(cors({
-    origin: '*'
-}));
+// Environment-based CORS allowlist (CLIENT_URL + ALLOWED_ORIGINS). When no
+// origins are configured it falls back to allow-all for local/LAN development —
+// configure CLIENT_URL (and optionally ALLOWED_ORIGINS) for any deployment.
+const { buildCorsOptions } = require('./middlewares/corsOptions');
+app.use(cors(buildCorsOptions()));
 
 // Simple Route
 app.get("/", (req, res) => {
@@ -33,6 +34,8 @@ const securityRoutes = require('./routes/security');
 app.use('/api/security', securityRoutes);
 const attendanceRoutes = require('./routes/attendance');
 app.use('/api/attendance', attendanceRoutes);
+const facialRecognitionRoutes = require('./routes/facialRecognition');
+app.use('/api/facial-recognition', facialRecognitionRoutes);
 const supportRoutes = require('./routes/support');
 app.use('/api/support', supportRoutes);
 

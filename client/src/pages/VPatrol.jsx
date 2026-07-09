@@ -10,6 +10,17 @@ import {
   isPiCameraReachable,
   fetchPiSnapshotBitmap,
 } from '../constants/piCamera';
+import { API_BASE_URL } from '../constants/api';
+import { describeRecognitionSubject, RECOGNITION_STATUS } from '../constants/recognition';
+import { formatSingaporeTimestamp, formatSingaporeFull } from '../constants/datetime';
+import {
+  deriveAccessResult,
+  getLogTimestamp,
+  filterSecurityLogs,
+  hasActiveFilters,
+  DATE_FILTERS,
+  EVENT_FILTERS,
+} from '../constants/securityTimeline';
 
 const VPatrol = () => {
   const videoRef = useRef(null);
@@ -43,8 +54,16 @@ const VPatrol = () => {
 
   const [incidentLogs, setIncidentLogs] = useState([]);
 
+  // Compact timeline filters (frontend-only filtering of the loaded records).
+  const [dateFilter, setDateFilter] = useState('all');
+  const [eventFilter, setEventFilter] = useState('all');
+  const [searchFilter, setSearchFilter] = useState('');
+
   const token = localStorage.getItem("accessToken");
-  const NODE_SERVER_URL = "/api/security/logs";
+  // All recognition traffic goes through the Node backend — never FastAPI directly.
+  const NODE_SERVER_URL = `${API_BASE_URL}/api/security/logs`;
+  const RECOGNIZE_URL = `${API_BASE_URL}/api/facial-recognition/recognize`;
+  const CAMERA_LOCATION = "Biometric Gantry";
 
   const changeScanState = (nextState) => {
     setScanStatus(nextState);
@@ -60,12 +79,12 @@ const VPatrol = () => {
         if (res.data && res.data.length > 0) {
           setIncidentLogs(res.data);
         } else {
-          setIncidentLogs([{ id: 'SYS-001', time: new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }), type: 'System Online', desc: 'Biometric sensors initialized.', severity: 'safe', icon: '✅' }]);
+          setIncidentLogs([{ id: 'SYS-001', occurredAt: new Date().toISOString(), type: 'System Online', desc: 'Biometric sensors initialized.', severity: 'safe', icon: '✅' }]);
         }
       })
       .catch(err => {
         console.error("Database connection waiting...", err);
-        setIncidentLogs([{ id: 'SYS-001', time: new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }), type: 'System Offline', desc: 'Cannot connect to security database.', severity: 'critical', icon: '⚠️' }]);
+        setIncidentLogs([{ id: 'SYS-001', occurredAt: new Date().toISOString(), type: 'System Offline', desc: 'Cannot connect to security database.', severity: 'critical', icon: '⚠️' }]);
       });
 
     const clockInterval = setInterval(() => {
@@ -169,29 +188,35 @@ const VPatrol = () => {
     audio.play().catch(() => console.log("Audio waiting for user gesture"));
   };
 
-  const grantFinalAccess = (detectedName) => {
+  const grantFinalAccess = (verifiedUser) => {
+    const subject = describeRecognitionSubject(verifiedUser);
     playFeedback('success');
     changeScanState("SECURE_MATCH");
-    setIdentifiedUser(detectedName);
+    setIdentifiedUser(subject.identityLabel);
     setScanProgress(100);
-    
-    const currentTimestamp = Date.now();
-    const logTimeStr = new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 
-    if (lastLogRef.current.name !== detectedName || (currentTimestamp - lastLogRef.current.timestamp > 30000)) {
+    const currentTimestamp = Date.now();
+
+    if (lastLogRef.current.name !== verifiedUser.name || (currentTimestamp - lastLogRef.current.timestamp > 30000)) {
       const newLog = {
         id: `ACC-${Date.now()}`,
-        time: logTimeStr,
+        // This is a NEW event happening right now — stamping it is correct.
+        // `time` stays for the backend write; `occurredAt` drives the display.
+        occurredAt: new Date(currentTimestamp).toISOString(),
+        time: new Date(currentTimestamp).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }),
         type: 'Gantry Access',
-        desc: `Identity & Liveness Verified: ${detectedName}`,
+        desc: `Identity & Liveness Verified: ${subject.identityLabel}`,
         severity: 'safe',
         icon: '🔓',
-        personnelName: detectedName 
+        personnelName: verifiedUser.name,
+        role: verifiedUser.role,
+        confidence: verifiedUser.confidence,
+        cameraLocation: CAMERA_LOCATION
       };
-      
-      setIncidentLogs(prev => [newLog, ...prev.slice(0, 14)]); 
-      lastLogRef.current = { name: detectedName, timestamp: currentTimestamp };
-      
+
+      setIncidentLogs(prev => [newLog, ...prev.slice(0, 14)]);
+      lastLogRef.current = { name: verifiedUser.name, timestamp: currentTimestamp };
+
       axios.post(NODE_SERVER_URL, newLog, { headers: { Authorization: `Bearer ${token}` } })
         .catch(e => console.log("DB Save Failed", e));
     }
@@ -250,8 +275,8 @@ const VPatrol = () => {
     try {
       const imageBase64 = await captureFrameBase64();
       if (!imageBase64) return;
-      const res = await axios.post('/ai/user/recognize', 
-        { image: imageBase64 }, 
+      const res = await axios.post(RECOGNIZE_URL,
+        { image: imageBase64, cameraLocation: CAMERA_LOCATION },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -327,31 +352,42 @@ const VPatrol = () => {
             const currentTimestamp = Date.now();
             const logTimeStr = new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 
-            if (res.data.user && res.data.user.name !== "UNAUTHORIZED") {
-              candidateUserRef.current = res.data.user.name;
+            const recognizedUser = res.data.user;
+            if (recognizedUser && recognizedUser.status === RECOGNITION_STATUS.AUTHORIZED) {
+              candidateUserRef.current = recognizedUser;
               changeScanState("LIVENESS_CHECK");
             } else {
+              // Suspended or unknown — the Node backend has already written the
+              // deduplicated SecurityLog; the client only updates its local timeline.
+              const isSuspended = recognizedUser && recognizedUser.status === RECOGNITION_STATUS.SUSPENDED;
+              const subject = describeRecognitionSubject(recognizedUser);
+
               playFeedback('denied');
               changeScanState("UNKNOWN_QUERY");
-              setIdentifiedUser("UNKNOWN PERSONNEL");
+              setIdentifiedUser(isSuspended ? `${subject.identityLabel} — SUSPENDED` : "UNKNOWN PERSONNEL");
               setScanProgress(0);
 
-              if (lastLogRef.current.name !== "UNKNOWN" || (currentTimestamp - lastLogRef.current.timestamp > 10000)) {
+              const dedupName = isSuspended ? recognizedUser.name : "UNKNOWN";
+              if (lastLogRef.current.name !== dedupName || (currentTimestamp - lastLogRef.current.timestamp > 10000)) {
                 const newLog = {
                   id: `SEC-${Date.now()}`,
+                  // New event happening right now — stamped at detection time.
+                  occurredAt: new Date(currentTimestamp).toISOString(),
                   time: logTimeStr,
-                  type: 'Intrusion Alert',
-                  desc: 'Unregistered personnel detected at gantry.',
+                  type: isSuspended ? 'Suspended Access Attempt' : 'Intrusion Alert',
+                  desc: isSuspended
+                    ? `Suspended account denied at gantry: ${subject.identityLabel}.`
+                    : 'Unregistered personnel detected at gantry.',
                   severity: 'critical',
-                  icon: '🚨',
-                  personnelName: null
+                  icon: isSuspended ? '⛔' : '🚨',
+                  personnelName: isSuspended ? recognizedUser.name : null,
+                  role: isSuspended ? recognizedUser.role : null,
+                  confidence: recognizedUser ? recognizedUser.confidence : null,
+                  cameraLocation: CAMERA_LOCATION
                 };
 
                 setIncidentLogs(prev => [newLog, ...prev.slice(0, 14)]);
-                lastLogRef.current = { name: "UNKNOWN", timestamp: currentTimestamp };
-                
-                axios.post(NODE_SERVER_URL, newLog, { headers: { Authorization: `Bearer ${token}` } })
-                  .catch(e => console.log("DB Save Failed", e));
+                lastLogRef.current = { name: dedupName, timestamp: currentTimestamp };
               }
 
               setTimeout(() => { resetScanner(); }, 3500);
@@ -373,6 +409,10 @@ const VPatrol = () => {
       isScanningRef.current = false; 
     }
   };
+
+  // Frontend filtering of the loaded timeline records (PoC).
+  const activeFilters = { dateRange: dateFilter, eventType: eventFilter, search: searchFilter };
+  const filteredLogs = filterSecurityLogs(incidentLogs, activeFilters);
 
   const resetScanner = () => {
     setIdentifiedUser(null);
@@ -526,23 +566,96 @@ const VPatrol = () => {
             <div className="section-header">
               <h2>Security Timeline</h2>
             </div>
-            
+
+            {/* Compact filter row — dropdowns + search, frontend filtering only */}
+            <div className="timeline-filters">
+              <select
+                className="timeline-filter"
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+                aria-label="Filter by date"
+              >
+                {DATE_FILTERS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+              </select>
+              <select
+                className="timeline-filter"
+                value={eventFilter}
+                onChange={(e) => setEventFilter(e.target.value)}
+                aria-label="Filter by event type"
+              >
+                {EVENT_FILTERS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+              </select>
+              <input
+                type="text"
+                className="timeline-filter timeline-search"
+                placeholder="Search name / role / location…"
+                value={searchFilter}
+                onChange={(e) => setSearchFilter(e.target.value)}
+                aria-label="Search timeline"
+              />
+              {hasActiveFilters(activeFilters) && (
+                <button
+                  type="button"
+                  className="timeline-clear-btn"
+                  onClick={() => { setDateFilter('all'); setEventFilter('all'); setSearchFilter(''); }}
+                >
+                  Clear Filters
+                </button>
+              )}
+            </div>
+
             <div className="vpatrol-list">
-              {incidentLogs.length > 0 ? incidentLogs.map((log) => (
-                <div key={log.id} className={`vpatrol-item ${log.severity}`}>
-                  <div className="item-header">
-                    <span className="item-id">#{log.id}</span>
-                    <span className="item-type-timestamp">{log.time}</span>
-                  </div>
-                  <div className="item-body">
-                    <div className="item-icon">{log.icon}</div>
-                    <div className="item-text">
-                      <h4>{log.type}</h4>
-                      <p>{log.desc}</p>
+              {incidentLogs.length === 0 ? (
+                <p>Initializing security sensors...</p>
+              ) : filteredLogs.length === 0 ? (
+                <div className="timeline-empty">
+                  <p>No security events match the current filters.</p>
+                  <button
+                    type="button"
+                    className="timeline-clear-btn"
+                    onClick={() => { setDateFilter('all'); setEventFilter('all'); setSearchFilter(''); }}
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+              ) : filteredLogs.map((log) => {
+                const accessResult = deriveAccessResult(log);
+                const timestamp = getLogTimestamp(log);
+                const timeLabel = formatSingaporeTimestamp(timestamp) || log.time || '—';
+                const confidencePct = typeof log.confidence === 'number'
+                  ? `${Math.round(log.confidence * 100)}%` : null;
+                return (
+                  <div key={log.id} className={`vpatrol-item ${log.severity}`}>
+                    {/* Primary: event, person, outcome */}
+                    <div className="item-body">
+                      <div className="item-icon">{log.icon}</div>
+                      <div className="item-text">
+                        <div className="item-title-row">
+                          <h4>{log.type}</h4>
+                          <span className={`access-result-badge result-${accessResult.toLowerCase()}`}>
+                            {accessResult}
+                          </span>
+                        </div>
+                        <p className="item-person">
+                          {log.personnelName || 'Unknown Person'}
+                          {log.role ? <span className="item-role"> • {log.role}</span> : null}
+                        </p>
+                        <p className="item-meta" title={formatSingaporeFull(timestamp) || undefined}>
+                          🕒 {timeLabel}
+                          {confidencePct ? ` • ${confidencePct} confidence` : ''}
+                          {log.cameraLocation ? ` • 📍 ${log.cameraLocation}` : ''}
+                        </p>
+                        <p className="item-desc">{log.desc}</p>
+                      </div>
+                    </div>
+                    {/* Secondary: muted UUID + review status */}
+                    <div className="item-footer-muted">
+                      <span className="item-id-muted">#{log.id}</span>
+                      {log.reviewStatus ? <span className="item-review-status">{log.reviewStatus}</span> : null}
                     </div>
                   </div>
-                </div>
-              )) : <p>Initializing security sensors...</p>}
+                );
+              })}
             </div>
           </div>
         </div>

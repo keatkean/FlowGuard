@@ -54,20 +54,37 @@ Both pages have a **Camera Source** bar:
 
 - **Pi source**: each scan tick fetches `/snapshot`, decodes the JPEG blob into
   an `ImageBitmap`, draws it onto the existing hidden capture canvas (scaled to
-  ≤420 px wide), and sends the same compressed base64 JPEG to the existing
-  `/ai/user/recognize` API. Because the bitmap is blob-backed the canvas is not
-  tainted. Three consecutive snapshot failures trigger automatic fallback to
-  the webcam.
+  ≤420 px wide), and sends the compressed base64 JPEG to the **Node backend**
+  (`POST /api/facial-recognition/recognize`). Because the bitmap is blob-backed
+  the canvas is not tainted. Three consecutive snapshot failures trigger
+  automatic fallback to the webcam.
 - **Webcam source**: unchanged — the original `<video>` → canvas → base64 flow.
 
-All downstream logic (face box overlay, liveness check, attendance clock-in via
-`/api/attendance/scan`, security logs via `/api/security/logs`) is source-agnostic
-because both paths produce the same canvas-scaled base64 frame.
+The frontend never calls the FastAPI AI service directly: Node forwards the
+temporary frame to FastAPI with a service key, resolves the matched User ID
+against PostgreSQL (role, `isActive`, `isEnrolled`), and returns only safe
+fields (`id`, `name`, `role`, `status`, `confidence`). See
+`facial-recognition-api-and-security.md` for the full contract. All downstream
+logic (face box overlay, liveness check, attendance clock-in via
+`/api/attendance/scan` with the verified `userId`) is source-agnostic because
+both paths produce the same canvas-scaled base64 frame.
+
+## Local PoC vs production direction
+
+- **Local PoC**: Pi live preview (`<img>` MJPEG) + `/snapshot` capture on the
+  browser kiosk, laptop webcam fallback, all services on the demo LAN.
+- **Deployment**: Vercel frontend → cloud Node backend (`VITE_API_BASE_URL`) →
+  secured FastAPI (`FACE_AI_URL` + `X-AI-Service-Key`) → PostgreSQL.
+- **Production direction**: the Pi edge node posts temporary frames directly to
+  `POST /api/facial-recognition/recognize` using the `x-edge-token`
+  (`EDGE_SERVICE_TOKEN`) — raw camera feeds and biometric templates are never
+  publicly exposed.
 
 ## Privacy
 
 - **Raw face frames are only processed temporarily** — each captured frame is
-  sent to the AI service for matching and is not persisted by the client.
+  sent through the Node backend to the AI service for matching and is not
+  persisted anywhere.
 - The app stores the **recognition result**, **confidence**, and the
   **attendance/security log** entry. Enrollment stores a **protected biometric
   template** server-side.

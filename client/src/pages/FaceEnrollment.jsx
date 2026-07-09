@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import '../css/Enrollment.css';
+import { API_BASE_URL } from '../constants/api';
 
 const FaceEnrollment = () => {
   const videoRef = useRef(null);
@@ -126,8 +127,10 @@ const FaceEnrollment = () => {
     setErrorMessage(null); // Clear any previous errors
 
     try {
-      // 🛑 THE FIX: Change to relative path so it uses the Vite Proxy
-      await axios.post('/user/enroll-face', {
+      // Relative path uses the Vite proxy locally; VITE_API_BASE_URL targets the
+      // deployed Node backend in production. Photos exist only in memory here —
+      // the backend converts them to a protected biometric template and discards them.
+      await axios.post(`${API_BASE_URL}/user/enroll-face`, {
         images: photos,
         targetUserId: targetUserId ? Number(targetUserId) : undefined
       }, {

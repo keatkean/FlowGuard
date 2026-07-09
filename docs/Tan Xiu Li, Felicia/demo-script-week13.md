@@ -19,6 +19,9 @@ cd ai-service && uvicorn main:app --host 0.0.0.0 --port 8501 --reload
   is up (e.g. `http://<pi-address>:8081/video_feed` in a browser). Set
   `VITE_PI_CAMERA_STREAM_URL` / `VITE_PI_CAMERA_SNAPSHOT_URL` in `client/.env` if the Pi's
   IP changed on the demo network.
+- **Service key**: set the SAME `AI_SERVICE_KEY` dev value (e.g. `dev-local-ai-key`) in
+  `server/.env` and `ai-service/.env` — the face endpoints are now service-key protected
+  and recognition goes browser → Node → FastAPI (never browser → FastAPI).
 
 ## 1. Open + log in as FM
 - Visit `http://localhost:5173`, log in as the FM admin.
@@ -35,6 +38,12 @@ cd ai-service && uvicorn main:app --host 0.0.0.0 --port 8501 --reload
   webcam is the fallback for demo reliability.
 - Privacy talking point: raw face frames are only processed temporarily; the app stores the
   **recognition result, confidence, and attendance/security log** — never exposed biometric vectors.
+- Security talking point: recognition matches by **unique User ID**; PostgreSQL — not the AI
+  cache — decides name, role and account status. Suspend a user (User Management), scan again →
+  "**ACCESS DENIED — ACCOUNT SUSPENDED**" and an automatic `Suspended Access Attempt` security
+  log (deduplicated, 30 s cooldown). An unknown face → automatic `Intrusion Alert` log.
+  `/api/attendance/scan` is authenticated and takes the server-verified `userId` — a public
+  `{ name }` POST no longer works.
 - **Security Review** — filter Pending Review, set a status + note (FM-only review workflow).
 - **User Management → Logs** — show a user's access history; mention PDPA off-board (wipes face vector, anonymises logs).
 

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import * as QRLib from "react-qr-code";
 import "../css/DriverPass.css";
+import { API_BASE_URL } from "../constants/api";
 
 // Resolve the QR component across CJS/ESM interop shapes. Under Vite/React 19 the
 // CommonJS module can be wrapped so `QRLib.default` is the module object (an object,
@@ -45,7 +46,8 @@ const DriverPass = () => {
         if (!ref) { setNotFound(true); setLoading(false); return; }
         const fetchBooking = async () => {
             try {
-                const res = await fetch(`/api/bookings/${encodeURIComponent(ref)}`);
+                // Public pass — works on Vercel via VITE_API_BASE_URL (blank locally → Vite proxy).
+                const res = await fetch(`${API_BASE_URL}/api/bookings/${encodeURIComponent(ref)}`);
                 const payload = await res.json().catch(() => null);
                 // Support both shapes: a direct booking object OR a { booking } envelope.
                 const loadedBooking = payload && (payload.booking || payload);

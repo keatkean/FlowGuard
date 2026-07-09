@@ -10,6 +10,8 @@ import {
   isPiCameraReachable,
   fetchPiSnapshotBitmap,
 } from '../constants/piCamera';
+import { API_BASE_URL } from '../constants/api';
+import { describeRecognitionSubject, RECOGNITION_STATUS } from '../constants/recognition';
 
 const GateScanner = () => {
   const videoRef = useRef(null);
@@ -23,6 +25,10 @@ const GateScanner = () => {
   // Camera source: Raspberry Pi Gate Camera is primary, laptop webcam is fallback
   const [cameraSource, setCameraSource] = useState(CAMERA_SOURCES.PI);
   const [cameraStatusMsg, setCameraStatusMsg] = useState("Connecting to Pi Gate Camera...");
+
+  // Last gate decision — safe display fields only (never biometric data).
+  // { identityLabel, accountState, accessLabel, action }
+  const [lastDecision, setLastDecision] = useState(null);
   const cameraSourceRef = useRef(CAMERA_SOURCES.PI);
   const piFailStreakRef = useRef(0);
 
@@ -33,7 +39,10 @@ const GateScanner = () => {
   const isScanningRef = useRef(false);
 
   const token = localStorage.getItem("accessToken");
-  const ATTENDANCE_SCAN_URL = "/api/attendance/scan";
+  // All recognition traffic goes through the Node backend — never FastAPI directly.
+  const ATTENDANCE_SCAN_URL = `${API_BASE_URL}/api/attendance/scan`;
+  const RECOGNIZE_URL = `${API_BASE_URL}/api/facial-recognition/recognize`;
+  const CAMERA_LOCATION = "South Entrance Turnstile";
 
   const changeScanState = (nextState, message) => {
     setScanStatus(nextState);
@@ -125,24 +134,38 @@ const GateScanner = () => {
     }
   };
 
-  const processAttendanceTransaction = async (verifiedName) => {
-    changeScanState("SECURE_MATCH", "IDENTITY VERIFIED // PROCESSING TIMECARD");
+  const processAttendanceTransaction = async (verifiedUser) => {
+    const subject = describeRecognitionSubject(verifiedUser);
+    changeScanState("SECURE_MATCH", `IDENTITY VERIFIED: ${subject.identityLabel}`);
     setScanProgress(100);
 
     try {
-      // 🎯 Hit the Node.js automatic clock-in/out controller
-      const res = await axios.post(ATTENDANCE_SCAN_URL, { name: verifiedName }, {
+      // 🎯 Hit the Node.js automatic clock-in/out controller with the
+      // server-verified unique user ID — never a name.
+      const res = await axios.post(ATTENDANCE_SCAN_URL, { userId: verifiedUser.id }, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
       if (res.data && res.data.action) {
         // Render the exact system response action directly onto the kiosk screen
         const actionMessage = res.data.action.replace(/_/g, " ");
-        setDisplayMessage(`🔓 ${verifiedName}: ${actionMessage}`);
+        setDisplayMessage(`🔓 ${subject.identityLabel} — ${actionMessage}`);
+        setLastDecision({
+          identityLabel: subject.identityLabel,
+          accountState: 'Active',
+          accessLabel: 'Access Granted',
+          action: `Attendance recorded (${actionMessage.toLowerCase()})`
+        });
       }
     } catch (err) {
       console.error("Attendance Sync Failed:", err);
       setDisplayMessage("🚨 GATE TRANSACTION ROUTING FAULT");
+      setLastDecision({
+        identityLabel: subject.identityLabel,
+        accountState: 'Active',
+        accessLabel: 'Access Granted',
+        action: 'Attendance sync failed — retry at the gate'
+      });
     }
 
     setTimeout(() => { resetTurnstileKiosk(); }, 4000);
@@ -199,7 +222,10 @@ const GateScanner = () => {
     try {
       const imageBase64 = await captureFrameBase64();
       if (!imageBase64) return;
-      const res = await axios.post('/ai/user/recognize', { image: imageBase64 }, {
+      const res = await axios.post(RECOGNIZE_URL, {
+        image: imageBase64,
+        cameraLocation: CAMERA_LOCATION
+      }, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -250,11 +276,31 @@ const GateScanner = () => {
           lockTimerRef.current = setTimeout(() => {
             clearInterval(progressIntervalRef.current);
 
-            if (res.data.user && res.data.user.name !== "UNAUTHORIZED") {
-              candidateUserRef.current = res.data.user.name;
+            const recognizedUser = res.data.user;
+            if (recognizedUser && recognizedUser.status === RECOGNITION_STATUS.AUTHORIZED) {
+              candidateUserRef.current = recognizedUser;
               changeScanState("LIVENESS_CHECK", "VERIFYING LIVENESS: TURN HEAD SLIGHTLY");
+            } else if (recognizedUser && recognizedUser.status === RECOGNITION_STATUS.SUSPENDED) {
+              // Server already denied access and wrote the security log.
+              const subject = describeRecognitionSubject(recognizedUser);
+              changeScanState("UNKNOWN_QUERY", `⛔ ${subject.identityLabel} — ${subject.accessLabel}`);
+              setLastDecision({
+                identityLabel: subject.identityLabel,
+                accountState: 'Suspended',
+                accessLabel: 'Access Denied',
+                action: 'Security log created'
+              });
+              setScanProgress(0);
+              setTimeout(() => { resetTurnstileKiosk(); }, 3500);
             } else {
+              // Unknown person — server already wrote the intrusion log.
               changeScanState("UNKNOWN_QUERY", "🚨 PERIMETER BREACH: ACCESS DENIED");
+              setLastDecision({
+                identityLabel: describeRecognitionSubject(recognizedUser).identityLabel,
+                accountState: 'Unknown',
+                accessLabel: 'Access Denied',
+                action: 'Security log created'
+              });
               setScanProgress(0);
               setTimeout(() => { resetTurnstileKiosk(); }, 3500);
             }
@@ -315,6 +361,33 @@ const GateScanner = () => {
             Laptop Webcam
           </button>
           <span style={{ color: '#38bdf8', fontSize: '0.82rem' }}>{cameraStatusMsg}</span>
+        </div>
+
+        {/* Last gate decision — safe recognition fields only */}
+        <div
+          className="gate-decision-panel"
+          style={{
+            display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap',
+            background: '#0b0f1a', border: '1px solid #2d364f', borderRadius: 10,
+            padding: '10px 14px', marginBottom: '12px', fontSize: '0.82rem'
+          }}
+        >
+          <span style={{ color: '#94a3b8', fontWeight: 600 }}>Last Decision:</span>
+          {lastDecision ? (
+            <>
+              <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{lastDecision.identityLabel}</span>
+              <span style={{ color: '#94a3b8' }}>Status: {lastDecision.accountState}</span>
+              <span style={{
+                fontWeight: 700,
+                color: lastDecision.accessLabel === 'Access Granted' ? '#10b981' : '#ef4444'
+              }}>
+                {lastDecision.accessLabel}
+              </span>
+              <span style={{ color: '#94a3b8' }}>Action: {lastDecision.action}</span>
+            </>
+          ) : (
+            <span style={{ color: '#707a91' }}>No face detected — awaiting scan</span>
+          )}
         </div>
 
         <div className="vpatrol-grid" style={{ gridTemplateColumns: '1fr' }}>
