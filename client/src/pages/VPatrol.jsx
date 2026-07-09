@@ -74,7 +74,9 @@ const VPatrol = () => {
   // All recognition traffic goes through the Node backend — never FastAPI directly.
   const NODE_SERVER_URL = `${API_BASE_URL}/api/security/logs`;
   const RECOGNIZE_URL = `${API_BASE_URL}/api/facial-recognition/recognize`;
-  const ATTENDANCE_SCAN_URL = `${API_BASE_URL}/api/attendance/scan`;
+  // V-Patrol is a monitoring post: it records access AUDIT events only and must
+  // never toggle clock-in/out (that belongs to the Gate Scanner's scan endpoint).
+  const ACCESS_EVENT_URL = `${API_BASE_URL}/api/facial-recognition/access-event`;
   const CAMERA_LOCATION = "Biometric Gantry";
 
   const changeScanState = (nextState) => {
@@ -230,13 +232,13 @@ const VPatrol = () => {
       setIncidentLogs(prev => [newLog, ...prev.slice(0, 14)]);
       lastLogRef.current = { name: verifiedUser.name, timestamp: currentTimestamp };
 
-      // Server-owned audit: the verified attendance scan records attendance AND
-      // writes the deduplicated safe access log (non-fatal for the UI).
-      axios.post(ATTENDANCE_SCAN_URL, {
+      // Server-owned audit: records the deduplicated safe access log WITHOUT
+      // touching attendance (no clock-in/out from V-Patrol). Non-fatal for the UI.
+      axios.post(ACCESS_EVENT_URL, {
         userId: verifiedUser.id,
         cameraLocation: CAMERA_LOCATION
       }, { headers: { Authorization: `Bearer ${token}` } })
-        .catch(e => console.log("Attendance/audit sync failed", e));
+        .catch(e => console.log("Access-event sync failed", e));
     }
 
     setTimeout(() => { resetScanner(); }, 3500);

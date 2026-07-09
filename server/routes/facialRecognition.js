@@ -24,6 +24,59 @@ const allowFMOrEdgeService = (req, res, next) => {
   return verifyToken(req, res, () => requireRole('FM')(req, res, next));
 };
 
+// POST /api/facial-recognition/access-event
+// V-Patrol monitoring: records a server-owned SAFE access audit event for a
+// verified (recognised + liveness-passed) active user WITHOUT touching
+// attendance — V-Patrol must never toggle clock-in/out; that is the Gate
+// Scanner's job via /api/attendance/scan. Deduplicated server-side.
+router.post('/access-event', allowFMOrEdgeService, async (req, res) => {
+  try {
+    const { userId, cameraLocation } = req.body;
+    if (userId == null || !Number.isInteger(Number(userId))) {
+      return res.status(400).json({ error: 'Missing required parameter: userId' });
+    }
+    const location = typeof cameraLocation === 'string' && cameraLocation.trim()
+      ? cameraLocation.trim().slice(0, 100)
+      : 'Biometric Gantry';
+
+    const user = await User.findByPk(userId, {
+      attributes: ['id', 'name', 'role', 'isActive', 'isEnrolled']
+    });
+    if (!user || !user.isEnrolled) {
+      return res.status(404).json({ error: 'User not recognized in system registry.' });
+    }
+    if (!user.isActive) {
+      return res.status(403).json({ error: 'Account suspended. Access event not recorded as granted.' });
+    }
+
+    // Same dedup namespace as the attendance scan, so a person passing both the
+    // gantry and the turnstile within the cooldown yields ONE safe log, not two.
+    let logged = false;
+    if (shouldWriteLog(`granted:${user.id}:${location}`)) {
+      logged = await createSecurityLog({
+        type: 'Gantry Access',
+        desc: `Identity & liveness verified: ${user.name} (${user.role}) at ${location}.`,
+        severity: 'safe',
+        icon: '🔓',
+        personnelName: user.name,
+        matchedUserId: user.id,
+        cameraLocation: location
+      });
+    }
+
+    // Safe fields only — never the biometric template.
+    return res.status(200).json({
+      status: 'SUCCESS',
+      logged,
+      worker: user.name,
+      role: user.role
+    });
+  } catch (err) {
+    console.error('Access-event error:', err);
+    return res.status(500).json({ error: 'Could not record access event.' });
+  }
+});
+
 // POST /api/facial-recognition/recognize
 // Frontend (Gate Scanner / V-Patrol) → Node → FastAPI → Node resolves the User
 // record from PostgreSQL → safe recognition result. The DB — not the AI cache —

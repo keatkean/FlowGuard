@@ -1,5 +1,7 @@
 // Frontend tests — V-Patrol Security Timeline cards and compact filters.
 import React from "react";
+import fs from "node:fs";
+import path from "node:path";
 import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -91,6 +93,16 @@ describe("V-Patrol Security Timeline cards", () => {
     // The UUID must not appear in the primary title area.
     const titles = [...container.querySelectorAll(".item-text h4")].map((el) => el.textContent);
     expect(titles.join(" ")).not.toMatch(/3f0a1c2e/);
+  });
+});
+
+describe("V-Patrol attendance separation", () => {
+  test("V-Patrol never calls /api/attendance/scan — audit events only", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../src/pages/VPatrol.jsx"), "utf8"
+    );
+    expect(source).not.toMatch(/attendance\/scan/);
+    expect(source).toMatch(/facial-recognition\/access-event/);
   });
 });
 
