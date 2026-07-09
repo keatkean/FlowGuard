@@ -25,6 +25,36 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.STRING(255),
             allowNull: true
         },
+        alert_type: {
+            type: DataTypes.STRING(100),
+            allowNull: true
+        },
+        severity: {
+            type: DataTypes.ENUM('Low', 'Medium', 'High', 'Critical'),
+            allowNull: false,
+            defaultValue: 'High'
+        },
+        source: {
+            type: DataTypes.STRING(100),
+            allowNull: false,
+            defaultValue: 'Object Detection'
+        },
+        confidence: {
+            type: DataTypes.FLOAT,
+            allowNull: true
+        },
+        snapshot_url: {
+            type: DataTypes.STRING(500),
+            allowNull: true
+        },
+        device_id: {
+            type: DataTypes.STRING(100),
+            allowNull: true
+        },
+        occurred_at: {
+            type: DataTypes.DATE,
+            allowNull: true
+        },
         // Best-effort links resolved from zone_name/camera_location at alert-creation time.
         // Nullable — the AI engine's existing string-only payload keeps working unchanged.
         camera_id: {

@@ -18,6 +18,9 @@ const VIDEO_SOURCES = [
   { label: 'Main Gate', value: '/videos/entrance.mp4' },
   { label: 'Packaging', value: '/videos/packaging.mp4' },
 ];
+// Sentinel select value for a user-supplied HTTP/MJPEG stream (e.g. SecurePi on a Raspberry Pi).
+const CUSTOM_SOURCE = 'custom';
+const isHttpStreamUrl = (value) => /^https?:\/\//i.test(String(value || '').trim());
 
 const emptyCamera = {
   camera_code: '',
@@ -25,7 +28,8 @@ const emptyCamera = {
   location: '',
   zone_id: '',
   status: 'Online',
-  stream_url: VIDEO_SOURCES[0].value,
+  stream_source: VIDEO_SOURCES[0].value,
+  custom_stream_url: '',
   camera_type: '',
   notes: '',
 };
@@ -48,13 +52,13 @@ export default function CameraInventory() {
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const token = localStorage.getItem('accessToken');
   const headers = { Authorization: `Bearer ${token}` };
   const canEdit = localStorage.getItem('userRole') === ROLES.FM;
 
   const fetchCameras = useCallback(() => {
-    setLoading(true);
     axios.get(CAMERAS_URL, { headers })
       .then((res) => {
         setCameras(Array.isArray(res.data) ? res.data : []);
@@ -93,34 +97,44 @@ export default function CameraInventory() {
     setEditingId(null);
     setFormError('');
     setConfirmDeleteId(null);
+    setAdvancedOpen(false);
   };
 
   const startEdit = (cam) => {
+    const isPreset = VIDEO_SOURCES.some((source) => source.value === cam.stream_url);
     setForm({
       camera_code: cam.camera_code,
       camera_name: cam.camera_name,
       location: cam.location,
       zone_id: cam.zone_id || '',
       status: cam.status,
-      stream_url: cam.stream_url || VIDEO_SOURCES[0].value,
+      stream_source: isPreset || !cam.stream_url ? (cam.stream_url || VIDEO_SOURCES[0].value) : CUSTOM_SOURCE,
+      custom_stream_url: isPreset || !cam.stream_url ? '' : cam.stream_url,
       camera_type: cam.camera_type || '',
       notes: cam.notes || '',
     });
     setEditingId(cam.id);
     setFormError('');
     setConfirmDeleteId(null);
+    setAdvancedOpen(false);
   };
 
   const resetForm = () => {
     setForm(emptyCamera);
     setEditingId(null);
     setFormError('');
+    setAdvancedOpen(false);
   };
 
   const saveCamera = async (event) => {
     event.preventDefault();
     if (!form.camera_code.trim() || !form.camera_name.trim() || !form.location.trim()) {
       setFormError('Camera code, name, and location are required.');
+      return;
+    }
+    const isCustomSource = form.stream_source === CUSTOM_SOURCE;
+    if (isCustomSource && !isHttpStreamUrl(form.custom_stream_url)) {
+      setFormError('Custom stream URL must start with http:// or https:// (e.g. http://<pi-ip>:8001/video_feed).');
       return;
     }
 
@@ -130,7 +144,7 @@ export default function CameraInventory() {
       location: form.location.trim(),
       zone_id: form.zone_id || null,
       status: form.status,
-      stream_url: form.stream_url,
+      stream_url: isCustomSource ? form.custom_stream_url.trim() : form.stream_source,
       camera_type: form.camera_type.trim() || null,
       notes: form.notes.trim() || null,
     };
@@ -232,7 +246,7 @@ export default function CameraInventory() {
             <div className="camera-section-title">
               <div>
                 <h2>Camera Register</h2>
-                <p>{filteredCameras.length} cameras visible - edit records without disturbing monitoring.</p>
+                <p>{filteredCameras.length} cameras visible - camera CRUD only.</p>
               </div>
               <label className="camera-search compact">
                 <UiIcon name="search" />
@@ -302,14 +316,22 @@ export default function CameraInventory() {
               </div>
               <div className="camera-form-grid">
                 <label>Camera Code<input value={form.camera_code} onChange={(event) => setForm((prev) => ({ ...prev, camera_code: event.target.value }))} placeholder="CAM-07" /></label>
-                <label>Status<select value={form.status} onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value }))}>{CAMERA_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label>
                 <label className="wide">Camera Name<input value={form.camera_name} onChange={(event) => setForm((prev) => ({ ...prev, camera_name: event.target.value }))} placeholder="Dispatch Bay East" /></label>
                 <label className="wide">Location<input value={form.location} onChange={(event) => setForm((prev) => ({ ...prev, location: event.target.value }))} placeholder="Zone G - Dispatch" /></label>
-                <label>Zone<select value={form.zone_id} onChange={(event) => setForm((prev) => ({ ...prev, zone_id: event.target.value }))}><option value="">Unassigned</option>{zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.zone_name}</option>)}</select></label>
-                <label>Camera Type<input value={form.camera_type} onChange={(event) => setForm((prev) => ({ ...prev, camera_type: event.target.value }))} placeholder="Fixed / PTZ / Dome" /></label>
-                <label>Video Source<select value={form.stream_url} onChange={(event) => setForm((prev) => ({ ...prev, stream_url: event.target.value }))}>{VIDEO_SOURCES.map((source) => <option key={source.value} value={source.value}>{source.label}</option>)}</select></label>
-                <label className="wide">Notes<input value={form.notes} onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Optional maintenance or install notes" /></label>
+                <label>Assigned Zone<select value={form.zone_id} onChange={(event) => setForm((prev) => ({ ...prev, zone_id: event.target.value }))}><option value="">Unassigned</option>{zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.zone_name}</option>)}</select></label>
+                <label>Status<select value={form.status} onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value }))}>{CAMERA_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label>
+                <label>Video Source<select value={form.stream_source} onChange={(event) => setForm((prev) => ({ ...prev, stream_source: event.target.value }))}>{VIDEO_SOURCES.map((source) => <option key={source.value} value={source.value}>{source.label}</option>)}<option value={CUSTOM_SOURCE}>Custom hardware/MJPEG URL</option></select></label>
+                {form.stream_source === CUSTOM_SOURCE && (
+                  <label className="wide">Stream URL<input value={form.custom_stream_url} onChange={(event) => setForm((prev) => ({ ...prev, custom_stream_url: event.target.value }))} placeholder="http://<pi-ip>:8001/video_feed" /></label>
+                )}
               </div>
+              <details className="camera-advanced-details" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
+                <summary>Advanced details</summary>
+                <div className="camera-form-grid">
+                  <label>Camera Type<input value={form.camera_type} onChange={(event) => setForm((prev) => ({ ...prev, camera_type: event.target.value }))} placeholder="Fixed / PTZ / Dome" /></label>
+                  <label className="wide">Notes<input value={form.notes} onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Optional maintenance or install notes" /></label>
+                </div>
+              </details>
               <p className={`camera-form-error${formError ? '' : ' is-empty'}`}>{formError || ' '}</p>
               <button className="camera-primary-btn full" type="submit" disabled={saving}>
                 <UiIcon name="check" />

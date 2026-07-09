@@ -26,6 +26,8 @@ const camerasRoute = require('./routes/cameras');
 app.use("/api/cameras", camerasRoute);
 const detectionAlertsRoute = require('./routes/detectionAlerts');
 app.use("/api/detection-alerts", detectionAlertsRoute);
+const edgeDetectionAlertsRoute = require('./routes/edgeDetectionAlerts');
+app.use("/api/edge", edgeDetectionAlertsRoute);
 const userRoute = require('./routes/user');
 app.use("/user", userRoute);
 const bookingRoutes = require('./routes/booking');
@@ -85,6 +87,8 @@ async function startServer() {
         const port = resolvePort();
         const host = resolveHost();
         app.listen(port, host, () => {
+        let port = process.env.APP_PORT || 5001;
+        app.listen(port, '0.0.0.0', () => {
             console.log("--------------------------------------------------");
             console.log(`FlowGuard Server is FULLY READY on ${host}:${port}`);
             console.log("--------------------------------------------------");
