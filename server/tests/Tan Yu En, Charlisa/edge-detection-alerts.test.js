@@ -49,6 +49,21 @@ describe("POST /api/edge/detection-alerts", () => {
     expect(mockDetectionAlert.create).not.toHaveBeenCalled();
   });
 
+  test("returns 503 when EDGE_INGEST_TOKEN is not configured", async () => {
+    const saved = process.env.EDGE_INGEST_TOKEN;
+    delete process.env.EDGE_INGEST_TOKEN;
+    try {
+      const res = await request(app)
+        .post("/api/edge/detection-alerts")
+        .set("Authorization", "Bearer test-edge-token")
+        .send(securePiPayload);
+      expect(res.status).toBe(503);
+      expect(mockDetectionAlert.create).not.toHaveBeenCalled();
+    } finally {
+      process.env.EDGE_INGEST_TOKEN = saved;
+    }
+  });
+
   test("rejects wrong bearer token (401)", async () => {
     const res = await request(app)
       .post("/api/edge/detection-alerts")

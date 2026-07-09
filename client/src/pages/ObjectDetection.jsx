@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
+import { getHardwareStreamUrl, getHardwareHealthUrl } from '../utils/securepiStream';
 import '../css/Dashboard.css';
 import '../css/ObjectDetection.css';
 
@@ -104,6 +105,19 @@ const ObjectDetection = () => {
       });
   }, []);
 
+  const monitoredCamera = useMemo(
+    () => cameras.find((cam) => String(cam.id) === String(selectedCameraId)) || null,
+    [cameras, selectedCameraId]
+  );
+  const hardwareStreamUrl = useMemo(
+    () => getHardwareStreamUrl(monitoredCamera, SECUREPI_STREAM_URL),
+    [monitoredCamera]
+  );
+  const hardwareHealthUrl = useMemo(
+    () => getHardwareHealthUrl(hardwareStreamUrl, SECUREPI_HEALTH_URL),
+    [hardwareStreamUrl]
+  );
+
   useEffect(() => {
     fetchZones();
     fetchCameras();
@@ -126,6 +140,9 @@ const ObjectDetection = () => {
     const stopBrowserCamera = () => {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
+      }
+      if (videoRef.current && videoRef.current.srcObject) {
+        videoRef.current.srcObject = null;
       }
     };
 
@@ -227,11 +244,8 @@ const ObjectDetection = () => {
 
     const startHardwareStream = async () => {
       setBrowserCameraError(false);
-      setStreamError(false);
-      setCameraReady(false);
       setDetections([]);
       setDetectionActive(false);
-      setCameraStatus(SECUREPI_STREAM_URL ? 'connecting_securepi_edge' : 'securepi_stream_not_configured');
     };
 
     if (sourceMode === 'file') {
@@ -252,11 +266,20 @@ const ObjectDetection = () => {
     if (uploadedVideoUrl) URL.revokeObjectURL(uploadedVideoUrl);
   }, [uploadedVideoUrl]);
 
+  // Hardware connection state reacts to the selected inventory camera changing
+  // without restarting the browser-camera/uploaded-video effect above.
   useEffect(() => {
-    if (sourceMode !== 'hardware' || !SECUREPI_HEALTH_URL) return undefined;
+    if (sourceMode !== 'hardware') return;
+    setStreamError(false);
+    setCameraReady(false);
+    setCameraStatus(hardwareStreamUrl ? 'connecting_securepi_edge' : 'securepi_stream_not_configured');
+  }, [sourceMode, hardwareStreamUrl]);
+
+  useEffect(() => {
+    if (sourceMode !== 'hardware' || !hardwareHealthUrl) return undefined;
     let cancelled = false;
     const checkHealth = () => {
-      axios.get(SECUREPI_HEALTH_URL, { timeout: 3000 })
+      axios.get(hardwareHealthUrl, { timeout: 3000 })
         .then(() => {
           if (cancelled) return;
           setCameraStatus('securepi_edge_live');
@@ -274,7 +297,7 @@ const ObjectDetection = () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [sourceMode, hardwareReloadKey]);
+  }, [sourceMode, hardwareReloadKey, hardwareHealthUrl]);
 
   const handleUpdateAlertStatus = async (id, status) => {
     setAlertActionBusy(true);
@@ -327,7 +350,6 @@ const ObjectDetection = () => {
     if (!latestOpenAlert) return '';
     return alertTitle(latestOpenAlert);
   }, [latestOpenAlert]);
-  const monitoredCamera = cameras.find((cam) => String(cam.id) === String(selectedCameraId));
   const sourceTitle = sourceMode === 'hardware'
     ? 'SecurePi Edge Live'
     : sourceMode === 'file'
@@ -422,10 +444,7 @@ const ObjectDetection = () => {
               <button
                 type="button"
                 className={sourceMode === 'hardware' ? 'active' : ''}
-                onClick={() => {
-                  setSourceMode('hardware');
-                  setHardwareReloadKey((prev) => prev + 1);
-                }}
+                onClick={() => setSourceMode('hardware')}
               >
                 SecurePi Hardware
               </button>
@@ -453,9 +472,9 @@ const ObjectDetection = () => {
               <div className="od-stream-placeholder">
                 Select a video file to run object detection on uploaded footage
               </div>
-            ) : sourceMode === 'hardware' && !SECUREPI_STREAM_URL ? (
+            ) : sourceMode === 'hardware' && !hardwareStreamUrl ? (
               <div className="od-stream-placeholder">
-                Configure VITE_SECUREPI_STREAM_URL in client/.env.local to view the Raspberry Pi stream
+                SecurePi stream not configured - set an http:// stream URL on the selected camera in Camera Inventory, or VITE_SECUREPI_STREAM_URL in client/.env.local
               </div>
             ) : sourceMode === 'hardware' && streamError ? (
               <div className="od-stream-placeholder od-stream-placeholder-stack">
@@ -477,7 +496,9 @@ const ObjectDetection = () => {
                 {sourceMode === 'hardware' ? (
                   <img
                     key={hardwareReloadKey}
-                    src={`${SECUREPI_STREAM_URL}${SECUREPI_STREAM_URL.includes('?') ? '&' : '?'}t=${hardwareReloadKey}`}
+                    src={hardwareReloadKey > 0
+                      ? `${hardwareStreamUrl}${hardwareStreamUrl.includes('?') ? '&' : '?'}t=${hardwareReloadKey}`
+                      : hardwareStreamUrl}
                     className="od-stream-img"
                     alt="SecurePi live hardware camera"
                     onLoad={() => {
