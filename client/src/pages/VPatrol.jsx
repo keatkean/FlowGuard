@@ -2,11 +2,24 @@ import React, { useRef, useState, useEffect } from 'react';
 import axios from 'axios';
 import Sidebar from '../components/Sidebar';
 import '../css/Dashboard.css';
-import '../css/VPatrol.css'; 
+import '../css/VPatrol.css';
+import {
+  PI_CAMERA_STREAM_URL,
+  CAMERA_SOURCES,
+  CAMERA_STATUS_MESSAGES,
+  isPiCameraReachable,
+  fetchPiSnapshotBitmap,
+} from '../constants/piCamera';
 
 const VPatrol = () => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+
+  // Camera source: Raspberry Pi Gate Camera is primary, laptop webcam is fallback
+  const [cameraSource, setCameraSource] = useState(CAMERA_SOURCES.PI);
+  const [cameraStatusMsg, setCameraStatusMsg] = useState("Connecting to Pi Gate Camera...");
+  const cameraSourceRef = useRef(CAMERA_SOURCES.PI);
+  const piFailStreakRef = useRef(0);
   
   // Staged States: SYSTEM_ACTIVE, PRESENCE_DETECTED, TARGET_LOCKING, LIVENESS_CHECK, SECURE_MATCH, UNKNOWN_QUERY
   const [scanStatus, setScanStatus] = useState("SYSTEM_ACTIVE"); 
@@ -39,7 +52,7 @@ const VPatrol = () => {
   };
 
   useEffect(() => {
-    startCCTV();
+    initCameraSource();
 
     // FETCH PERMANENT LOGS ON LOAD
     axios.get(NODE_SERVER_URL, { headers: { Authorization: `Bearer ${token}` } })
@@ -73,6 +86,46 @@ const VPatrol = () => {
       if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
     };
   }, []);
+
+  const applyCameraSource = (source, statusMsg) => {
+    cameraSourceRef.current = source;
+    setCameraSource(source);
+    setCameraStatusMsg(statusMsg);
+    piFailStreakRef.current = 0;
+  };
+
+  // Primary source: Raspberry Pi Gate Camera. Probe the snapshot endpoint on
+  // load; if unreachable, automatically fall back to the laptop webcam.
+  const initCameraSource = async () => {
+    const piReachable = await isPiCameraReachable();
+    if (piReachable) {
+      stopCCTV();
+      applyCameraSource(CAMERA_SOURCES.PI, CAMERA_STATUS_MESSAGES.PI_CONNECTED);
+      changeScanState("SYSTEM_ACTIVE");
+    } else {
+      applyCameraSource(CAMERA_SOURCES.WEBCAM, CAMERA_STATUS_MESSAGES.PI_UNAVAILABLE);
+      await startCCTV();
+    }
+  };
+
+  // Manual camera source switch (Pi Gate Camera / Laptop Webcam)
+  const selectCameraSource = async (source) => {
+    if (source === cameraSourceRef.current) return;
+    if (source === CAMERA_SOURCES.PI) {
+      const piReachable = await isPiCameraReachable();
+      if (piReachable) {
+        stopCCTV();
+        applyCameraSource(CAMERA_SOURCES.PI, CAMERA_STATUS_MESSAGES.PI_CONNECTED);
+        changeScanState("SYSTEM_ACTIVE");
+      } else {
+        applyCameraSource(CAMERA_SOURCES.WEBCAM, CAMERA_STATUS_MESSAGES.PI_UNAVAILABLE);
+        await startCCTV();
+      }
+    } else {
+      applyCameraSource(CAMERA_SOURCES.WEBCAM, CAMERA_STATUS_MESSAGES.WEBCAM_ACTIVE);
+      await startCCTV();
+    }
+  };
 
   const startCCTV = async () => {
     // Guard: browser without camera API (insecure context / no webcam support)
@@ -146,34 +199,57 @@ const VPatrol = () => {
     setTimeout(() => { resetScanner(); }, 3500);
   };
 
-  const performLiveScan = async () => {
-    if (isScanningRef.current) return; 
+  // Capture one frame from the active camera source onto the hidden canvas
+  // and return it as a compressed JPEG data URL for the recognition API.
+  const captureFrameBase64 = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const context = canvas.getContext('2d');
+    const MAX_WIDTH = 420;
+
+    if (cameraSourceRef.current === CAMERA_SOURCES.PI) {
+      let bitmap;
+      try {
+        bitmap = await fetchPiSnapshotBitmap();
+        piFailStreakRef.current = 0;
+      } catch {
+        // Pi snapshot failed mid-session — after 3 misses, fall back to webcam
+        piFailStreakRef.current += 1;
+        if (piFailStreakRef.current >= 3) {
+          applyCameraSource(CAMERA_SOURCES.WEBCAM, CAMERA_STATUS_MESSAGES.PI_UNAVAILABLE);
+          await startCCTV();
+        }
+        return null;
+      }
+      const scale = Math.min(1, MAX_WIDTH / bitmap.width);
+      canvas.width = Math.round(bitmap.width * scale);
+      canvas.height = Math.round(bitmap.height * scale);
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close?.();
+      return canvas.toDataURL('image/jpeg', 0.3);
+    }
 
     const video = videoRef.current;
-    const canvas = canvasRef.current;
-    
-    if (!video || !canvas || video.videoWidth === 0) return;
-    if (scanStatusRef.current === "SECURE_MATCH" || scanStatusRef.current === "UNKNOWN_QUERY") return;
-
-    isScanningRef.current = true; 
-
-    const context = canvas.getContext('2d');
-    
-    // 🚀 LAPTOP OPTIMIZATION: Shrink the image to 480px wide before sending to AI
-    // This dramatically reduces the mathematical load on your laptop's weak CPU!
-    const MAX_WIDTH = 420;
+    if (!video || video.videoWidth === 0) return null;
     const scaleDownRatio = MAX_WIDTH / video.videoWidth;
-    
     canvas.width = MAX_WIDTH;
     canvas.height = video.videoHeight * scaleDownRatio;
-    
-    // Draw the compressed version
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    // Send a highly compressed JPEG
-    const imageBase64 = canvas.toDataURL('image/jpeg', 0.3);
+    return canvas.toDataURL('image/jpeg', 0.3);
+  };
+
+  const performLiveScan = async () => {
+    if (isScanningRef.current) return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (scanStatusRef.current === "SECURE_MATCH" || scanStatusRef.current === "UNKNOWN_QUERY") return;
+
+    isScanningRef.current = true;
 
     try {
+      const imageBase64 = await captureFrameBase64();
+      if (!imageBase64) return;
       const res = await axios.post('/ai/user/recognize', 
         { image: imageBase64 }, 
         { headers: { Authorization: `Bearer ${token}` } }
@@ -317,10 +393,49 @@ const VPatrol = () => {
           </div>
         </header>
 
+        <div className="camera-source-bar" style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '12px' }}>
+          <span style={{ color: '#94a3b8', fontSize: '0.85rem', fontWeight: 600 }}>Camera Source:</span>
+          <button
+            onClick={() => selectCameraSource(CAMERA_SOURCES.PI)}
+            style={{
+              padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem',
+              border: cameraSource === CAMERA_SOURCES.PI ? '1px solid #3b82f6' : '1px solid #334155',
+              background: cameraSource === CAMERA_SOURCES.PI ? '#1d4ed8' : '#1e293b', color: '#e2e8f0'
+            }}
+          >
+            Raspberry Pi Gate Camera
+          </button>
+          <button
+            onClick={() => selectCameraSource(CAMERA_SOURCES.WEBCAM)}
+            style={{
+              padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem',
+              border: cameraSource === CAMERA_SOURCES.WEBCAM ? '1px solid #3b82f6' : '1px solid #334155',
+              background: cameraSource === CAMERA_SOURCES.WEBCAM ? '#1d4ed8' : '#1e293b', color: '#e2e8f0'
+            }}
+          >
+            Laptop Webcam
+          </button>
+          <span style={{ color: '#38bdf8', fontSize: '0.82rem' }}>{cameraStatusMsg}</span>
+        </div>
+
         <div className="vpatrol-grid">
           <div className="vpatrol-card monitor-section">
             <div className={`cctv-container state-theme-${scanStatus.toLowerCase()}`} style={{ width: '100%', height: '100%' }}>
-              <video ref={videoRef} autoPlay playsInline muted className="video-feed" />
+              {cameraSource === CAMERA_SOURCES.PI && (
+                <img
+                  src={PI_CAMERA_STREAM_URL}
+                  alt="Raspberry Pi gate camera live preview"
+                  className="video-feed"
+                />
+              )}
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="video-feed"
+                style={cameraSource === CAMERA_SOURCES.PI ? { display: 'none' } : undefined}
+              />
               <canvas ref={canvasRef} style={{ display: 'none' }} />
 
               {scanStatus === "HARDWARE_ERR" && (
