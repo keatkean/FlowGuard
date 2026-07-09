@@ -21,6 +21,15 @@ import {
   DATE_FILTERS,
   EVENT_FILTERS,
 } from '../constants/securityTimeline';
+import {
+  SCAN_INTERVAL_MS,
+  TARGET_LOCK_MS,
+  CAPTURE_MAX_WIDTH,
+  SERVICE_UNAVAILABLE_MSG,
+  createScanGate,
+  startTimer,
+  logScanTimings,
+} from '../constants/scanControl';
 
 const VPatrol = () => {
   const videoRef = useRef(null);
@@ -42,7 +51,9 @@ const VPatrol = () => {
   const lockTimerRef = useRef(null);
   const progressIntervalRef = useRef(null);
 
-  const isScanningRef = useRef(false);
+  // No-overlap + AI-error-backoff guard for the scan loop.
+  const scanGateRef = useRef(createScanGate());
+  const [serviceNotice, setServiceNotice] = useState('');
 
   // LIVENESS MEMORY: Tracks the head-turn validation
   const candidateUserRef = useRef(null); 
@@ -63,6 +74,7 @@ const VPatrol = () => {
   // All recognition traffic goes through the Node backend — never FastAPI directly.
   const NODE_SERVER_URL = `${API_BASE_URL}/api/security/logs`;
   const RECOGNIZE_URL = `${API_BASE_URL}/api/facial-recognition/recognize`;
+  const ATTENDANCE_SCAN_URL = `${API_BASE_URL}/api/attendance/scan`;
   const CAMERA_LOCATION = "Biometric Gantry";
 
   const changeScanState = (nextState) => {
@@ -93,9 +105,9 @@ const VPatrol = () => {
       }));
     }, 1000);
 
-    const scanInterval = setInterval(() => { 
-      performLiveScan(); 
-    }, 1200);
+    const scanInterval = setInterval(() => {
+      performLiveScan();
+    }, SCAN_INTERVAL_MS);
 
     return () => {
       stopCCTV();
@@ -198,12 +210,13 @@ const VPatrol = () => {
     const currentTimestamp = Date.now();
 
     if (lastLogRef.current.name !== verifiedUser.name || (currentTimestamp - lastLogRef.current.timestamp > 30000)) {
+      // Local timeline entry ONLY — the persisted safe access log is created by
+      // the SERVER during the verified attendance scan below, so the browser no
+      // longer posts audit rows (no duplicate client+server logs).
       const newLog = {
         id: `ACC-${Date.now()}`,
         // This is a NEW event happening right now — stamping it is correct.
-        // `time` stays for the backend write; `occurredAt` drives the display.
         occurredAt: new Date(currentTimestamp).toISOString(),
-        time: new Date(currentTimestamp).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }),
         type: 'Gantry Access',
         desc: `Identity & Liveness Verified: ${subject.identityLabel}`,
         severity: 'safe',
@@ -217,8 +230,13 @@ const VPatrol = () => {
       setIncidentLogs(prev => [newLog, ...prev.slice(0, 14)]);
       lastLogRef.current = { name: verifiedUser.name, timestamp: currentTimestamp };
 
-      axios.post(NODE_SERVER_URL, newLog, { headers: { Authorization: `Bearer ${token}` } })
-        .catch(e => console.log("DB Save Failed", e));
+      // Server-owned audit: the verified attendance scan records attendance AND
+      // writes the deduplicated safe access log (non-fatal for the UI).
+      axios.post(ATTENDANCE_SCAN_URL, {
+        userId: verifiedUser.id,
+        cameraLocation: CAMERA_LOCATION
+      }, { headers: { Authorization: `Bearer ${token}` } })
+        .catch(e => console.log("Attendance/audit sync failed", e));
     }
 
     setTimeout(() => { resetScanner(); }, 3500);
@@ -230,7 +248,7 @@ const VPatrol = () => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const context = canvas.getContext('2d');
-    const MAX_WIDTH = 420;
+    const MAX_WIDTH = CAPTURE_MAX_WIDTH;
 
     if (cameraSourceRef.current === CAMERA_SOURCES.PI) {
       let bitmap;
@@ -264,24 +282,37 @@ const VPatrol = () => {
   };
 
   const performLiveScan = async () => {
-    if (isScanningRef.current) return;
+    const gate = scanGateRef.current;
+    // No overlapping requests; short backoff after a recognition-service failure.
+    if (!gate.canScan()) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
     if (scanStatusRef.current === "SECURE_MATCH" || scanStatusRef.current === "UNKNOWN_QUERY") return;
 
-    isScanningRef.current = true;
+    gate.begin();
+    const totalTimer = startTimer();
 
     try {
+      const captureTimer = startTimer();
       const imageBase64 = await captureFrameBase64();
+      const captureMs = captureTimer();
       if (!imageBase64) return;
+
+      const apiTimer = startTimer();
       const res = await axios.post(RECOGNIZE_URL,
         { image: imageBase64, cameraLocation: CAMERA_LOCATION },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      logScanTimings({
+        captureMs,
+        apiMs: apiTimer(),
+        totalMs: totalTimer(),
+        serverTimings: res.data?.timings
+      });
+      setServiceNotice('');
 
       if (scanStatusRef.current === "SECURE_MATCH" || scanStatusRef.current === "UNKNOWN_QUERY") {
-         isScanningRef.current = false;
          return;
       }
 
@@ -317,7 +348,6 @@ const VPatrol = () => {
             setFaceBox(null); 
             setScanProgress(0);
           }
-          isScanningRef.current = false; 
           return;
         }
 
@@ -392,7 +422,7 @@ const VPatrol = () => {
 
               setTimeout(() => { resetScanner(); }, 3500);
             }
-          }, 1800);
+          }, TARGET_LOCK_MS);
 
         } else if (scanStatusRef.current === "TARGET_LOCKING") {
           setFaceBox(targetBox);
@@ -404,9 +434,13 @@ const VPatrol = () => {
         }
       }
     } catch (err) {
+      // Node/FastAPI unavailable — back off instead of flooding the endpoint.
+      // The camera preview keeps running; webcam fallback is ONLY for Pi failure.
       console.error("AI Command Loop Fault:", err);
+      scanGateRef.current.applyBackoff();
+      setServiceNotice(SERVICE_UNAVAILABLE_MSG);
     } finally {
-      isScanningRef.current = false; 
+      scanGateRef.current.end();
     }
   };
 
@@ -456,6 +490,9 @@ const VPatrol = () => {
             Laptop Webcam
           </button>
           <span style={{ color: '#38bdf8', fontSize: '0.82rem' }}>{cameraStatusMsg}</span>
+          {serviceNotice && (
+            <span style={{ color: '#f59e0b', fontSize: '0.82rem', fontWeight: 600 }}>⚠ {serviceNotice}</span>
+          )}
         </div>
 
         <div className="vpatrol-grid">

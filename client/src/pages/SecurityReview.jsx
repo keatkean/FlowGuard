@@ -3,6 +3,7 @@ import axios from 'axios';
 import Sidebar from '../components/Sidebar';
 import '../css/Dashboard.css';
 import '../css/Management.css';
+import { API_BASE_URL } from '../constants/api';
 
 const REVIEW_STATUSES = ['Pending Review', 'False Positive', 'Escalated', 'Resolved'];
 
@@ -22,7 +23,7 @@ const SecurityReview = () => {
     setLoading(true);
     try {
       const query = statusFilter === 'All' ? '?limit=100' : `?status=${encodeURIComponent(statusFilter)}&limit=100`;
-      const res = await axios.get(`/api/security/logs${query}`, {
+      const res = await axios.get(`${API_BASE_URL}/api/security/logs${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setLogs(Array.isArray(res.data) ? res.data : []);
@@ -58,7 +59,7 @@ const SecurityReview = () => {
 
     setSavingId(log.id);
     try {
-      await axios.patch(`/api/security/logs/${log.id}/review`,
+      await axios.patch(`${API_BASE_URL}/api/security/logs/${log.id}/review`,
         { reviewStatus, reviewNotes },
         { headers: { Authorization: `Bearer ${token}` } }
       );

@@ -254,7 +254,8 @@ router.get("/my-staff", authenticateToken, async (req, res) => {
     try {
         const myStaff = await User.findAll({
             where: { role: 'Staff', managerId: req.user.id },
-            attributes: ['id', 'name', 'email', 'createdAt']
+            // Safe fields only — isEnrolled shows Face ID status, never the template.
+            attributes: ['id', 'name', 'email', 'isEnrolled', 'isActive', 'createdAt']
         });
         res.json(myStaff);
     } catch (err) {
@@ -268,7 +269,9 @@ router.get("/", authenticateToken, async (req, res) => {
         if (req.user.role !== 'FM') return res.status(403).json({ message: "Unauthorized." });
 
         const users = await User.findAll({
-            attributes: ['id', 'name', 'email', 'role', 'isActive', 'createdAt'],
+            // isEnrolled is a safe boolean flag — the protected biometric
+            // template itself (faceVector) is NEVER selected or returned.
+            attributes: ['id', 'name', 'email', 'role', 'isActive', 'isEnrolled', 'createdAt'],
             include: [{
                 model: Attendance,
                 as: 'Attendances',
@@ -355,6 +358,20 @@ router.delete("/:id", authenticateToken, async (req, res) => {
         );
 
         await staffMember.destroy();
+
+        // 4. Ask the AI service to reload its known-face cache so the wiped
+        //    template disappears from memory immediately. NON-FATAL: the
+        //    off-boarding already succeeded; the cache also reloads on restart.
+        try {
+            const faceAiUrl = process.env.FACE_AI_URL || 'http://127.0.0.1:8501';
+            await axios.get(`${faceAiUrl}/refresh`, {
+                timeout: 5000,
+                headers: { 'X-AI-Service-Key': process.env.AI_SERVICE_KEY || '' }
+            });
+        } catch (refreshErr) {
+            console.warn("AI face-cache refresh after off-boarding failed (non-fatal):", refreshErr.message);
+        }
+
         res.json({ message: "Removed successfully. Biometric data wiped and access logs anonymised." });
     } catch (err) {
         console.error(err);

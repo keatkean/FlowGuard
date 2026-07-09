@@ -79,10 +79,14 @@ async function startServer() {
         // Start PDPA 90-day transcript cleanup cron
         startCleanupCron(db);
 
-        let port = process.env.APP_PORT || 5000;
-        app.listen(port, '127.0.0.1', () => {
+        // Cloud-compatible binding: PORT (cloud) → APP_PORT (local .env) → 5001,
+        // listening on 0.0.0.0 so deployed containers accept external traffic.
+        const { resolvePort, resolveHost } = require('./config/serverConfig');
+        const port = resolvePort();
+        const host = resolveHost();
+        app.listen(port, host, () => {
             console.log("--------------------------------------------------");
-            console.log(`FlowGuard Server is FULLY READY on port ${port}`);
+            console.log(`FlowGuard Server is FULLY READY on ${host}:${port}`);
             console.log("--------------------------------------------------");
         });
     } catch (err) {

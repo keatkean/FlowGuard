@@ -6,6 +6,7 @@ const { Op } = require('sequelize');
 // 🎯 IMPORT YOUR AUTH MIDDLEWARE HERE
 // (Change this path/name if your project uses a different filename like verifyToken.js)
 const { verifyToken, verifyServiceOrRole } = require('../middlewares/auth');
+const { shouldWriteLog, createSecurityLog } = require('../services/securityAudit');
 
 // 1. GET Route: Fetch attendance log data dynamically based on RBAC
 // URL: GET /api/attendance/logs
@@ -137,6 +138,23 @@ router.post('/scan', verifyServiceOrRole('FM'), async (req, res) => {
         finalLog = lastOutLog;
         actionTaken = "CLOCK_OUT_TIMESTAMP_UPDATED";
       }
+    }
+
+    // Server-owned SAFE access log — the browser no longer posts these, which
+    // prevents duplicate client+server audit rows. Deduplicated per user/location.
+    const cameraLocation = typeof req.body.cameraLocation === 'string' && req.body.cameraLocation.trim()
+      ? req.body.cameraLocation.trim().slice(0, 100)
+      : 'Main Gate';
+    if (shouldWriteLog(`granted:${user.id}:${cameraLocation}`)) {
+      await createSecurityLog({
+        type: 'Gantry Access',
+        desc: `Identity & liveness verified — ${actionTaken.replace(/_/g, ' ').toLowerCase()}: ${user.name} (${user.role}) at ${cameraLocation}.`,
+        severity: 'safe',
+        icon: '🔓',
+        personnelName: user.name,
+        matchedUserId: user.id,
+        cameraLocation
+      });
     }
 
     // Safe fields only — never the biometric template.

@@ -12,6 +12,15 @@ import {
 } from '../constants/piCamera';
 import { API_BASE_URL } from '../constants/api';
 import { describeRecognitionSubject, RECOGNITION_STATUS } from '../constants/recognition';
+import {
+  SCAN_INTERVAL_MS,
+  TARGET_LOCK_MS,
+  CAPTURE_MAX_WIDTH,
+  SERVICE_UNAVAILABLE_MSG,
+  createScanGate,
+  startTimer,
+  logScanTimings,
+} from '../constants/scanControl';
 
 const GateScanner = () => {
   const videoRef = useRef(null);
@@ -36,7 +45,8 @@ const GateScanner = () => {
   const lockTimerRef = useRef(null);
   const progressIntervalRef = useRef(null);
   const candidateUserRef = useRef(null);
-  const isScanningRef = useRef(false);
+  // No-overlap + AI-error-backoff guard for the scan loop.
+  const scanGateRef = useRef(createScanGate());
 
   const token = localStorage.getItem("accessToken");
   // All recognition traffic goes through the Node backend — never FastAPI directly.
@@ -52,7 +62,7 @@ const GateScanner = () => {
 
   useEffect(() => {
     initCameraSource();
-    const scanInterval = setInterval(() => performPerimeterScan(), 1200);
+    const scanInterval = setInterval(() => performPerimeterScan(), SCAN_INTERVAL_MS);
 
     return () => {
       stopGateCamera();
@@ -142,7 +152,10 @@ const GateScanner = () => {
     try {
       // 🎯 Hit the Node.js automatic clock-in/out controller with the
       // server-verified unique user ID — never a name.
-      const res = await axios.post(ATTENDANCE_SCAN_URL, { userId: verifiedUser.id }, {
+      const res = await axios.post(ATTENDANCE_SCAN_URL, {
+        userId: verifiedUser.id,
+        cameraLocation: CAMERA_LOCATION
+      }, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -177,7 +190,7 @@ const GateScanner = () => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const context = canvas.getContext('2d');
-    const maxWidth = 420;
+    const maxWidth = CAPTURE_MAX_WIDTH;
 
     if (cameraSourceRef.current === CAMERA_SOURCES.PI) {
       let bitmap;
@@ -211,22 +224,35 @@ const GateScanner = () => {
   };
 
   const performPerimeterScan = async () => {
-    if (isScanningRef.current) return;
+    const gate = scanGateRef.current;
+    // No overlapping requests; short backoff after a recognition-service failure.
+    if (!gate.canScan()) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
     if (scanStatusRef.current === "SECURE_MATCH" || scanStatusRef.current === "UNKNOWN_QUERY") return;
 
-    isScanningRef.current = true;
+    gate.begin();
+    const totalTimer = startTimer();
 
     try {
+      const captureTimer = startTimer();
       const imageBase64 = await captureFrameBase64();
+      const captureMs = captureTimer();
       if (!imageBase64) return;
+
+      const apiTimer = startTimer();
       const res = await axios.post(RECOGNIZE_URL, {
         image: imageBase64,
         cameraLocation: CAMERA_LOCATION
       }, {
         headers: { Authorization: `Bearer ${token}` }
+      });
+      logScanTimings({
+        captureMs,
+        apiMs: apiTimer(),
+        totalMs: totalTimer(),
+        serverTimings: res.data?.timings
       });
 
       if (scanStatusRef.current === "SECURE_MATCH" || scanStatusRef.current === "UNKNOWN_QUERY") return;
@@ -304,7 +330,7 @@ const GateScanner = () => {
               setScanProgress(0);
               setTimeout(() => { resetTurnstileKiosk(); }, 3500);
             }
-          }, 1800);
+          }, TARGET_LOCK_MS);
         } else if (scanStatusRef.current === "TARGET_LOCKING") {
           setFaceBox(targetBox);
         }
@@ -314,9 +340,13 @@ const GateScanner = () => {
         }
       }
     } catch (err) {
+      // Node/FastAPI unavailable — back off instead of flooding the endpoint.
+      // The camera preview keeps running; webcam fallback is ONLY for Pi failure.
       console.error("Gate AI Link Fault:", err);
+      gate.applyBackoff();
+      setDisplayMessage(SERVICE_UNAVAILABLE_MSG);
     } finally {
-      isScanningRef.current = false;
+      gate.end();
     }
   };
 

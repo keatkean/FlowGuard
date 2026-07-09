@@ -5,6 +5,7 @@ import Sidebar from '../components/Sidebar';
 import '../css/Dashboard.css';
 import '../css/Management.css'; 
 import '../css/Attendance.css'; 
+import { API_BASE_URL } from '../constants/api';
 
 const Attendance = () => {
   const navigate = useNavigate(); 
@@ -28,7 +29,7 @@ const Attendance = () => {
 
   const fetchAttendanceData = async () => {
     try {
-      const res = await axios.get('/api/attendance/logs', {
+      const res = await axios.get(`${API_BASE_URL}/api/attendance/logs`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data) {

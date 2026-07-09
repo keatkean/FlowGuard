@@ -26,6 +26,8 @@ const TenantLogistics = () => {
 
   // Booking form is hidden by default and opens in a modal (keeps the list roomy).
   const [isFormOpen, setIsFormOpen] = useState(false);
+  // Manual UPDATE evidence: when set, the modal edits this booking via PATCH /api/bookings/:id.
+  const [editingId, setEditingId] = useState(null);
   // Frontend-only filtering (backend has no booking filter endpoint).
   const [searchText, setSearchText] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
@@ -72,8 +74,33 @@ const TenantLogistics = () => {
 
   const onField = (e) => setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
-  const openForm = () => { setError(''); setForm(emptyForm); setIsFormOpen(true); };
-  const closeForm = () => setIsFormOpen(false);
+  const openForm = () => { setError(''); setForm(emptyForm); setEditingId(null); setIsFormOpen(true); };
+  const closeForm = () => { setIsFormOpen(false); setEditingId(null); };
+
+  // ISO/DB timestamp → value accepted by <input type="datetime-local">.
+  const toLocalInput = (v) => {
+    if (!v) return '';
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+
+  const openEdit = (b) => {
+    setError('');
+    setForm({
+      transport_company: b.transport_company || '',
+      license_plate: b.license_plate || '',
+      driver_phone: b.driver_phone || '',
+      driver_name: b.driver_name || '',
+      loading_bay: b.loading_bay || '',
+      slot_start: toLocalInput(b.slot_start),
+      slot_end: toLocalInput(b.slot_end),
+      notes: b.notes || ''
+    });
+    setEditingId(b.id);
+    setIsFormOpen(true);
+  };
 
   const describeWhatsapp = (wa) => {
     if (!wa) return '';
@@ -81,18 +108,25 @@ const TenantLogistics = () => {
     return wa.success ? ' (WhatsApp sent)' : ' (WhatsApp delivery pending)';
   };
 
-  const createBooking = async (e) => {
+  const submitBookingForm = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     setError('');
     try {
-      const res = await axios.post(`${API_BASE_URL}/api/bookings/create`, form, authHeader);
-      setNotice(`Booking created (status: Pending).${describeWhatsapp(res.data?.whatsapp)}`);
+      if (editingId) {
+        // Manual UPDATE — editable fields only; server enforces ownership + slot conflicts.
+        await axios.patch(`${API_BASE_URL}/api/bookings/${editingId}`, form, authHeader);
+        setNotice('Booking updated.');
+      } else {
+        const res = await axios.post(`${API_BASE_URL}/api/bookings/create`, form, authHeader);
+        setNotice(`Booking created (status: Pending).${describeWhatsapp(res.data?.whatsapp)}`);
+      }
       setForm(emptyForm);
       setIsFormOpen(false);
+      setEditingId(null);
       fetchBookings();
     } catch (err) {
-      const msg = err.response?.data?.error || 'Failed to create booking.';
+      const msg = err.response?.data?.error || (editingId ? 'Failed to update booking.' : 'Failed to create booking.');
       setError(msg);
     } finally {
       setSubmitting(false);
@@ -297,6 +331,11 @@ const TenantLogistics = () => {
                               </button>
                             )}
                             {!isClosed && (role === 'FM' || role === 'Tenant') && (
+                              <button className="edit-btn" onClick={() => openEdit(b)}>
+                                Edit
+                              </button>
+                            )}
+                            {!isClosed && (role === 'FM' || role === 'Tenant') && (
                               <button className="edit-btn" style={{ background: '#7f1d1d' }} onClick={() => cancelBooking(b.id)}>
                                 Cancel
                               </button>
@@ -317,13 +356,13 @@ const TenantLogistics = () => {
           <div className="modal-overlay" onClick={closeForm}>
             <div className="modal-content booking-modal" onClick={(e) => e.stopPropagation()}>
               <div className="booking-modal-head">
-                <h2>Schedule New Delivery</h2>
+                <h2>{editingId ? 'Edit Booking' : 'Schedule New Delivery'}</h2>
                 <button className="modal-x" onClick={closeForm} aria-label="Close">✕</button>
               </div>
 
               {error && <div className="error-banner" style={{ margin: '0 0 14px' }}>⚠️ {error}</div>}
 
-              <form onSubmit={createBooking} className="dark-form">
+              <form onSubmit={submitBookingForm} className="dark-form">
                 <div className="form-group">
                   <label>Transport Company *</label>
                   <input name="transport_company" value={form.transport_company} onChange={onField} placeholder="e.g., NinjaVan" required />
@@ -362,7 +401,7 @@ const TenantLogistics = () => {
                 <div className="booking-modal-actions">
                   <button type="button" className="cancel-btn" onClick={closeForm}>Cancel</button>
                   <button type="submit" className="submit-booking-btn" disabled={submitting}>
-                    {submitting ? 'Creating...' : 'Create Booking'}
+                    {submitting ? 'Saving...' : editingId ? 'Save Changes' : 'Create Booking'}
                   </button>
                 </div>
               </form>

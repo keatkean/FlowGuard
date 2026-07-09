@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
-const { randomUUID } = require('crypto');
-const { User, SecurityLog } = require('../models');
+const { User } = require('../models');
 const { verifyToken, requireRole } = require('../middlewares/auth');
+const { shouldWriteLog, createSecurityLog } = require('../services/securityAudit');
 
 // FACE_AI_URL is the BASE url of the InsightFace service; paths are appended.
 const FACE_AI_URL = () => process.env.FACE_AI_URL || 'http://127.0.0.1:8501';
@@ -24,48 +24,6 @@ const allowFMOrEdgeService = (req, res, next) => {
   return verifyToken(req, res, () => requireRole('FM')(req, res, next));
 };
 
-// --- Security-log deduplication ------------------------------------------------
-// Repeated unknown/suspended detections at ~1 scan/sec would flood the table.
-// One log per (event, identity, location) per cooldown window.
-const LOG_COOLDOWN_MS = 30 * 1000;
-const recentLogKeys = new Map(); // key -> last logged epoch ms
-
-const shouldWriteLog = (key) => {
-  const now = Date.now();
-  const last = recentLogKeys.get(key) || 0;
-  if (now - last < LOG_COOLDOWN_MS) return false;
-  recentLogKeys.set(key, now);
-  // Opportunistic cleanup so the map never grows unbounded.
-  if (recentLogKeys.size > 500) {
-    for (const [k, t] of recentLogKeys) {
-      if (now - t > LOG_COOLDOWN_MS) recentLogKeys.delete(k);
-    }
-  }
-  return true;
-};
-
-// Audit information only — never the snapshot or any biometric template data.
-const createSecurityLog = async ({ type, desc, severity, icon, personnelName, matchedUserId, role, confidence, cameraLocation }) => {
-  try {
-    await SecurityLog.create({
-      id: randomUUID(),
-      time: new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }),
-      type,
-      desc,
-      severity,
-      icon,
-      personnelName,
-      matchedUserId: matchedUserId ?? null,
-      confidence: confidence ?? null,
-      cameraLocation: cameraLocation || 'Main Gate',
-      reviewStatus: severity === 'safe' ? 'Resolved' : 'Pending Review'
-    });
-  } catch (err) {
-    // Logging must never break the recognition response.
-    console.error('Security log write failed:', err.message);
-  }
-};
-
 // POST /api/facial-recognition/recognize
 // Frontend (Gate Scanner / V-Patrol) → Node → FastAPI → Node resolves the User
 // record from PostgreSQL → safe recognition result. The DB — not the AI cache —
@@ -84,6 +42,7 @@ router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
     : 'Main Gate';
 
   let aiResult;
+  const aiStartedAt = Date.now();
   try {
     const aiResponse = await axios.post(`${FACE_AI_URL()}/user/recognize`, { image }, {
       timeout: 15000,
@@ -104,11 +63,17 @@ router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
     return res.status(502).json({ error: 'Facial recognition service returned an error.' });
   }
 
-  const { matchedUserId, confidence = 0, box = null, liveness_ratio = 0.5, faceDetected } = aiResult || {};
+  const { matchedUserId, confidence = 0, box = null, liveness_ratio = 0.5, faceDetected, inference_ms = null } = aiResult || {};
+
+  // Development timing telemetry — durations only, never images or templates.
+  const timings = { nodeToAiMs: Date.now() - aiStartedAt, inferenceMs: inference_ms };
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`[recognize] Node→FastAPI ${timings.nodeToAiMs}ms, InsightFace inference ${inference_ms ?? '?'}ms`);
+  }
 
   // No face in frame → no recognition attempt, and no suspicious-person log.
   if (faceDetected === false || (!box && matchedUserId == null)) {
-    return res.status(200).json({ user: null, box: null, liveness_ratio });
+    return res.status(200).json({ user: null, box: null, liveness_ratio, timings });
   }
 
   // Face detected but no template match → unknown person.
@@ -127,7 +92,8 @@ router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
     return res.status(200).json({
       user: { id: null, name: 'Unknown Person', role: null, status: 'DENIED', confidence },
       box,
-      liveness_ratio
+      liveness_ratio,
+      timings
     });
   }
 
@@ -153,7 +119,8 @@ router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
     return res.status(200).json({
       user: { id: null, name: 'Unknown Person', role: null, status: 'DENIED', confidence },
       box,
-      liveness_ratio
+      liveness_ratio,
+      timings
     });
   }
 
@@ -175,7 +142,8 @@ router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
     return res.status(200).json({
       user: { id: user.id, name: user.name, role: user.role, status: 'SUSPENDED', confidence },
       box,
-      liveness_ratio
+      liveness_ratio,
+      timings
     });
   }
 
@@ -183,7 +151,8 @@ router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
   return res.status(200).json({
     user: { id: user.id, name: user.name, role: user.role, status: 'AUTHORIZED', confidence },
     box,
-    liveness_ratio
+    liveness_ratio,
+    timings
   });
 });
 

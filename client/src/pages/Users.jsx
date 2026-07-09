@@ -5,6 +5,7 @@ import Sidebar from '../components/Sidebar';
 import PasswordInput from '../components/PasswordInput';
 import '../css/Dashboard.css';
 import '../css/Users.css';
+import { API_BASE_URL } from '../constants/api';
 
 const Users = () => {
   const navigate = useNavigate();
@@ -33,7 +34,7 @@ const Users = () => {
     setAddSubmitting(true);
     setAddError('');
     try {
-      await axios.post('/user/manual-create', newUser, { headers: { Authorization: `Bearer ${token}` } });
+      await axios.post(`${API_BASE_URL}/user/manual-create`, newUser, { headers: { Authorization: `Bearer ${token}` } });
       setAddOpen(false);
       setNotification(`Tenant account created for ${newUser.name}.`);
       fetchUsers();
@@ -47,7 +48,7 @@ const Users = () => {
   const fetchUsers = async () => {
     setLoading(true); 
     try {
-      const response = await axios.get('/user', {
+      const response = await axios.get(`${API_BASE_URL}/user`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
@@ -87,7 +88,7 @@ const Users = () => {
 
     try {
       if (modal.action === 'delete') {
-        await axios.delete(`/user/${id}`, {
+        await axios.delete(`${API_BASE_URL}/user/${id}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
 
@@ -97,7 +98,7 @@ const Users = () => {
         return;
       }
 
-      await axios.put(`/user/suspend/${id}`, {}, {
+      await axios.put(`${API_BASE_URL}/user/suspend/${id}`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
@@ -206,16 +207,17 @@ const Users = () => {
                   <tr>
                     <th>Personnel</th>
                     <th>System Role</th>
-                    <th>Email Address</th> 
+                    <th>Email Address</th>
+                    <th>Face ID</th>
                     <th>Physical Presence</th>
-                    <th>Joined Date</th> 
+                    <th>Joined Date</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {users.length === 0 ? (
                     <tr>
-                      <td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                      <td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
                         No users found in database.
                       </td>
                     </tr>
@@ -241,6 +243,15 @@ const Users = () => {
                             </span>
                           </td>
                           <td className="access-cell" data-label="Email Address">{u.email}</td>
+                          <td data-label="Face ID">
+                            {/* Safe boolean flag only — never biometric template data */}
+                            <span
+                              className={`presence-tag ${u.isEnrolled ? 'on-site' : 'off-site'}`}
+                              title={u.isEnrolled ? 'A protected biometric template is enrolled' : 'No Face ID enrolled yet'}
+                            >
+                              {u.isEnrolled ? <>✅ Enrolled</> : <>❌ Not Enrolled</>}
+                            </span>
+                          </td>
                           <td data-label="Presence">
                             <div className={`presence-tag ${u.locationStatus === 'On-Site' ? 'on-site' : 'off-site'}`}>
                               {u.locationStatus === 'On-Site' ? (
@@ -255,12 +266,22 @@ const Users = () => {
                           </td>
                           <td className="actions-cell" data-label="Actions">
                             <div className="action-button-group" aria-label={`Actions for ${u.name}`}>
-                              <button 
+                              <button
                                 className="action-btn action-neutral"
                                 onClick={() => navigate(`/user-logs/${u.id}`)}
                               >
                                 Logs
                               </button>
+
+                              {role === 'FM' && (
+                                <button
+                                  className="action-btn action-neutral"
+                                  onClick={() => navigate(`/enrollment?userId=${u.id}&name=${encodeURIComponent(u.name)}&returnTo=/users`)}
+                                  title={u.isEnrolled ? `Re-enrol ${u.name}'s Face ID` : `Enrol ${u.name}'s Face ID`}
+                                >
+                                  {u.isEnrolled ? 'Re-enrol Face ID' : 'Enrol Face ID'}
+                                </button>
+                              )}
 
                               <button
                                 className={`action-btn ${u.isActive === false ? 'action-restore' : 'action-warning'} ${isSelf ? 'disabled-action' : ''}`}

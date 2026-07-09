@@ -200,7 +200,10 @@ async def recognize(request: RecognitionRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail="Invalid image data")
 
+    # Development telemetry: inference duration only — never images/templates.
+    _inference_started = time.time()
     live_faces = face_app.get(img)
+    inference_ms = int((time.time() - _inference_started) * 1000)
 
     for face in live_faces:
         best_match = None
@@ -231,10 +234,11 @@ async def recognize(request: RecognitionRequest):
             "confidence": round(highest_similarity, 4),
             "box": [x, y, width, height],
             "liveness_ratio": liveness_ratio,
-            "faceDetected": True
+            "faceDetected": True,
+            "inference_ms": inference_ms
         }
 
-    return {"matchedUserId": None, "confidence": 0.0, "box": None, "liveness_ratio": 0.5, "faceDetected": False}
+    return {"matchedUserId": None, "confidence": 0.0, "box": None, "liveness_ratio": 0.5, "faceDetected": False, "inference_ms": inference_ms}
 
 # Helper to refresh the list manually if a new staff joins
 @app.get("/refresh", dependencies=[Depends(require_service_key)])

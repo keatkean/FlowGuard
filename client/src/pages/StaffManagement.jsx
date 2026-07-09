@@ -5,6 +5,7 @@ import Sidebar from '../components/Sidebar';
 import PasswordInput from '../components/PasswordInput';
 import '../css/Dashboard.css';
 import '../css/Management.css';
+import { API_BASE_URL } from '../constants/api';
 
 const StaffManagement = () => {
   const navigate = useNavigate();
@@ -39,7 +40,7 @@ const StaffManagement = () => {
     setAddSubmitting(true);
     setAddError('');
     try {
-      await axios.post('/user/manual-create', newStaff, { headers: { Authorization: `Bearer ${token}` } });
+      await axios.post(`${API_BASE_URL}/user/manual-create`, newStaff, { headers: { Authorization: `Bearer ${token}` } });
       setAddOpen(false);
       triggerNotify(`Staff account created for ${newStaff.name}.`, "success");
       fetchData();
@@ -64,7 +65,7 @@ const StaffManagement = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const codeRes = await axios.get('/user/my-code', {
+      const codeRes = await axios.get(`${API_BASE_URL}/user/my-code`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
@@ -75,7 +76,7 @@ const StaffManagement = () => {
         createdAt: codeRes.data.codeCreatedAt // Received from Hybrid logic backend
       });
 
-      const staffRes = await axios.get('/user/my-staff', {
+      const staffRes = await axios.get(`${API_BASE_URL}/user/my-staff`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setStaff(staffRes.data);
@@ -103,7 +104,7 @@ const StaffManagement = () => {
   const handleConfirmDelete = async () => {
     const { id, name } = deleteModal.user;
     try {
-      await axios.delete(`/user/${id}`, {
+      await axios.delete(`${API_BASE_URL}/user/${id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setStaff(prev => prev.filter(m => m.id !== id));
@@ -117,7 +118,7 @@ const StaffManagement = () => {
 
   const handleGenerateCode = async () => {
     try {
-      const res = await axios.put('/user/generate-code', {}, {
+      const res = await axios.put(`${API_BASE_URL}/user/generate-code`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setCompanyCode(res.data.companyCode);
@@ -249,6 +250,7 @@ const StaffManagement = () => {
                 <tr>
                   <th>PERSONNEL</th>
                   <th>EMAIL ADDRESS</th>
+                  <th>FACE ID</th>
                   <th>STATUS</th>
                   <th>JOINED DATE</th>
                   <th>ACTIONS</th>
@@ -264,6 +266,13 @@ const StaffManagement = () => {
                       </div>
                     </td>
                     <td data-label="Email">{member.email}</td>
+                    <td data-label="Face ID">
+                      {/* Safe boolean flag only — enrolment status, never template data */}
+                      <span className={`status-badge ${member.isEnrolled ? 'active' : ''}`}
+                            style={member.isEnrolled ? undefined : { background: '#334155', color: '#cbd5e1' }}>
+                        {member.isEnrolled ? '✅ Enrolled' : '❌ Not Enrolled'}
+                      </span>
+                    </td>
                     <td data-label="Status"><span className="status-badge active">On-Site</span></td>
                     <td data-label="Joined">{new Date(member.createdAt).toLocaleDateString('en-SG')}</td>
                     <td data-label="Actions">
@@ -277,7 +286,7 @@ const StaffManagement = () => {
                   </tr>
                 )) : (
                     <tr>
-                        <td colSpan="5" style={{ textAlign: 'center', padding: '50px', color: '#64748b' }}>
+                        <td colSpan="6" style={{ textAlign: 'center', padding: '50px', color: '#64748b' }}>
                             {loading ? "Accessing unit data..." : "No personnel registered to this unit."}
                         </td>
                     </tr>

@@ -36,7 +36,7 @@ operations are part of access management, not the whole feature.
 |------|----------|
 | **Create** | Manual create Tenant/Staff where allowed (`POST /user/manual-create`); face enrolment `POST /user/enroll-face` (self, or FM via `targetUserId`); **automatic** attendance created by ID-verified recognition (`POST /api/facial-recognition/recognize` → `POST /api/attendance/scan { userId }`); **automatic** SecurityLogs for unknown/suspended detections (server-side, deduplicated). |
 | **Read** | V-Patrol, Gate Scanner, Security Review, User Logs, Attendance logs — `GET /api/security/logs`, `GET /api/security/logs/user/:id`, `GET /api/attendance/logs`, `GET /user/`. |
-| **Update** | Face re-enrolment (`POST /user/enroll-face`, overwrites the vector); suspend/reactivate user (`PUT /user/suspend/:id`); update security-review status/notes (`PATCH /api/security/logs/:id/review`). |
+| **Update** | Face re-enrolment (`POST /user/enroll-face`, overwrites the protected template — FM can re-enrol any user via the "Re-enrol Face ID" action → `/enrollment?userId=<id>`); suspend/reactivate user (`PUT /user/suspend/:id`); update security-review status/notes (`PATCH /api/security/logs/:id/review`). Face ID enrolment status badge on User/Staff Management. |
 | **Delete** | PDPA off-boarding `DELETE /user/:id` — wipe `faceVector`, delete the attendance trail, and **anonymise** security logs (kept for audit, `personnelName` nulled). |
 
 ### Secondary supporting feature — Smart Logistics & Loading Bay Management
@@ -47,7 +47,7 @@ Scan, and next-in-line alerts.
 |------|----------|
 | **Create** | `POST /api/bookings/create` (FM / Tenant / Staff) |
 | **Read** | `GET /api/bookings/` (role-scoped) and public `GET /api/bookings/:ref` (driver pass) |
-| **Update** | `PATCH /api/bookings/:id/status` and `PATCH /api/bookings/:ref/gate-scan` |
+| **Update** | Manual **Edit Booking** `PATCH /api/bookings/:id` (editable fields, tenant-ownership + FM permissions, slot-conflict validation); `PATCH /api/bookings/:id/status`; `PATCH /api/bookings/:ref/gate-scan` |
 | **Delete (soft)** | `PATCH /api/bookings/:id/cancel` (status = Cancelled) |
 
 ### Automatic-process evidence (facial recognition)
@@ -62,7 +62,7 @@ Scan, and next-in-line alerts.
   off-boarding flow above. See `facial-recognition-api-and-security.md`.
 
 ## Notes
-- **Backend 150/150 passed**, **Frontend 113/113 passed**, **build success** (commands in the
+- **Backend 170/170 passed**, **Frontend 150/150 passed**, **build success** (commands in the
   test-results summary).
 - **Object Detection** and **Incident Tracking** teammate modules are merged into this branch and
   present in the shared DB/models (`detection_alerts`, `incident_logs`, `monitoring_zones`).

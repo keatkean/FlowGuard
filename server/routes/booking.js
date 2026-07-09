@@ -180,6 +180,74 @@ router.patch('/:id/status', verifyToken, requireRole('FM'), async (req, res) => 
 });
 
 // ---------------------------------------------------------------------------
+// EDIT — manual booking update. FM may edit any booking; a Tenant may edit
+// only their own unit's bookings. Closed bookings cannot be edited.
+// Editable fields only — status changes stay on /:id/status and /:ref/gate-scan,
+// and cancellation remains the soft-delete on /:id/cancel.
+// ---------------------------------------------------------------------------
+const EDITABLE_FIELDS = [
+    'transport_company', 'driver_name', 'driver_phone', 'license_plate',
+    'loading_bay', 'slot_start', 'slot_end', 'notes'
+];
+
+router.patch('/:id', verifyToken, requireRole('FM', 'Tenant'), async (req, res) => {
+    try {
+        const booking = await Booking.findByPk(req.params.id);
+        if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+
+        const isFM = req.user.role === 'FM';
+        const isOwnerTenant = req.user.role === 'Tenant' && booking.tenantId === req.user.id;
+        if (!isFM && !isOwnerTenant) {
+            return res.status(403).json({ error: 'You can only edit your own bookings.' });
+        }
+        if (['Completed', 'Cancelled'].includes(booking.status)) {
+            return res.status(409).json({ error: `Cannot edit a ${booking.status} booking.` });
+        }
+
+        // Whitelist — ignore any other fields (status, tenantId, booking_ref…).
+        const updates = {};
+        for (const field of EDITABLE_FIELDS) {
+            if (field in req.body) updates[field] = req.body[field];
+        }
+        if (Object.keys(updates).length === 0) {
+            return res.status(400).json({ error: 'No editable fields supplied.' });
+        }
+
+        if ('driver_phone' in updates && !/^[+\d][\d\s-]{6,}$/.test(String(updates.driver_phone))) {
+            return res.status(400).json({ error: 'driver_phone is not a valid phone number.' });
+        }
+
+        // Slot-conflict validation on the resulting time window/bay.
+        const newStart = 'slot_start' in updates ? updates.slot_start : booking.slot_start;
+        const newEnd = 'slot_end' in updates ? updates.slot_end : booking.slot_end;
+        const newBay = 'loading_bay' in updates ? updates.loading_bay : booking.loading_bay;
+        if (newStart && newEnd) {
+            if (new Date(newEnd) <= new Date(newStart)) {
+                return res.status(400).json({ error: 'slot_end must be after slot_start.' });
+            }
+            const clash = await Booking.findOne({
+                where: {
+                    id: { [Op.ne]: booking.id }, // ignore the booking being edited
+                    loading_bay: newBay,
+                    status: { [Op.ne]: 'Cancelled' },
+                    slot_start: { [Op.lt]: new Date(newEnd) },
+                    slot_end: { [Op.gt]: new Date(newStart) }
+                }
+            });
+            if (clash) {
+                return res.status(409).json({ error: `${newBay} is already booked for that time window.` });
+            }
+        }
+
+        await booking.update(updates);
+        res.status(200).json({ message: 'Booking updated.', booking });
+    } catch (err) {
+        console.error('Booking edit error:', err);
+        res.status(500).json({ error: 'Could not update booking.' });
+    }
+});
+
+// ---------------------------------------------------------------------------
 // CANCEL — FM, or the Tenant who owns it. Soft cancel (status='Cancelled').
 // ---------------------------------------------------------------------------
 router.patch('/:id/cancel', verifyToken, async (req, res) => {
@@ -283,7 +351,21 @@ router.get('/:ref', async (req, res) => {
     try {
         const booking = await Booking.findOne({ where: { booking_ref: req.params.ref } });
         if (!booking) return res.status(404).json({ message: 'Booking not found' });
-        res.json(booking);
+
+        // SAFE public DTO — only what the driver pass needs. Never expose
+        // tenantId, driver_phone, private notes, or internal timestamps.
+        res.json({
+            booking_ref: booking.booking_ref,
+            transport_company: booking.transport_company,
+            driver_name: booking.driver_name,
+            license_plate: booking.license_plate,
+            loading_bay: booking.loading_bay,
+            slot_start: booking.slot_start,
+            slot_end: booking.slot_end,
+            status: booking.status,
+            arrived_at: booking.arrived_at,
+            completed_at: booking.completed_at
+        });
     } catch (err) {
         console.error('Booking lookup error:', err);
         res.status(500).json({ message: 'Error fetching booking' });
