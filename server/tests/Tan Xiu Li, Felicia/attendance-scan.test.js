@@ -23,8 +23,23 @@ const staffToken = jwt.sign({ id: 60, role: "Staff" }, process.env.APP_SECRET);
 
 const activeUser = { id: 25, name: "Tan Xiu Li, Felicia", role: "Staff", isActive: true, isEnrolled: true };
 
+// verifyToken is now DB-backed: it re-reads the authenticated account by the
+// JWT's id via User.findByPk. Key the mock by id so BOTH the middleware lookup
+// (auth ids 1/60) and the route-level lookup (scanned userId) resolve correctly.
+const AUTH_USERS = {
+  1: { id: 1, role: "FM", isActive: true },
+  60: { id: 60, role: "Staff", isActive: true },
+};
+const primeDb = (extra = {}) => {
+  const table = { ...AUTH_USERS, ...extra };
+  mockUser.findByPk.mockImplementation((id) => Promise.resolve(table[id] ?? null));
+};
+
 describe("POST /api/attendance/scan — authentication", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    primeDb();
+  });
 
   test("unauthenticated public request → 401", async () => {
     const res = await request(app).post("/api/attendance/scan").send({ userId: 25 });
@@ -41,7 +56,7 @@ describe("POST /api/attendance/scan — authentication", () => {
   });
 
   test("trusted service key (x-service-key) is accepted without a JWT", async () => {
-    mockUser.findByPk.mockResolvedValue(activeUser);
+    primeDb({ 25: activeUser });
     mockAttendance.findAll.mockResolvedValue([]);
     mockAttendance.create.mockResolvedValue({ timestamp: new Date(), type: "IN" });
 
@@ -62,10 +77,13 @@ describe("POST /api/attendance/scan — authentication", () => {
 });
 
 describe("POST /api/attendance/scan — identity & account checks", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    primeDb();
+  });
 
   test("identity is resolved by unique ID, never by name (duplicate-name safety)", async () => {
-    mockUser.findByPk.mockResolvedValue(activeUser);
+    primeDb({ 25: activeUser });
     mockAttendance.findAll.mockResolvedValue([]);
     mockAttendance.create.mockResolvedValue({ timestamp: new Date(), type: "IN" });
 
@@ -88,7 +106,7 @@ describe("POST /api/attendance/scan — identity & account checks", () => {
   });
 
   test("nonexistent userId → 404", async () => {
-    mockUser.findByPk.mockResolvedValue(null);
+    primeDb({ 9999: null }); // FM auth account still resolves; target id does not
     const res = await request(app)
       .post("/api/attendance/scan")
       .set("Authorization", `Bearer ${fmToken}`)
@@ -97,7 +115,7 @@ describe("POST /api/attendance/scan — identity & account checks", () => {
   });
 
   test("suspended user → 403 and no attendance record", async () => {
-    mockUser.findByPk.mockResolvedValue({ ...activeUser, isActive: false });
+    primeDb({ 25: { ...activeUser, isActive: false } });
     const res = await request(app)
       .post("/api/attendance/scan")
       .set("Authorization", `Bearer ${fmToken}`)
@@ -107,7 +125,7 @@ describe("POST /api/attendance/scan — identity & account checks", () => {
   });
 
   test("non-enrolled user → 403 and no attendance record", async () => {
-    mockUser.findByPk.mockResolvedValue({ ...activeUser, isEnrolled: false });
+    primeDb({ 25: { ...activeUser, isEnrolled: false } });
     const res = await request(app)
       .post("/api/attendance/scan")
       .set("Authorization", `Bearer ${fmToken}`)
@@ -118,10 +136,13 @@ describe("POST /api/attendance/scan — identity & account checks", () => {
 });
 
 describe("POST /api/attendance/scan — clock-in/out behaviour", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    primeDb();
+  });
 
   test("recognised active user with no log today → CLOCK_IN + safe fields returned", async () => {
-    mockUser.findByPk.mockResolvedValue(activeUser);
+    primeDb({ 25: activeUser });
     mockAttendance.findAll.mockResolvedValue([]);
     const ts = new Date();
     mockAttendance.create.mockResolvedValue({ timestamp: ts, type: "IN" });
@@ -144,7 +165,7 @@ describe("POST /api/attendance/scan — clock-in/out behaviour", () => {
   });
 
   test("already clocked in today → CLOCK_OUT on second scan", async () => {
-    mockUser.findByPk.mockResolvedValue(activeUser);
+    primeDb({ 25: activeUser });
     mockAttendance.findAll.mockResolvedValue([{ type: "IN", timestamp: new Date() }]);
     mockAttendance.create.mockResolvedValue({ timestamp: new Date(), type: "OUT" });
 

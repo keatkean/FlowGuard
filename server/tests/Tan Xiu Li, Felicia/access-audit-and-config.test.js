@@ -11,11 +11,18 @@ const mockUser = {
   create: jest.fn(), update: jest.fn(),
 };
 const mockSecurityLog = { create: jest.fn(), update: jest.fn() };
+// Off-boarding runs inside sequelize.transaction and anonymises Booking rows,
+// so the mocked models must expose both. The transaction mock just runs the
+// callback with a stand-in transaction handle.
+const mockBooking = { update: jest.fn(async () => [0]) };
+const mockSequelize = { transaction: jest.fn(async (cb) => cb({ mocked: true })) };
 jest.mock("../../models", () => ({
   Attendance: mockAttendance,
   User: mockUser,
   SecurityLog: mockSecurityLog,
+  Booking: mockBooking,
   Invite: { findOne: jest.fn(), create: jest.fn() },
+  sequelize: mockSequelize,
 }));
 
 const mockAxios = {
@@ -40,6 +47,15 @@ const fmToken = jwt.sign({ id: 1, role: "FM" }, process.env.APP_SECRET);
 
 const activeUser = { id: 25, name: "Tan Xiu Li, Felicia", role: "Staff", isActive: true, isEnrolled: true };
 
+// verifyToken is DB-backed: findByPk(1) authenticates the FM requester, while
+// findByPk(25) is the route-level lookup of the scanned user — so the mock must
+// be keyed by id instead of a blanket mockResolvedValue.
+const fmAccount = { id: 1, role: "FM", isActive: true };
+const scanUserTable = (scanned) =>
+  mockUser.findByPk.mockImplementation((id) =>
+    Promise.resolve(Number(id) === 1 ? fmAccount : scanned)
+  );
+
 describe("POST /api/attendance/scan — server-owned safe access log", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -47,7 +63,7 @@ describe("POST /api/attendance/scan — server-owned safe access log", () => {
   });
 
   test("successful verified scan creates attendance AND a server access log", async () => {
-    mockUser.findByPk.mockResolvedValue(activeUser);
+    scanUserTable(activeUser);
     mockAttendance.findAll.mockResolvedValue([]);
     mockAttendance.create.mockResolvedValue({ timestamp: new Date(), type: "IN" });
 
@@ -70,7 +86,7 @@ describe("POST /api/attendance/scan — server-owned safe access log", () => {
   });
 
   test("repeated scans within the cooldown do not duplicate the access log", async () => {
-    mockUser.findByPk.mockResolvedValue(activeUser);
+    scanUserTable(activeUser);
     mockAttendance.findAll.mockResolvedValue([]);
     mockAttendance.create.mockResolvedValue({ timestamp: new Date(), type: "IN" });
 
@@ -84,7 +100,9 @@ describe("POST /api/attendance/scan — server-owned safe access log", () => {
   });
 
   test("denied scan (suspended user) creates NO safe access log here", async () => {
-    mockUser.findByPk.mockResolvedValue({ ...activeUser, isActive: false });
+    // The requester (FM) stays active; only the SCANNED user is suspended, so
+    // the 403 is the route's gate denial — not a middleware auth failure.
+    scanUserTable({ ...activeUser, isActive: false });
     const res = await request(app)
       .post("/api/attendance/scan")
       .set("Authorization", `Bearer ${fmToken}`)
@@ -139,7 +157,11 @@ describe("DELETE /user/:id — offboarding refreshes the AI cache non-fatally", 
   test("offboarding requests a FastAPI /refresh so the wiped template leaves the cache", async () => {
     const res = await request(app).delete("/user/60").set("Authorization", `Bearer ${fmToken}`);
     expect(res.status).toBe(200);
-    expect(target.update).toHaveBeenCalledWith({ faceVector: null, isEnrolled: false });
+    // Same wipe payload as before — now performed inside the off-boarding transaction.
+    expect(target.update).toHaveBeenCalledWith(
+      { faceVector: null, isEnrolled: false },
+      expect.objectContaining({ transaction: expect.anything() })
+    );
     expect(mockAxios.get).toHaveBeenCalledWith(
       expect.stringMatching(/\/refresh$/),
       expect.objectContaining({ headers: expect.objectContaining({ "X-AI-Service-Key": expect.any(String) }) })

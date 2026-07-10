@@ -34,8 +34,23 @@ const nextLocation = () => `Test Gate ${++locSeq}`;
 
 const aiReplies = (data) => mockAxios.post.mockResolvedValue({ data });
 
+// verifyToken is now DB-backed: it re-reads the authenticated account by the
+// JWT's id via User.findByPk. Key the mock by id so BOTH the middleware lookup
+// (auth ids 1/60) and the route-level lookup (matchedUserId) resolve correctly.
+const AUTH_USERS = {
+  1: { id: 1, role: "FM", isActive: true },
+  60: { id: 60, role: "Staff", isActive: true },
+};
+const primeDb = (extra = {}) => {
+  const table = { ...AUTH_USERS, ...extra };
+  mockUser.findByPk.mockImplementation((id) => Promise.resolve(table[id] ?? null));
+};
+
 describe("POST /api/facial-recognition/recognize — access control", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    primeDb();
+  });
 
   test("unauthenticated request → 401", async () => {
     const res = await request(app)
@@ -72,7 +87,10 @@ describe("POST /api/facial-recognition/recognize — access control", () => {
 });
 
 describe("POST /api/facial-recognition/recognize — validation & AI forwarding", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    primeDb();
+  });
 
   test("missing / non-data-URL image → 400", async () => {
     const res = await request(app)
@@ -119,7 +137,10 @@ describe("POST /api/facial-recognition/recognize — validation & AI forwarding"
 });
 
 describe("POST /api/facial-recognition/recognize — outcomes & security logging", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    primeDb();
+  });
 
   test("no face detected → user null and NO suspicious-person log", async () => {
     aiReplies({ matchedUserId: null, confidence: 0, box: null, liveness_ratio: 0.5, faceDetected: false });
@@ -167,8 +188,8 @@ describe("POST /api/facial-recognition/recognize — outcomes & security logging
     aiReplies({ matchedUserId: 25, confidence: 0.92, box: [10, 20, 30, 40], liveness_ratio: 0.31, faceDetected: true });
     // The DB record deliberately differs from anything the AI could claim —
     // proving role/name/status come from PostgreSQL, not FastAPI metadata.
-    mockUser.findByPk.mockResolvedValue({
-      id: 25, name: "Tan Xiu Li, Felicia", role: "FM", isActive: true, isEnrolled: true
+    primeDb({
+      25: { id: 25, name: "Tan Xiu Li, Felicia", role: "FM", isActive: true, isEnrolled: true }
     });
 
     const res = await request(app)
@@ -189,8 +210,8 @@ describe("POST /api/facial-recognition/recognize — outcomes & security logging
 
   test("recognised SUSPENDED user → SUSPENDED result + denial SecurityLog", async () => {
     aiReplies({ matchedUserId: 25, confidence: 0.92, box: [1, 2, 3, 4], liveness_ratio: 0.4, faceDetected: true });
-    mockUser.findByPk.mockResolvedValue({
-      id: 25, name: "Tan Xiu Li, Felicia", role: "FM", isActive: false, isEnrolled: true
+    primeDb({
+      25: { id: 25, name: "Tan Xiu Li, Felicia", role: "FM", isActive: false, isEnrolled: true }
     });
 
     const res = await request(app)
@@ -209,7 +230,7 @@ describe("POST /api/facial-recognition/recognize — outcomes & security logging
 
   test("match for a user the DB no longer knows → DENIED (stale AI cache)", async () => {
     aiReplies({ matchedUserId: 999, confidence: 0.8, box: [1, 2, 3, 4], liveness_ratio: 0.5, faceDetected: true });
-    mockUser.findByPk.mockResolvedValue(null);
+    primeDb({ 999: null }); // FM auth account still resolves; matched id does not
 
     const res = await request(app)
       .post("/api/facial-recognition/recognize")

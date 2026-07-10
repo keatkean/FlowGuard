@@ -11,6 +11,7 @@ import {
   fetchPiSnapshotBitmap,
 } from '../constants/piCamera';
 import { API_BASE_URL } from '../constants/api';
+import { clampBoxToFrame, faceBoxStyle } from '../constants/faceBox';
 import { describeRecognitionSubject, RECOGNITION_STATUS } from '../constants/recognition';
 import {
   SCAN_INTERVAL_MS,
@@ -25,6 +26,7 @@ import {
 const GateScanner = () => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const containerRef = useRef(null); // preview container, for face-box projection
 
   const [scanStatus, setScanStatus] = useState("SYSTEM_ACTIVE");
   const [displayMessage, setDisplayMessage] = useState("PLACE FACE IN VIEWPORT");
@@ -257,19 +259,20 @@ const GateScanner = () => {
 
       if (scanStatusRef.current === "SECURE_MATCH" || scanStatusRef.current === "UNKNOWN_QUERY") return;
 
-      if (res.data && res.data.box && res.data.box.length >= 4) {
-        let rawX, rawY, boxWidth, boxHeight;
-        const [v1, v2, v3, v4] = res.data.box;
-        if (v2 > v4 && v3 > v1) { rawY = v1; rawX = v4; boxWidth = v2 - v4; boxHeight = v3 - v1; } 
-        else { rawX = v1; rawY = v2; boxWidth = v3; boxHeight = v4; }
-        
+      if (res.data && Array.isArray(res.data.box) && res.data.box.length === 4) {
+        // FastAPI contract: box is exactly [x, y, width, height] in pixels of
+        // the captured frame. Direct mapping (no corner-order guessing),
+        // clamped to the frame, projected onto the contain-fit preview.
+        const frame = { width: canvas.width, height: canvas.height };
+        const containerEl = containerRef.current;
+        const container = containerEl
+          ? { width: containerEl.clientWidth, height: containerEl.clientHeight }
+          : frame;
+        const { width: boxWidth } = clampBoxToFrame(res.data.box, frame.width, frame.height);
+        const targetBox = faceBoxStyle(res.data.box, frame, container, 'contain');
+
         const faceProximityPercentage = (boxWidth / canvas.width) * 100;
         const livenessRatio = res.data.liveness_ratio || 0.5;
-
-        const targetBox = {
-          left: `${(rawX / canvas.width) * 100}%`, top: `${(rawY / canvas.height) * 100}%`,
-          width: `${(boxWidth / canvas.width) * 100}%`, height: `${(boxHeight / canvas.height) * 100}%`
-        };
 
         if (faceProximityPercentage < 8 && scanStatusRef.current !== "LIVENESS_CHECK") {
           changeScanState("PRESENCE_DETECTED", "TARGET DETECTED // MOVE CLOSER");
@@ -422,7 +425,7 @@ const GateScanner = () => {
 
         <div className="vpatrol-grid" style={{ gridTemplateColumns: '1fr' }}>
           <div className="vpatrol-card monitor-section">
-            <div className={`cctv-container state-theme-${scanStatus.toLowerCase()}`} style={{ width: '100%', height: '100%' }}>
+            <div ref={containerRef} className={`cctv-container state-theme-${scanStatus.toLowerCase()}`} style={{ width: '100%', height: '100%' }}>
               {cameraSource === CAMERA_SOURCES.PI && (
                 <img
                   src={PI_CAMERA_STREAM_URL}

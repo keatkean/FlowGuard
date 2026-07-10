@@ -123,8 +123,10 @@
 .video-feed {
     width: 100%;
     height: 100%;
-    /* object-fit: fill; */
-    object-fit: cover;
+    /* contain (not cover): the full captured frame stays visible, so the
+       face-tracking overlay projected via constants/faceBox.js lines up 1:1
+       with the preview instead of being shifted by the crop. */
+    object-fit: contain;
     filter: brightness(0.8) contrast(1.25) sepia(5%);
 }
 
@@ -477,6 +479,6 @@
     .video-feed {
         width: 100% !important;
         height: 100% !important;
-        object-fit: cover !important;
+        object-fit: contain !important; /* keep the face overlay aligned on mobile too */
     }
 }

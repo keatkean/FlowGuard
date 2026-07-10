@@ -57,6 +57,26 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.BOOLEAN,
             defaultValue: true,
             allowNull: false
+        },
+        // --- SESSION REVOCATION ---
+        // Stamped into every JWT at login and compared on every authenticated
+        // request. Incremented on password change/reset and on suspension so
+        // all previously issued tokens (e.g. on a lost device) die instantly.
+        tokenVersion: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0,
+            allowNull: false
+        },
+        // --- FORGOT/RESET PASSWORD ---
+        // Only the SHA-256 hash of the emailed reset token is stored — never
+        // the raw token. Cleared as soon as the reset completes.
+        passwordResetTokenHash: {
+            type: DataTypes.STRING(64),
+            allowNull: true
+        },
+        passwordResetExpiresAt: {
+            type: DataTypes.DATE,
+            allowNull: true
         }
     }, {
         tableName: 'users',

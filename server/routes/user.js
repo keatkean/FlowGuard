@@ -1,33 +1,19 @@
 const express = require('express');
 const router = express.Router();
-const { User, Attendance, Invite, SecurityLog } = require('../models');
+const { User, Attendance, Invite, SecurityLog, Booking, sequelize } = require('../models');
+const { Op } = require('sequelize');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const yup = require('yup');
 const axios = require('axios');
 const crypto = require('crypto');
+// Canonical auth middleware: verifies the JWT, then re-reads the account from
+// PostgreSQL on EVERY request (deleted → 401, suspended → 403, tokenVersion
+// mismatch → 401) and uses the DATABASE role as authoritative.
 const { verifyToken, requireRole } = require('../middlewares/auth');
+const { createRateLimiter } = require('../middlewares/rateLimit');
+const { sendPasswordResetEmail } = require('../services/mailer');
 require('dotenv').config();
-
-// --- MIDDLEWARE ---
-const authenticateToken = async (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-
-    if (!token) return res.status(401).json({ message: "Access denied. No token provided." });
-
-    jwt.verify(token, process.env.APP_SECRET, async (err, decoded) => {
-        if (err) return res.status(403).json({ message: "Invalid or expired token." });
-
-        const user = await User.findByPk(decoded.id);
-        if (!user || user.isActive === false) {
-            return res.status(403).json({ message: "Account suspended. Session terminated." });
-        }
-
-        req.user = decoded;
-        next();
-    });
-};
 
 // --- REGISTRATION (Multi-Level Security Gate) ---
 router.post("/register", async (req, res) => {
@@ -134,7 +120,7 @@ router.post("/register", async (req, res) => {
 });
 
 // --- FM ONLY: Get all generated invites ---
-router.post("/invite-tenant", authenticateToken, async (req, res) => {
+router.post("/invite-tenant", verifyToken, async (req, res) => {
     try {
         if (req.user.role !== 'FM') return res.status(403).json({ message: "Access Denied." });
 
@@ -156,7 +142,7 @@ router.post("/invite-tenant", authenticateToken, async (req, res) => {
 });
 
 // --- KEY GENERATION (Updated to reset Hybrid Fields) ---
-router.put("/generate-code", authenticateToken, async (req, res) => {
+router.put("/generate-code", verifyToken, async (req, res) => {
     try {
         if (req.user.role !== 'Tenant') return res.status(403).json({ message: "Access Denied." });
 
@@ -215,9 +201,11 @@ router.post("/login", async (req, res) => {
             return res.status(403).json({ message: "Access Denied: Account suspended." });
         }
 
-        // 5. Generate JWT Token
+        // 5. Generate JWT Token. tokenVersion is stamped into the token and
+        // re-checked on every authenticated request — bumping it (password
+        // change/reset, suspension) instantly revokes tokens on lost devices.
         const token = jwt.sign(
-            { id: user.id, email: user.email, role: user.role },
+            { id: user.id, email: user.email, role: user.role, tokenVersion: user.tokenVersion ?? 0 },
             process.env.APP_SECRET,
             { expiresIn: '1h' }
         );
@@ -238,7 +226,7 @@ router.post("/login", async (req, res) => {
     }
 });
 
-router.get("/my-code", authenticateToken, async (req, res) => {
+router.get("/my-code", verifyToken, async (req, res) => {
     try {
         const user = await User.findByPk(req.user.id, {
             attributes: ['companyCode', 'codeCurrentUsage', 'codeMaxUsage', 'codeCreatedAt']
@@ -250,7 +238,7 @@ router.get("/my-code", authenticateToken, async (req, res) => {
     }
 });
 
-router.get("/my-staff", authenticateToken, async (req, res) => {
+router.get("/my-staff", verifyToken, async (req, res) => {
     try {
         const myStaff = await User.findAll({
             where: { role: 'Staff', managerId: req.user.id },
@@ -264,7 +252,7 @@ router.get("/my-staff", authenticateToken, async (req, res) => {
     }
 });
 
-router.get("/", authenticateToken, async (req, res) => {
+router.get("/", verifyToken, async (req, res) => {
     try {
         if (req.user.role !== 'FM') return res.status(403).json({ message: "Unauthorized." });
 
@@ -295,14 +283,27 @@ router.get("/", authenticateToken, async (req, res) => {
     }
 });
 
-router.put("/suspend/:id", authenticateToken, async (req, res) => {
+router.put("/suspend/:id", verifyToken, async (req, res) => {
     try {
-        if (req.user.role !== 'FM') return res.status(403).json({ message: "Unauthorized." });
-
         const user = await User.findByPk(req.params.id);
         if (!user) return res.status(404).json({ message: "User not found." });
 
-        await user.update({ isActive: !user.isActive });
+        // FM may suspend/reactivate anyone; a Tenant only their OWN Staff.
+        const isFM = req.user.role === 'FM';
+        const isTenantManagingOwnStaff =
+            req.user.role === 'Tenant' && user.role === 'Staff' && user.managerId === req.user.id;
+        if (!isFM && !isTenantManagingOwnStaff) {
+            return res.status(403).json({ message: "Unauthorized." });
+        }
+
+        const suspending = user.isActive === true;
+        await user.update(
+            suspending
+                // Suspension also bumps tokenVersion so every already-issued
+                // JWT for this account is rejected on its very next request.
+                ? { isActive: false, tokenVersion: (user.tokenVersion ?? 0) + 1 }
+                : { isActive: true }
+        );
         res.json({ message: `User status updated to ${user.isActive ? 'Active' : 'Suspended'}` });
     } catch (err) {
         console.error(err);
@@ -310,7 +311,7 @@ router.put("/suspend/:id", authenticateToken, async (req, res) => {
     }
 });
 
-router.get("/logs/:id", authenticateToken, requireRole('FM'), async (req, res) => {
+router.get("/logs/:id", verifyToken, requireRole('FM'), async (req, res) => {
     try {
         const logs = await Attendance.findAll({
             where: { userId: req.params.id },
@@ -324,7 +325,7 @@ router.get("/logs/:id", authenticateToken, requireRole('FM'), async (req, res) =
     }
 });
 
-router.delete("/:id", authenticateToken, async (req, res) => {
+router.delete("/:id", verifyToken, async (req, res) => {
     try {
         const staffMember = await User.findByPk(req.params.id);
         if (!staffMember) return res.status(404).json({ message: "Not found." });
@@ -340,24 +341,57 @@ router.delete("/:id", authenticateToken, async (req, res) => {
             return res.status(403).json({ message: "Unauthorized action." });
         }
 
-        // --- PDPA-COMPLIANT OFF-BOARDING (data minimisation) ---
-        // 1. Explicitly wipe the biometric vector before removing the row, so the
-        //    face embedding can never linger even if the delete is interrupted.
-        await staffMember.update({ faceVector: null, isEnrolled: false });
+        // Tenant off-boarding guard: never leave orphan Staff. The FM must
+        // remove or reassign the tenant's Staff before the tenant account
+        // itself can be deleted (safest PoC behaviour → 409 Conflict).
+        if (staffMember.role === 'Tenant') {
+            const linkedStaff = await User.count({ where: { role: 'Staff', managerId: staffMember.id } });
+            if (linkedStaff > 0) {
+                return res.status(409).json({
+                    message: `This tenant still has ${linkedStaff} linked Staff account(s). Remove or reassign them before off-boarding the tenant.`
+                });
+            }
+        }
 
-        // 2. Hard-delete the user record + their attendance trail (cascade).
-        await Attendance.destroy({ where: { userId: staffMember.id } });
+        const targetId = staffMember.id;
+        const targetName = staffMember.name;
 
-        // 3. Anonymise — not delete — the security/access logs that referenced this
-        //    person. We keep the events for the security audit trail, but strip the
-        //    PII (name) so no biometric-linked identity remains. SecurityLog links by
-        //    name (no FK), so we match on the stored personnelName.
-        await SecurityLog.update(
-            { personnelName: null },
-            { where: { personnelName: staffMember.name } }
-        );
+        // --- PDPA-COMPLIANT OFF-BOARDING (data minimisation, TRANSACTIONAL) ---
+        // Every step commits together or not at all — no half-deleted accounts.
+        await sequelize.transaction(async (t) => {
+            // 1. Explicitly wipe the protected biometric template first, so it
+            //    can never linger even if a later step fails and is retried.
+            await staffMember.update({ faceVector: null, isEnrolled: false }, { transaction: t });
 
-        await staffMember.destroy();
+            // 2. Hard-delete their attendance trail.
+            await Attendance.destroy({ where: { userId: targetId }, transaction: t });
+
+            // 3. Anonymise — not delete — the security/access logs that referenced
+            //    this person. The events stay for the security audit trail, but the
+            //    personal linkage (name + matched user id) is stripped, and any
+            //    description containing their name is replaced with a neutral one.
+            await SecurityLog.update(
+                { personnelName: null, matchedUserId: null },
+                {
+                    where: { [Op.or]: [{ personnelName: targetName }, { matchedUserId: targetId }] },
+                    transaction: t
+                }
+            );
+            await SecurityLog.update(
+                { desc: 'Access event retained for audit — personnel record removed and identity anonymised.' },
+                { where: { desc: { [Op.like]: `%${targetName}%` } }, transaction: t }
+            );
+
+            // 4. Bookings keep their operational audit trail (ref, company,
+            //    schedule, gate scans) but lose the personal account linkage.
+            await Booking.update(
+                { tenantId: null },
+                { where: { tenantId: targetId }, transaction: t }
+            );
+
+            // 5. Hard-delete the user row itself.
+            await staffMember.destroy({ transaction: t });
+        });
 
         // 4. Ask the AI service to reload its known-face cache so the wiped
         //    template disappears from memory immediately. NON-FATAL: the
@@ -396,13 +430,23 @@ router.post('/enroll-face', verifyToken, async (req, res) => {
         const requestedUserId = targetUserId || req.user.id;
         const isSelfEnrollment = String(requestedUserId) === String(req.user.id);
 
-        if (!isSelfEnrollment && requester.role !== 'FM') {
-            return res.status(403).json({ error: "Only Facilities Managers can re-enroll another user's Face ID." });
-        }
-
         const targetUser = await User.findByPk(requestedUserId);
         if (!targetUser) {
             return res.status(404).json({ error: "Target user not found." });
+        }
+
+        // Enrolment permissions:
+        //  - any authenticated user may enrol/re-enrol THEMSELVES
+        //  - FM may enrol/re-enrol ANY user
+        //  - a Tenant may re-enrol only their OWN Staff (target.managerId === requester.id)
+        //  - Staff can never enrol another account
+        const isTenantEnrollingOwnStaff =
+            requester.role === 'Tenant' &&
+            targetUser.role === 'Staff' &&
+            targetUser.managerId === requester.id;
+
+        if (!isSelfEnrollment && requester.role !== 'FM' && !isTenantEnrollingOwnStaff) {
+            return res.status(403).json({ error: "Only Facilities Managers can re-enroll another user's Face ID." });
         }
 
         console.log(`Starting face enrollment for User ID: ${targetUser.id}`);
@@ -481,7 +525,7 @@ router.post('/enroll-face', verifyToken, async (req, res) => {
 //   Staff / Public -> cannot create users
 //   No one can create FM accounts through this flow.
 // The invite-code self-registration flow (POST /register) remains unchanged as an alternative.
-router.post('/manual-create', authenticateToken, async (req, res) => {
+router.post('/manual-create', verifyToken, async (req, res) => {
     try {
         const creatorRole = req.user.role;
 
@@ -542,6 +586,127 @@ router.post('/manual-create', authenticateToken, async (req, res) => {
         }
         console.error("Manual create error:", err);
         return res.status(500).json({ errors: ["An unexpected error occurred while creating the account."] });
+    }
+});
+
+// --- CHANGE PASSWORD (any authenticated user, own account only) ---
+// Verifies the CURRENT password before accepting the new one, then bumps
+// tokenVersion so every previously issued JWT (all devices) is revoked and
+// the user must log in again with the new password. Never returns hashes.
+router.put('/change-password', verifyToken, async (req, res) => {
+    try {
+        const currentPassword = String(req.body.currentPassword || '');
+        const newPassword = String(req.body.newPassword || '');
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ message: "Current and new password are required." });
+        }
+        if (newPassword.length < 8) {
+            return res.status(400).json({ message: "New password must be at least 8 characters." });
+        }
+        if (newPassword === currentPassword) {
+            return res.status(400).json({ message: "New password must be different from the current password." });
+        }
+
+        const user = await User.findByPk(req.user.id);
+        if (!user) return res.status(401).json({ message: "Account no longer exists." });
+
+        const match = await bcrypt.compare(currentPassword, user.password);
+        if (!match) {
+            return res.status(401).json({ message: "Current password is incorrect." });
+        }
+
+        const hashed = await bcrypt.hash(newPassword, 10);
+        await user.update({
+            password: hashed,
+            tokenVersion: (user.tokenVersion ?? 0) + 1 // revoke all existing sessions
+        });
+
+        return res.json({ message: "Password changed successfully. Please log in again with your new password." });
+    } catch (err) {
+        console.error("Change-password error:", err);
+        return res.status(500).json({ message: "Internal server error." });
+    }
+});
+
+// --- FORGOT PASSWORD (public, rate-limited) ---
+// ALWAYS answers with the same generic message so the endpoint cannot be used
+// to probe which emails exist. Stores only the SHA-256 hash of a random token
+// (15-minute expiry) and emails ${CLIENT_URL}/reset-password?token=... via the
+// server-only SMTP configuration (services/mailer.js).
+const forgotPasswordLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 5 });
+const GENERIC_FORGOT_RESPONSE = {
+    message: "If that email matches an authorized FlowGuard profile, a secure reset link has been sent."
+};
+
+router.post('/forgot-password', forgotPasswordLimiter, async (req, res) => {
+    try {
+        const email = String(req.body.email || '').trim();
+        if (!email) return res.json(GENERIC_FORGOT_RESPONSE);
+
+        const user = await User.findOne({ where: { email } });
+        if (user) {
+            const rawToken = crypto.randomBytes(32).toString('hex');
+            const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+            await user.update({
+                passwordResetTokenHash: tokenHash,
+                passwordResetExpiresAt: new Date(Date.now() + 15 * 60 * 1000)
+            });
+
+            const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/+$/, '');
+            const resetUrl = `${clientUrl}/reset-password?token=${rawToken}`;
+
+            try {
+                await sendPasswordResetEmail(user.email, resetUrl);
+            } catch (mailErr) {
+                // Still answer generically — never leak whether the account exists.
+                console.error("Password-reset email failed:", mailErr.message);
+            }
+        }
+
+        return res.json(GENERIC_FORGOT_RESPONSE);
+    } catch (err) {
+        console.error("Forgot-password error:", err);
+        return res.json(GENERIC_FORGOT_RESPONSE);
+    }
+});
+
+// --- RESET PASSWORD (public, token from the emailed link) ---
+router.post('/reset-password', async (req, res) => {
+    try {
+        const token = String(req.body.token || '');
+        const newPassword = String(req.body.newPassword || '');
+
+        if (!token) return res.status(400).json({ message: "Reset token is required." });
+        if (!newPassword || newPassword.length < 8) {
+            return res.status(400).json({ message: "New password must be at least 8 characters." });
+        }
+
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        const user = await User.findOne({
+            where: {
+                passwordResetTokenHash: tokenHash,
+                passwordResetExpiresAt: { [Op.gt]: new Date() }
+            }
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: "Invalid or expired reset link. Please request a new one." });
+        }
+
+        const hashed = await bcrypt.hash(newPassword, 10);
+        await user.update({
+            password: hashed,
+            passwordResetTokenHash: null,
+            passwordResetExpiresAt: null,
+            tokenVersion: (user.tokenVersion ?? 0) + 1 // revoke every existing session
+        });
+
+        return res.json({ message: "Password reset successful. Please log in with your new password." });
+    } catch (err) {
+        console.error("Reset-password error:", err);
+        return res.status(500).json({ message: "Internal server error." });
     }
 });
 

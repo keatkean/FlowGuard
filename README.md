@@ -108,8 +108,10 @@ WHATSAPP_API_URL=https://graph.facebook.com/vXX.X
 WHATSAPP_API_KEY=your_whatsapp_api_key_here
 WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id_here
 
-# client/.env
-VITE_API_URL=http://localhost:5001
+# client/.env — the ONE backend URL variable. Leave EMPTY for local dev
+# (relative URLs go through the Vite proxy); set the deployed Node backend
+# URL for production builds.
+VITE_API_BASE_URL=
 ```
 
 > **WhatsApp notifications are disabled by default.** When `WHATSAPP_ENABLED=false`, FlowGuard uses a safe simulated notification mode for local demos. Never commit a real WhatsApp API key.

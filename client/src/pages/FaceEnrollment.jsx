@@ -3,6 +3,13 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import '../css/Enrollment.css';
 import { API_BASE_URL } from '../constants/api';
+import {
+  PI_CAMERA_STREAM_URL,
+  CAMERA_SOURCES,
+  CAMERA_STATUS_MESSAGES,
+  isPiCameraReachable,
+  fetchPiSnapshotBitmap,
+} from '../constants/piCamera';
 
 const FaceEnrollment = () => {
   const videoRef = useRef(null);
@@ -16,6 +23,14 @@ const FaceEnrollment = () => {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
 
+  // Camera source: Raspberry Pi Camera Module 3 is primary; the laptop webcam
+  // is the AUTOMATIC fallback when the Pi is unreachable. Same shared helpers
+  // as Gate Scanner / V-Patrol. Enrolment photos exist only in memory.
+  const [cameraSource, setCameraSource] = useState(CAMERA_SOURCES.PI);
+  const [cameraStatusMsg, setCameraStatusMsg] = useState("Connecting to Pi Camera...");
+  const cameraSourceRef = useRef(CAMERA_SOURCES.PI);
+  const piFailStreakRef = useRef(0);
+
   const token = localStorage.getItem("accessToken");
   const userName = localStorage.getItem("userName");
   const targetUserId = searchParams.get("userId");
@@ -27,11 +42,52 @@ const FaceEnrollment = () => {
   const allUploaded = photos.front && photos.left && photos.right;
 
   useEffect(() => {
-    startCamera();
-    return () => stopCamera();
+    initCameraSource();
+    return () => stopWebcam();
   }, []);
 
-  const startCamera = async () => {
+  const applyCameraSource = (source, statusMsg) => {
+    cameraSourceRef.current = source;
+    setCameraSource(source);
+    setCameraStatusMsg(statusMsg);
+    piFailStreakRef.current = 0;
+  };
+
+  // Probe the Pi on page load (first-time enrolment AND re-enrolment). If the
+  // Pi answers, show its MJPEG preview and capture via /snapshot; otherwise
+  // fall back to the laptop webcam automatically. Node/FastAPI being offline
+  // must NEVER trigger this fallback — only Pi reachability does.
+  const initCameraSource = async () => {
+    const piReachable = await isPiCameraReachable();
+    if (piReachable) {
+      stopWebcam();
+      applyCameraSource(CAMERA_SOURCES.PI, CAMERA_STATUS_MESSAGES.PI_CONNECTED);
+    } else {
+      applyCameraSource(CAMERA_SOURCES.WEBCAM, CAMERA_STATUS_MESSAGES.PI_UNAVAILABLE);
+      await startWebcam();
+    }
+  };
+
+  // Manual camera source switch (Pi Camera / Laptop Webcam)
+  const selectCameraSource = async (source) => {
+    if (source === cameraSourceRef.current) return;
+    setErrorMessage(null);
+    if (source === CAMERA_SOURCES.PI) {
+      const piReachable = await isPiCameraReachable();
+      if (piReachable) {
+        stopWebcam();
+        applyCameraSource(CAMERA_SOURCES.PI, CAMERA_STATUS_MESSAGES.PI_CONNECTED);
+      } else {
+        applyCameraSource(CAMERA_SOURCES.WEBCAM, CAMERA_STATUS_MESSAGES.PI_UNAVAILABLE);
+        await startWebcam();
+      }
+    } else {
+      applyCameraSource(CAMERA_SOURCES.WEBCAM, CAMERA_STATUS_MESSAGES.WEBCAM_ACTIVE);
+      await startWebcam();
+    }
+  };
+
+  const startWebcam = async () => {
     // No camera API (insecure context / no webcam): steer the user to manual upload.
     if (!navigator.mediaDevices?.getUserMedia) {
       setErrorMessage("No webcam detected on this device. Use the “Upload Photos” option instead.");
@@ -55,36 +111,66 @@ const FaceEnrollment = () => {
     }
   };
 
-  const stopCamera = () => {
+  const stopWebcam = () => {
     if (videoRef.current && videoRef.current.srcObject) {
       const tracks = videoRef.current.srcObject.getTracks();
       tracks.forEach(track => track.stop());
+      videoRef.current.srcObject = null;
     }
   };
 
-  const capturePhoto = () => {
-    const video = videoRef.current;
+  const advanceStage = () => {
+    if (stage === 'front') setStage('left');
+    else if (stage === 'left') setStage('right');
+    else {
+      setStage('ready');
+      stopWebcam();
+    }
+  };
+
+  // Capture the current angle from the active source onto the hidden canvas.
+  // Pi source pulls one fresh frame from /snapshot; after three consecutive
+  // snapshot failures the page switches to the laptop webcam automatically.
+  const capturePhoto = async () => {
     const canvas = canvasRef.current;
-    
-    if (video && canvas) {
-      const context = canvas.getContext('2d');
-      const maxWidth = 640;
+    if (!canvas) return;
+    const context = canvas.getContext('2d');
+    const maxWidth = 640;
+
+    if (cameraSourceRef.current === CAMERA_SOURCES.PI) {
+      let bitmap;
+      try {
+        bitmap = await fetchPiSnapshotBitmap();
+        piFailStreakRef.current = 0;
+      } catch {
+        piFailStreakRef.current += 1;
+        if (piFailStreakRef.current >= 3) {
+          applyCameraSource(CAMERA_SOURCES.WEBCAM, CAMERA_STATUS_MESSAGES.PI_UNAVAILABLE);
+          await startWebcam();
+          setErrorMessage("Pi Camera stopped responding — switched to the laptop webcam. Capture again.");
+        } else {
+          setErrorMessage("Pi Camera snapshot failed. Please try capturing again.");
+        }
+        return;
+      }
+      const scale = Math.min(1, maxWidth / bitmap.width);
+      canvas.width = Math.round(bitmap.width * scale);
+      canvas.height = Math.round(bitmap.height * scale);
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close?.();
+    } else {
+      const video = videoRef.current;
+      if (!video || !video.videoWidth) return;
       const scale = Math.min(1, maxWidth / video.videoWidth);
       canvas.width = Math.round(video.videoWidth * scale);
       canvas.height = Math.round(video.videoHeight * scale);
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      const imageDataUrl = canvas.toDataURL('image/jpeg', 0.75);
-      
-      setPhotos(prev => ({ ...prev, [stage]: imageDataUrl }));
-      
-      if (stage === 'front') setStage('left');
-      else if (stage === 'left') setStage('right');
-      else {
-        setStage('ready');
-        stopCamera();
-      }
     }
+
+    const imageDataUrl = canvas.toDataURL('image/jpeg', 0.75);
+    setErrorMessage(null);
+    setPhotos(prev => ({ ...prev, [stage]: imageDataUrl }));
+    advanceStage();
   };
 
   const switchMode = (mode) => {
@@ -94,9 +180,9 @@ const FaceEnrollment = () => {
     setErrorMessage(null);
     setStage('front');
     if (mode === 'camera') {
-      startCamera();
+      initCameraSource();
     } else {
-      stopCamera();
+      stopWebcam();
     }
   };
 
@@ -119,7 +205,7 @@ const FaceEnrollment = () => {
     setPhotos({ front: null, left: null, right: null });
     setErrorMessage(null);
     setStage('front');
-    if (enrollmentMode === 'camera') startCamera();
+    if (enrollmentMode === 'camera') initCameraSource();
   };
 
   const submitEnrollment = async () => {
@@ -136,7 +222,7 @@ const FaceEnrollment = () => {
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      
+
       // Navigate to dashboard on success
       navigate(returnTo, {
         state: {
@@ -144,11 +230,12 @@ const FaceEnrollment = () => {
             ? `Face ID re-enrolled for ${displayName}.`
             : "Biometric enrollment successful."
         }
-      }); 
+      });
     } catch (error) {
       console.error("Enrollment failed:", error);
-      
-      // Extract specific error from backend if available
+
+      // Extract specific error from backend if available. A Node/FastAPI outage
+      // surfaces here as an error banner — it must NOT switch the camera source.
       const backendError = error.response?.data?.error || "Facial vectoring failed. Ensure face is clearly visible.";
       setErrorMessage(backendError);
     } finally {
@@ -168,6 +255,8 @@ const FaceEnrollment = () => {
       default: return "";
     }
   };
+
+  const isPiPreview = enrollmentMode === 'camera' && cameraSource === CAMERA_SOURCES.PI;
 
   return (
     <div className="enrollment-layout">
@@ -192,6 +281,35 @@ const FaceEnrollment = () => {
           </button>
         </div>
 
+        {/* --- CAMERA SOURCE (Pi primary / webcam fallback) --- */}
+        {enrollmentMode === 'camera' && (
+          <div className="camera-source-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', flexWrap: 'wrap', margin: '10px 0' }}>
+            <button
+              type="button"
+              onClick={() => selectCameraSource(CAMERA_SOURCES.PI)}
+              style={{
+                padding: '5px 12px', borderRadius: 8, cursor: 'pointer', fontSize: '0.8rem',
+                border: cameraSource === CAMERA_SOURCES.PI ? '1px solid #3b82f6' : '1px solid #334155',
+                background: cameraSource === CAMERA_SOURCES.PI ? '#1d4ed8' : '#1e293b', color: '#e2e8f0'
+              }}
+            >
+              Raspberry Pi Camera
+            </button>
+            <button
+              type="button"
+              onClick={() => selectCameraSource(CAMERA_SOURCES.WEBCAM)}
+              style={{
+                padding: '5px 12px', borderRadius: 8, cursor: 'pointer', fontSize: '0.8rem',
+                border: cameraSource === CAMERA_SOURCES.WEBCAM ? '1px solid #3b82f6' : '1px solid #334155',
+                background: cameraSource === CAMERA_SOURCES.WEBCAM ? '#1d4ed8' : '#1e293b', color: '#e2e8f0'
+              }}
+            >
+              Laptop Webcam
+            </button>
+            <span style={{ color: '#38bdf8', fontSize: '0.78rem' }}>{cameraStatusMsg}</span>
+          </div>
+        )}
+
         <div className="progress-tracker">
             <span className={`tracker-badge ${photos.front ? 'done' : enrollmentMode === 'camera' && stage === 'front' ? 'active' : ''}`}>Front</span>
             <span className="tracker-line"></span>
@@ -212,7 +330,22 @@ const FaceEnrollment = () => {
               </div>
             ) : (
               <div className="video-wrapper">
-                <video ref={videoRef} autoPlay playsInline muted className="live-video" />
+                {isPiPreview && (
+                  <img
+                    src={PI_CAMERA_STREAM_URL}
+                    alt="Raspberry Pi camera live preview"
+                    className="live-video"
+                    style={{ transform: 'none' }} /* Pi view is not a mirror */
+                  />
+                )}
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="live-video"
+                  style={isPiPreview ? { display: 'none' } : undefined}
+                />
                 <div className={`face-guide-overlay ${stage}`}></div>
               </div>
             )

@@ -87,8 +87,6 @@ async function startServer() {
         const port = resolvePort();
         const host = resolveHost();
         app.listen(port, host, () => {
-        let port = process.env.APP_PORT || 5001;
-        app.listen(port, '0.0.0.0', () => {
             console.log("--------------------------------------------------");
             console.log(`FlowGuard Server is FULLY READY on ${host}:${port}`);
             console.log("--------------------------------------------------");

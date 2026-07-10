@@ -22,7 +22,17 @@ const app = express();
 app.use(express.json());
 app.use("/api/bookings", bookingRouter);
 
-const tokenFor = (role, id = 7) => jwt.sign({ id, role }, process.env.APP_SECRET);
+// verifyToken is now DB-backed: it re-reads the account via User.findByPk and
+// the DB role is authoritative, so each role needs its own id. The mocked User
+// table below is keyed by those ids (50 = the Tenant who owns booking 42).
+const ID_BY_ROLE = { FM: 7, Tenant: 8, Staff: 9 };
+const DB_USERS = {
+  7: { id: 7, role: "FM", isActive: true },
+  8: { id: 8, role: "Tenant", isActive: true },
+  9: { id: 9, role: "Staff", isActive: true },
+  50: { id: 50, role: "Tenant", isActive: true },
+};
+const tokenFor = (role, id = ID_BY_ROLE[role]) => jwt.sign({ id, role }, process.env.APP_SECRET);
 
 const makeBooking = (overrides = {}) => ({
   id: 42,
@@ -46,7 +56,11 @@ const makeBooking = (overrides = {}) => ({
 });
 
 describe("PATCH /api/bookings/:id — manual edit", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // Re-arm the DB-backed auth lookup after clearing mocks.
+    mockUser.findByPk.mockImplementation((id) => Promise.resolve(DB_USERS[id] || null));
+  });
 
   test("unauthenticated → 401", async () => {
     const res = await request(app).patch("/api/bookings/42").send({ driver_name: "X" });

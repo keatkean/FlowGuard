@@ -30,10 +30,23 @@ const staffToken = jwt.sign({ id: 60, role: "Staff" }, process.env.APP_SECRET);
 
 const activeUser = { id: 25, name: "Tan Xiu Li, Felicia", role: "Staff", isActive: true, isEnrolled: true };
 
+// verifyToken is now DB-backed: it re-reads the authenticated account by the
+// JWT's id via User.findByPk. Key the mock by id so BOTH the middleware lookup
+// (auth ids 1/60) and the route-level lookup (target userId) resolve correctly.
+const AUTH_USERS = {
+  1: { id: 1, role: "FM", isActive: true },
+  60: { id: 60, role: "Staff", isActive: true },
+};
+const primeDb = (extra = {}) => {
+  const table = { ...AUTH_USERS, ...extra };
+  mockUser.findByPk.mockImplementation((id) => Promise.resolve(table[id] ?? null));
+};
+
 describe("POST /api/facial-recognition/access-event", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetLogCooldowns();
+    primeDb();
     mockSecurityLog.create.mockResolvedValue({});
   });
 
@@ -51,7 +64,7 @@ describe("POST /api/facial-recognition/access-event", () => {
   });
 
   test("verified active user → safe access log, NO attendance record", async () => {
-    mockUser.findByPk.mockResolvedValue(activeUser);
+    primeDb({ 25: activeUser });
 
     const res = await request(app)
       .post("/api/facial-recognition/access-event")
@@ -75,7 +88,7 @@ describe("POST /api/facial-recognition/access-event", () => {
   });
 
   test("repeated events within the cooldown are deduplicated", async () => {
-    mockUser.findByPk.mockResolvedValue(activeUser);
+    primeDb({ 25: activeUser });
     for (let i = 0; i < 3; i++) {
       await request(app)
         .post("/api/facial-recognition/access-event")
@@ -86,7 +99,7 @@ describe("POST /api/facial-recognition/access-event", () => {
   });
 
   test("suspended user → 403 and no safe log", async () => {
-    mockUser.findByPk.mockResolvedValue({ ...activeUser, isActive: false });
+    primeDb({ 25: { ...activeUser, isActive: false } });
     const res = await request(app)
       .post("/api/facial-recognition/access-event")
       .set("Authorization", `Bearer ${fmToken}`)
@@ -96,7 +109,7 @@ describe("POST /api/facial-recognition/access-event", () => {
   });
 
   test("unknown / non-enrolled userId → 404", async () => {
-    mockUser.findByPk.mockResolvedValue(null);
+    primeDb({ 9999: null }); // FM auth account still resolves; target id does not
     const res = await request(app)
       .post("/api/facial-recognition/access-event")
       .set("Authorization", `Bearer ${fmToken}`)

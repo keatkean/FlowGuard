@@ -8,6 +8,7 @@ const mockUser = {
   create: jest.fn(),
   update: jest.fn(),
   destroy: jest.fn(),
+  count: jest.fn(),
 };
 
 jest.mock("../models", () => ({
@@ -15,6 +16,9 @@ jest.mock("../models", () => ({
   Attendance: { findAll: jest.fn(), destroy: jest.fn() },
   Invite: { findOne: jest.fn(), create: jest.fn() },
   SecurityLog: { update: jest.fn() },
+  Booking: { update: jest.fn() },
+  // Transactional off-boarding: run the callback with a stub transaction.
+  sequelize: { transaction: jest.fn((fn) => fn({})) },
 }));
 
 jest.mock("axios", () => ({
@@ -89,17 +93,27 @@ describe("User routes", () => {
   test("DELETE /user/:id removes a user and wipes biometric data", async () => {
     const update = jest.fn().mockResolvedValue(true);
     const destroy = jest.fn().mockResolvedValue(true);
-    mockUser.findByPk.mockResolvedValue({ id: 1, name: "Worker Bee", managerId: 99, update, destroy });
+    // Middleware re-reads the FM (id 99); the route loads the target (id 1).
+    const fmAccount = { id: 99, role: "FM", isActive: true };
+    const target = { id: 1, name: "Worker Bee", role: "Staff", managerId: 99, update, destroy };
+    mockUser.findByPk.mockImplementation((id) =>
+      Promise.resolve(Number(id) === 99 ? fmAccount : target)
+    );
     const res = await request(app)
       .delete("/user/1")
       .set("Authorization", `Bearer ${fmToken}`);
     expect(res.status).toBe(200);
-    // PDPA: biometric vector explicitly nulled, and access logs anonymised by name.
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({ faceVector: null }));
-    expect(require("../models").SecurityLog.update).toHaveBeenCalledWith(
-      { personnelName: null },
-      { where: { personnelName: "Worker Bee" } }
+    // PDPA: biometric vector explicitly nulled inside the transaction, access
+    // logs anonymised (name + matched user id stripped), row hard-deleted.
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ faceVector: null, isEnrolled: false }),
+      expect.any(Object)
     );
+    expect(require("../models").SecurityLog.update).toHaveBeenCalledWith(
+      expect.objectContaining({ personnelName: null, matchedUserId: null }),
+      expect.objectContaining({ where: expect.anything() })
+    );
+    expect(destroy).toHaveBeenCalled();
   });
 
   // --- Manual user creation (role rules) ---

@@ -5,6 +5,7 @@ import SystemHealth from './pages/SystemHealth';
 import Contact from './pages/Contact';
 import Login from './pages/Login';
 import ForgotKey from './pages/ForgotKey';
+import ResetPassword from './pages/ResetPassword';
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import NotFound from "./pages/NotFound";
@@ -52,6 +53,7 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotKey />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/innovation" element={<AIInnovation />} />
         <Route path="/driver-portal" element={<DriverPortal />} />
 

@@ -11,6 +11,7 @@ import {
   fetchPiSnapshotBitmap,
 } from '../constants/piCamera';
 import { API_BASE_URL } from '../constants/api';
+import { clampBoxToFrame, faceBoxStyle } from '../constants/faceBox';
 import { describeRecognitionSubject, RECOGNITION_STATUS } from '../constants/recognition';
 import { formatSingaporeTimestamp, formatSingaporeFull } from '../constants/datetime';
 import {
@@ -34,6 +35,7 @@ import {
 const VPatrol = () => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const containerRef = useRef(null); // preview container, for face-box projection
 
   // Camera source: Raspberry Pi Gate Camera is primary, laptop webcam is fallback
   const [cameraSource, setCameraSource] = useState(CAMERA_SOURCES.PI);
@@ -318,31 +320,21 @@ const VPatrol = () => {
          return;
       }
 
-      if (res.data && res.data.box && res.data.box.length >= 4) {
-        
-        let rawX, rawY, boxWidth, boxHeight;
-        const [v1, v2, v3, v4] = res.data.box;
+      if (res.data && Array.isArray(res.data.box) && res.data.box.length === 4) {
+        // FastAPI contract: box is exactly [x, y, width, height] in pixels of
+        // the captured frame. Direct mapping (no corner-order guessing),
+        // clamped to the frame, projected onto the contain-fit preview.
+        const frame = { width: canvas.width, height: canvas.height };
+        const containerEl = containerRef.current;
+        const container = containerEl
+          ? { width: containerEl.clientWidth, height: containerEl.clientHeight }
+          : frame;
+        const { width: boxWidth } = clampBoxToFrame(res.data.box, frame.width, frame.height);
+        const targetBox = faceBoxStyle(res.data.box, frame, container, 'contain');
 
-        // Note: The AI is now returning coordinates based on the SMALL 480px canvas, not the video
-        if (v3 > v1 && v4 > v2 && v3 <= canvas.width && v4 <= canvas.height) {
-          rawX = v1; rawY = v2; boxWidth = v3 - v1; boxHeight = v4 - v2;
-        } else if (v2 > v4 && v3 > v1) {
-          rawY = v1; rawX = v4; boxWidth = v2 - v4; boxHeight = v3 - v1; 
-        } else {
-          rawX = v1; rawY = v2; boxWidth = v3; boxHeight = v4;
-        }
-        
         // Calculate proximity based on the compressed canvas width
-        const faceProximityPercentage = (boxWidth / canvas.width) * 100; 
+        const faceProximityPercentage = (boxWidth / canvas.width) * 100;
         const livenessRatio = res.data.liveness_ratio || 0.5;
-
-        // 🎯 UPDATED MATH: Calculate percentages using the compressed canvas dimensions
-        const targetBox = {
-          left: `${(rawX / canvas.width) * 100}%`,
-          top: `${(rawY / canvas.height) * 100}%`,
-          width: `${(boxWidth / canvas.width) * 100}%`,
-          height: `${(boxHeight / canvas.height) * 100}%`
-        };
 
         if (faceProximityPercentage < 5 && scanStatusRef.current !== "LIVENESS_CHECK") {
           if (scanStatusRef.current === "SYSTEM_ACTIVE" || scanStatusRef.current === "PRESENCE_DETECTED") {
@@ -499,7 +491,7 @@ const VPatrol = () => {
 
         <div className="vpatrol-grid">
           <div className="vpatrol-card monitor-section">
-            <div className={`cctv-container state-theme-${scanStatus.toLowerCase()}`} style={{ width: '100%', height: '100%' }}>
+            <div ref={containerRef} className={`cctv-container state-theme-${scanStatus.toLowerCase()}`} style={{ width: '100%', height: '100%' }}>
               {cameraSource === CAMERA_SOURCES.PI && (
                 <img
                   src={PI_CAMERA_STREAM_URL}
