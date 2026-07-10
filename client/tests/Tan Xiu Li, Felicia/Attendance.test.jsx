@@ -1,50 +1,67 @@
-// Frontend tests — Daily Attendance role-aware wording + Staff empty state.
-import React from "react";
-import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
-import { vi, describe, test, expect, beforeEach } from "vitest";
+﻿import React from 'react';
+import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { vi, describe, test, expect, beforeEach } from 'vitest';
 
-const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn(() => Promise.resolve({ data: [] })) }));
-vi.mock("axios", () => ({ default: { get: mockGet } }));
+const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
+vi.mock('axios', () => ({ default: { get: mockGet } }));
 
-import Attendance from "../../src/pages/Attendance";
+import Attendance from '../../src/pages/Attendance';
 
-const renderAs = (role) => {
-  localStorage.setItem("accessToken", "test-token");
-  localStorage.setItem("userRole", role);
-  return render(<MemoryRouter><Attendance /></MemoryRouter>);
+const responses = {
+  FM: { role: 'FM', summary: { peopleOnSite: 3, checkedInToday: 8, checkedOutToday: 5 } },
+  Tenant: {
+    role: 'Tenant',
+    summary: { staffOnSite: 2, onTimeToday: 4, lateToday: 1 },
+    records: [{ userId: 10, user: { name: 'Linked Staff', role: 'Staff' }, date: '2026-07-10', firstCheckIn: '2026-07-10T00:30:00.000Z', latestCheckOut: '2026-07-10T09:00:00.000Z', currentStatus: 'OUT', punctuality: 'ON_TIME' }]
+  },
+  Staff: {
+    role: 'Staff',
+    summary: { currentStatus: 'IN', firstCheckIn: '2026-07-10T00:30:00.000Z', latestCheckOut: null, punctuality: 'ON_TIME' },
+    records: [{ userId: 60, user: { name: 'Me', role: 'Staff' }, date: '2026-07-10', firstCheckIn: '2026-07-10T00:30:00.000Z', latestCheckOut: null, currentStatus: 'IN', punctuality: 'ON_TIME' }]
+  }
 };
 
-beforeEach(() => { mockGet.mockClear(); localStorage.clear(); });
+const renderAs = async (role) => {
+  localStorage.setItem('accessToken', 'test-token');
+  localStorage.setItem('userRole', role);
+  mockGet.mockResolvedValueOnce({ data: responses[role] });
+  render(<MemoryRouter><Attendance /></MemoryRouter>);
+  await waitFor(() => expect(mockGet).toHaveBeenCalled());
+};
 
-describe("Daily Attendance — role-aware copy", () => {
-  test("FM sees the workforce management title", () => {
-    renderAs("FM");
-    expect(screen.getByText("Workforce Attendance Management")).toBeTruthy();
-    expect(screen.getByText(/Global facility occupancy/i)).toBeTruthy();
+beforeEach(() => { mockGet.mockReset(); localStorage.clear(); });
+
+describe('Daily Attendance - Phase 2 role-aware summaries', () => {
+  test('FM sees aggregate operational cards only', async () => {
+    await renderAs('FM');
+    expect(await screen.findByText('Workforce Attendance Management')).toBeTruthy();
+    expect(screen.getByText('People On Site')).toBeTruthy();
+    expect(screen.getByText('Checked In Today')).toBeTruthy();
+    expect(screen.getByText('Checked Out Today')).toBeTruthy();
+    expect(screen.getByText(/Individual late-arrival performance/i)).toBeTruthy();
+    expect(screen.queryByText('Late Exceptions')).toBeNull();
   });
 
-  test("Tenant sees the unit staff title", () => {
-    renderAs("Tenant");
-    expect(screen.getByText("Unit Staff Attendance")).toBeTruthy();
-    expect(screen.getByText(/your registered unit staff/i)).toBeTruthy();
+  test('Tenant sees own-Staff cards and detailed linked Staff table', async () => {
+    await renderAs('Tenant');
+    expect(await screen.findByText('Unit Staff Attendance')).toBeTruthy();
+    expect(screen.getByText('Staff On Site')).toBeTruthy();
+    expect(screen.getByText('Late Exceptions')).toBeTruthy();
+    expect(screen.getByText('Linked Staff')).toBeTruthy();
   });
 
-  test("Staff sees the personal 'My Attendance' title + personal cards", () => {
-    renderAs("Staff");
-    expect(screen.getByText("My Attendance")).toBeTruthy();
-    expect(screen.getByText(/your own check-in/i)).toBeTruthy();
-    expect(screen.getByText("My On-Time Arrivals")).toBeTruthy();
-    expect(screen.getByText("My Late Exceptions")).toBeTruthy();
+  test('Staff sees personal status and own history only', async () => {
+    await renderAs('Staff');
+    expect(await screen.findByText('My Attendance')).toBeTruthy();
+    expect(screen.getByText('Current Status')).toBeTruthy();
+    expect(screen.getByText('First Check-In')).toBeTruthy();
+    expect(screen.getByText('Latest Check-Out')).toBeTruthy();
+    expect(screen.queryByText('Staff On Site')).toBeNull();
   });
 
-  test("Staff empty state is account-scoped wording", async () => {
-    renderAs("Staff");
-    expect(await screen.findByText("No attendance records found for your account.")).toBeTruthy();
-  });
-
-  test("Staff page is accessible (renders without crashing) and calls the logs API", async () => {
-    renderAs("Staff");
-    expect(mockGet).toHaveBeenCalledWith("/api/attendance/logs", expect.any(Object));
+  test('calls the role-aware logs API with a date filter', async () => {
+    await renderAs('Staff');
+    expect(mockGet).toHaveBeenCalledWith('/api/attendance/logs', expect.objectContaining({ params: { filter: 'today' } }));
   });
 });

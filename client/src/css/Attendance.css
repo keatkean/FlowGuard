@@ -1,3 +1,45 @@
+﻿.attendance-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.attendance-actions select,
+.attendance-actions input[type="date"] {
+  background: #0f172a;
+  border: 1px solid #334155;
+  color: #f8fafc;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.attendance-error,
+.attendance-aggregate-note {
+  background: #1e2539;
+  border: 1px solid #2d364f;
+  border-radius: 8px;
+  padding: 18px;
+  margin-bottom: 20px;
+}
+
+.attendance-error {
+  color: #fecdd3;
+  border-color: rgba(244, 63, 94, 0.35);
+  background: rgba(244, 63, 94, 0.1);
+}
+
+.attendance-aggregate-note h3 {
+  margin: 0 0 6px;
+  color: #f8fafc;
+}
+
+.attendance-aggregate-note p {
+  margin: 0;
+  color: #94a3b8;
+  line-height: 1.5;
+}
 /* --- Layout Header & Actions --- */
 .attendance-header {
   display: flex;
@@ -130,7 +172,7 @@
     border-radius: 8px;
   }
 
-  /* 4. 🎯 FORCE CONTENT TO THE LEFT OVERRIDE */
+  /* 4. ðŸŽ¯ FORCE CONTENT TO THE LEFT OVERRIDE */
   .management-table tr,
   .management-table th,
   .management-table td {

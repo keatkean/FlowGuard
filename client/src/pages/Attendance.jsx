@@ -1,43 +1,65 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom'; 
+﻿import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Sidebar from '../components/Sidebar';
 import '../css/Dashboard.css';
-import '../css/Management.css'; 
-import '../css/Attendance.css'; 
+import '../css/Management.css';
+import '../css/Attendance.css';
 import { API_BASE_URL } from '../constants/api';
 
-const Attendance = () => {
-  const navigate = useNavigate(); 
-  const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [metrics, setMetrics] = useState({ totalPresent: 0, onTime: 0, lateCount: 0 });
-  
-  const token = localStorage.getItem("accessToken");
-  const userRole = localStorage.getItem("userRole") || 'Tenant';
-  const userName = localStorage.getItem("userName") || 'User';
+const FILTERS = [
+  { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'last7', label: 'Last 7 Days' },
+  { value: 'custom', label: 'Custom Date' }
+];
 
-  // Role-aware copy so the page never implies workforce-wide access it doesn't grant.
-  const isFM = userRole === 'FM';
-  const isStaff = userRole === 'Staff';
+const formatDateTime = (value) => value
+  ? new Intl.DateTimeFormat('en-SG', { timeZone: 'Asia/Singapore', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+  : 'Not recorded';
+
+const formatStatus = (status) => {
+  if (status === 'ON_TIME') return 'On Time';
+  if (status === 'LATE') return 'Late';
+  return 'No Check-In';
+};
+
+const Attendance = () => {
+  const navigate = useNavigate();
+  const [attendance, setAttendance] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [filter, setFilter] = useState('today');
+  const [customDate, setCustomDate] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Singapore' }));
+
+  const token = localStorage.getItem('accessToken');
+  const userRole = localStorage.getItem('userRole') || 'Tenant';
+  const isFM = attendance?.role === 'FM' || userRole === 'FM';
+  const isTenant = attendance?.role === 'Tenant' || userRole === 'Tenant';
+  const isStaff = attendance?.role === 'Staff' || userRole === 'Staff';
+
   const pageTitle = isFM ? 'Workforce Attendance Management'
-    : userRole === 'Tenant' ? 'Unit Staff Attendance'
+    : isTenant ? 'Unit Staff Attendance'
     : 'My Attendance';
-  const pageSubtitle = isFM ? 'Global facility occupancy and labor tracking logs'
-    : userRole === 'Tenant' ? 'Attendance records for your registered unit staff'
-    : 'View your own check-in and attendance records';
+  const pageSubtitle = isFM ? 'Aggregate facility occupancy without individual lateness details'
+    : isTenant ? 'Attendance summaries for your directly linked Staff'
+    : 'View your own check-in status and attendance history';
 
   const fetchAttendanceData = async () => {
+    setLoading(true);
+    setError('');
     try {
+      const params = { filter };
+      if (filter === 'custom') params.date = customDate;
       const res = await axios.get(`${API_BASE_URL}/api/attendance/logs`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
+        params
       });
-      if (res.data) {
-        setLogs(res.data);
-        calculateMetrics(res.data);
-      }
+      setAttendance(res.data);
     } catch (err) {
-      console.error("Failed to load workforce attendance metrics:", err);
+      console.error('Failed to load workforce attendance metrics:', err);
+      setError(err.response?.data?.error || 'Unable to load attendance right now.');
+      setAttendance(null);
     } finally {
       setLoading(false);
     }
@@ -45,156 +67,109 @@ const Attendance = () => {
 
   useEffect(() => {
     fetchAttendanceData();
-    const pollInterval = setInterval(fetchAttendanceData, 30000); // auto-refresh every 30s
-    return () => clearInterval(pollInterval);
-  }, [token]);
+  }, [token, filter, customDate]);
 
-  const calculateMetrics = (attendanceData) => {
-    const todayStr = new Date().toDateString();
-    
-    const logsToday = attendanceData.filter(log => 
-      new Date(log.timestamp).toDateString() === todayStr
-    );
+  const cards = useMemo(() => {
+    const summary = attendance?.summary || {};
+    if (isFM) {
+      return [
+        ['People On Site', summary.peopleOnSite ?? 0, 'blue-status'],
+        ['Checked In Today', summary.checkedInToday ?? 0, 'green-status'],
+        ['Checked Out Today', summary.checkedOutToday ?? 0, 'orange-status']
+      ];
+    }
+    if (isTenant) {
+      return [
+        ['Staff On Site', summary.staffOnSite ?? 0, 'blue-status'],
+        ['On Time', summary.onTimeToday ?? 0, 'green-status'],
+        ['Late Exceptions', summary.lateToday ?? 0, 'orange-status']
+      ];
+    }
+    return [
+      ['Current Status', summary.currentStatus === 'IN' ? 'On Site' : 'Off Site', 'blue-status'],
+      ['First Check-In', summary.firstCheckIn ? formatDateTime(summary.firstCheckIn) : 'Not recorded', 'green-status'],
+      ['Latest Check-Out', summary.latestCheckOut ? formatDateTime(summary.latestCheckOut) : 'Not recorded', 'orange-status']
+    ];
+  }, [attendance, isFM, isTenant]);
 
-    const userLatestStatus = {}; 
-
-    logsToday.forEach(log => {
-      const userId = log.User?.id;
-      if (userId && !userLatestStatus.hasOwnProperty(userId)) {
-        userLatestStatus[userId] = log.type; 
-      }
-    });
-
-    const totalPresent = Object.values(userLatestStatus).filter(status => status === 'IN').length;
-
-    let onTime = 0;
-    let lateCount = 0;
-    const processedUsers = new Set();
-
-    [...logsToday].reverse().forEach(log => {
-      const userId = log.User?.id;
-      if (userId && log.type === 'IN' && !processedUsers.has(userId)) {
-        processedUsers.add(userId);
-        const checkInTime = new Date(log.timestamp);
-        
-        if (checkInTime.getHours() >= 9) {
-          lateCount++;
-        } else {
-          onTime++;
-        }
-      }
-    });
-
-    setMetrics({ totalPresent, onTime, lateCount });
-  };
+  const records = attendance?.records || [];
 
   return (
     <div className="dashboard-layout">
       <Sidebar />
       <main className="dashboard-main">
-        {/* 🎯 Class assigned here */}
         <header className="dashboard-header attendance-header">
           <div className="header-titles">
             <h1>{pageTitle}</h1>
             <p>{pageSubtitle}</p>
           </div>
-          
-          {/* 🎯 Class assigned here */}
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button onClick={fetchAttendanceData} className="launch-terminal-btn" style={{ background: '#334155' }}>
-              Refresh
-            </button>
-            {/* Gate terminal is an FM/Staff operational tool — hide from Tenants who cannot open it */}
+
+          <div className="attendance-actions">
+            <select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Attendance date filter">
+              {FILTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+            {filter === 'custom' && (
+              <input type="date" value={customDate} onChange={(e) => setCustomDate(e.target.value)} aria-label="Custom attendance date" />
+            )}
+            <button onClick={fetchAttendanceData} className="launch-terminal-btn" style={{ background: '#334155' }}>Refresh</button>
             {userRole === 'FM' && (
-              <button onClick={() => navigate('/gate-scanner')} className="launch-terminal-btn">
-                Launch Gate Terminal
-              </button>
+              <button onClick={() => navigate('/gate-scanner')} className="launch-terminal-btn">Launch Gate Terminal</button>
             )}
           </div>
         </header>
 
-        {/* 🎯 Classes assigned to the metrics block items below */}
         <div className="attendance-metrics-grid">
-          <div className="attendance-metric-card blue-status">
-            <h3>{isFM ? 'Total Personnel On-Site' : isStaff ? 'My On-Site Status' : 'Active On-Site Staff'}</h3>
-            <p className="value-neutral">{metrics.totalPresent}</p>
-          </div>
-
-          <div className="attendance-metric-card green-status">
-            <h3>{isStaff ? 'My On-Time Arrivals' : 'On-Time Arrivals'}</h3>
-            <p className="value-success">{metrics.onTime}</p>
-          </div>
-
-          <div className="attendance-metric-card orange-status">
-            <h3>{isStaff ? 'My Late Exceptions' : 'Late Exceptions'}</h3>
-            <p className="value-warning">{metrics.lateCount}</p>
-          </div>
+          {cards.map(([label, value, statusClass]) => (
+            <div className={`attendance-metric-card ${statusClass}`} key={label}>
+              <h3>{label}</h3>
+              <p className="value-neutral">{value}</p>
+            </div>
+          ))}
         </div>
 
-        {/* 🗃️ Operational Log Table */}
-        <div className="table-container">
-          <table className="management-table">
-            <thead>
-              <tr>
-                <th>TIMESTAMP</th>
-                <th>EMPLOYEE NAME</th>
-                <th>ROLE STATUS</th>
-                <th>TRANSACTION</th>
-                <th>COMPLIANCE WINDOW</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="5" className="table-notice-state">
-                    Parsing synchronized timecard logs...
-                  </td>
-                </tr>
-              ) : logs.length > 0 ? logs.map((log) => {
-                const logDate = new Date(log.timestamp);
-                const isLate = log.type === 'IN' && logDate.getHours() >= 9;
+        {error && <div className="attendance-error" role="alert">{error}</div>}
 
-                return (
-                  <tr key={log.id}>
-                    <td className="cell-timestamp">
-                      {logDate.toLocaleString('en-SG', { dateStyle: 'medium', timeStyle: 'medium' })}
-                    </td>
-                    <td className="cell-worker-name">
-                      {log.User?.name || 'Unknown User'}
-                    </td>
-                    <td>
-                      <span className="cell-role-badge">
-                        {log.User?.role === 'Tenant' ? 'Tenant Admin' : log.User?.role || 'Staff'}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`presence-tag ${log.type === 'IN' ? 'on-site' : 'off-site'}`}>
-                        {log.type === 'IN' ? 'CLOCK-IN' : 'CLOCK-OUT'}
-                      </span>
-                    </td>
-                    <td>
-                      {log.type === 'OUT' ? (
-                        <span className="cell-placeholder-dash">—</span>
-                      ) : (
-                        <span className={`status-badge ${isLate ? 'inactive' : 'active'}`}>
-                          {isLate ? 'Late Arrival' : 'On Time'}
-                        </span>
-                      )}
+        {isFM ? (
+          <section className="attendance-aggregate-note">
+            <h3>Aggregate Operational View</h3>
+            <p>Facilities Managers receive occupancy totals only. Individual late-arrival performance and personal attendance history are excluded by the server.</p>
+          </section>
+        ) : (
+          <div className="table-container">
+            <table className="management-table">
+              <thead>
+                <tr>
+                  {!isStaff && <th>EMPLOYEE NAME</th>}
+                  <th>DATE</th>
+                  <th>FIRST CHECK-IN</th>
+                  <th>LATEST CHECK-OUT</th>
+                  <th>CURRENT STATUS</th>
+                  <th>PUNCTUALITY</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={isStaff ? 5 : 6} className="table-notice-state">Loading attendance summaries...</td></tr>
+                ) : records.length > 0 ? records.map((record) => (
+                  <tr key={`${record.userId}-${record.date}`}>
+                    {!isStaff && <td className="cell-worker-name">{record.user?.name || 'Unknown Staff'}</td>}
+                    <td className="cell-timestamp">{record.date}</td>
+                    <td>{formatDateTime(record.firstCheckIn)}</td>
+                    <td>{formatDateTime(record.latestCheckOut)}</td>
+                    <td><span className={`presence-tag ${record.currentStatus === 'IN' ? 'on-site' : 'off-site'}`}>{record.currentStatus === 'IN' ? 'ON SITE' : 'OFF SITE'}</span></td>
+                    <td><span className={`status-badge ${record.punctuality === 'LATE' ? 'expired' : 'active'}`}>{formatStatus(record.punctuality)}</span></td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td colSpan={isStaff ? 5 : 6} className="table-notice-state muted-text">
+                      {isStaff ? 'No attendance records found for your account.' : 'No linked Staff attendance summaries for this date range.'}
                     </td>
                   </tr>
-                );
-              }) : (
-                <tr>
-                  <td colSpan="5" className="table-notice-state muted-text">
-                    {isStaff
-                      ? 'No attendance records found for your account.'
-                      : 'No workforce check-in records discovered for this billing cycle.'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </main>
     </div>
   );
