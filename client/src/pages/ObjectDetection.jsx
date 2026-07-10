@@ -492,14 +492,14 @@ const ObjectDetection = () => {
                 Python AI service offline - start ai-service to enable stream
               </div>
             ) : (
-              <div className="od-video-stage">
+              <div className={`od-video-stage ${sourceMode === 'hardware' ? 'od-video-stage-hardware' : ''}`}>
                 {sourceMode === 'hardware' ? (
                   <img
                     key={hardwareReloadKey}
                     src={hardwareReloadKey > 0
                       ? `${hardwareStreamUrl}${hardwareStreamUrl.includes('?') ? '&' : '?'}t=${hardwareReloadKey}`
                       : hardwareStreamUrl}
-                    className="od-stream-img"
+                    className="od-stream-img od-stream-img-hardware"
                     alt="SecurePi live hardware camera"
                     onLoad={() => {
                       setCameraReady(true);

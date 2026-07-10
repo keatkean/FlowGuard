@@ -394,6 +394,24 @@
     opacity: 0.74;
 }
 
+.od-video-stage-hardware {
+    aspect-ratio: 4 / 3;
+    background: #02040a;
+}
+
+.od-stream-img-hardware {
+    object-fit: contain;
+    object-position: center;
+    padding: 10px 10px 52px;
+    box-sizing: border-box;
+    opacity: 0.9;
+}
+
+.od-video-stage-hardware .od-video-footer {
+    min-height: 42px;
+    background: rgba(5, 7, 13, 0.7);
+}
+
 .od-video-stage::after {
     content: "";
     position: absolute;
