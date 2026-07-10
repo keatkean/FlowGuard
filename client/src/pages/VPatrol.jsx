@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+﻿import React, { useRef, useState, useEffect } from 'react';
 import axios from 'axios';
 import Sidebar from '../components/Sidebar';
 import '../css/Dashboard.css';
@@ -14,6 +14,16 @@ import { API_BASE_URL } from '../constants/api';
 import { clampBoxToFrame, faceBoxStyle } from '../constants/faceBox';
 import { describeRecognitionSubject, RECOGNITION_STATUS } from '../constants/recognition';
 import { formatSingaporeTimestamp, formatSingaporeFull } from '../constants/datetime';
+import {
+  CONDITIONS,
+  IDENTITY_LABELS,
+  DETECTION_OUTCOMES,
+  loadRecords,
+  saveRecords,
+  loadLabelMap,
+  buildEvaluationDraftFromRecognition,
+  saveEvaluationRecordFromDraft,
+} from '../constants/evaluation';
 import {
   deriveAccessResult,
   getLogTimestamp,
@@ -56,6 +66,8 @@ const VPatrol = () => {
   // No-overlap + AI-error-backoff guard for the scan loop.
   const scanGateRef = useRef(createScanGate());
   const [serviceNotice, setServiceNotice] = useState('');
+  const [lastEvaluationDecision, setLastEvaluationDecision] = useState(null);
+  const [evalModal, setEvalModal] = useState({ open: false, draft: null, actualLabel: 'P01', condition: 'Front', notes: '', message: '' });
 
   // LIVENESS MEMORY: Tracks the head-turn validation
   const candidateUserRef = useRef(null); 
@@ -73,13 +85,29 @@ const VPatrol = () => {
   const [searchFilter, setSearchFilter] = useState('');
 
   const token = localStorage.getItem("accessToken");
-  // All recognition traffic goes through the Node backend — never FastAPI directly.
+  // All recognition traffic goes through the Node backend â€” never FastAPI directly.
   const NODE_SERVER_URL = `${API_BASE_URL}/api/security/logs`;
   const RECOGNIZE_URL = `${API_BASE_URL}/api/facial-recognition/recognize`;
   // V-Patrol is a monitoring post: it records access AUDIT events only and must
   // never toggle clock-in/out (that belongs to the Gate Scanner's scan endpoint).
   const ACCESS_EVENT_URL = `${API_BASE_URL}/api/facial-recognition/access-event`;
   const CAMERA_LOCATION = "Biometric Gantry";
+
+  const openEvaluationRecorder = (result) => {
+    const draft = buildEvaluationDraftFromRecognition({ result, labelMap: loadLabelMap(), origin: 'V-Patrol' });
+    setEvalModal({ open: true, draft, actualLabel: 'P01', condition: 'Front', notes: '', message: draft.needsMapping ? 'Assign evaluation label first' : '' });
+  };
+
+  const saveEvaluationFromModal = () => {
+    try {
+      const rec = saveEvaluationRecordFromDraft(evalModal.draft, { actualLabel: evalModal.actualLabel, condition: evalModal.condition, notes: evalModal.notes });
+      saveRecords([rec, ...loadRecords()]);
+      setEvalModal({ open: false, draft: null, actualLabel: 'P01', condition: 'Front', notes: '', message: '' });
+      setLastEvaluationDecision((prev) => prev ? { ...prev, message: 'Live evaluation result recorded' } : prev);
+    } catch (err) {
+      setEvalModal((prev) => ({ ...prev, message: err.message }));
+    }
+  };
 
   const changeScanState = (nextState) => {
     setScanStatus(nextState);
@@ -95,12 +123,12 @@ const VPatrol = () => {
         if (res.data && res.data.length > 0) {
           setIncidentLogs(res.data);
         } else {
-          setIncidentLogs([{ id: 'SYS-001', occurredAt: new Date().toISOString(), type: 'System Online', desc: 'Biometric sensors initialized.', severity: 'safe', icon: '✅' }]);
+          setIncidentLogs([{ id: 'SYS-001', occurredAt: new Date().toISOString(), type: 'System Online', desc: 'Biometric sensors initialized.', severity: 'safe', icon: 'âœ…' }]);
         }
       })
       .catch(err => {
         console.error("Database connection waiting...", err);
-        setIncidentLogs([{ id: 'SYS-001', occurredAt: new Date().toISOString(), type: 'System Offline', desc: 'Cannot connect to security database.', severity: 'critical', icon: '⚠️' }]);
+        setIncidentLogs([{ id: 'SYS-001', occurredAt: new Date().toISOString(), type: 'System Offline', desc: 'Cannot connect to security database.', severity: 'critical', icon: 'âš ï¸' }]);
       });
 
     const clockInterval = setInterval(() => {
@@ -185,7 +213,7 @@ const VPatrol = () => {
       }
       changeScanState("SYSTEM_ACTIVE");
     } catch (err) {
-      // Permission denied, no device, or device busy — surface it instead of a black feed
+      // Permission denied, no device, or device busy â€” surface it instead of a black feed
       console.error("CCTV camera unavailable:", err);
       changeScanState("HARDWARE_ERR");
     }
@@ -209,22 +237,23 @@ const VPatrol = () => {
     playFeedback('success');
     changeScanState("SECURE_MATCH");
     setIdentifiedUser(subject.identityLabel);
+    setLastEvaluationDecision({ identityLabel: subject.identityLabel, accessLabel: 'Access Granted', action: 'Audit access event preserved', result: verifiedUser._evaluationResult, message: '' });
     setScanProgress(100);
 
     const currentTimestamp = Date.now();
 
     if (lastLogRef.current.name !== verifiedUser.name || (currentTimestamp - lastLogRef.current.timestamp > 30000)) {
-      // Local timeline entry ONLY — the persisted safe access log is created by
+      // Local timeline entry ONLY â€” the persisted safe access log is created by
       // the SERVER during the verified attendance scan below, so the browser no
       // longer posts audit rows (no duplicate client+server logs).
       const newLog = {
         id: `ACC-${Date.now()}`,
-        // This is a NEW event happening right now — stamping it is correct.
+        // This is a NEW event happening right now â€” stamping it is correct.
         occurredAt: new Date(currentTimestamp).toISOString(),
         type: 'Gantry Access',
         desc: `Identity & Liveness Verified: ${subject.identityLabel}`,
         severity: 'safe',
-        icon: '🔓',
+        icon: 'ðŸ”“',
         personnelName: verifiedUser.name,
         role: verifiedUser.role,
         confidence: verifiedUser.confidence,
@@ -260,7 +289,7 @@ const VPatrol = () => {
         bitmap = await fetchPiSnapshotBitmap();
         piFailStreakRef.current = 0;
       } catch {
-        // Pi snapshot failed mid-session — after 3 misses, fall back to webcam
+        // Pi snapshot failed mid-session â€” after 3 misses, fall back to webcam
         piFailStreakRef.current += 1;
         if (piFailStreakRef.current >= 3) {
           applyCameraSource(CAMERA_SOURCES.WEBCAM, CAMERA_STATUS_MESSAGES.PI_UNAVAILABLE);
@@ -378,24 +407,25 @@ const VPatrol = () => {
 
             const recognizedUser = res.data.user;
             if (recognizedUser && recognizedUser.status === RECOGNITION_STATUS.AUTHORIZED) {
-              candidateUserRef.current = recognizedUser;
+              candidateUserRef.current = { ...recognizedUser, _evaluationResult: res.data };
               changeScanState("LIVENESS_CHECK");
             } else {
-              // Suspended or unknown — the Node backend has already written the
+              // Suspended or unknown â€” the Node backend has already written the
               // deduplicated SecurityLog; the client only updates its local timeline.
               const isSuspended = recognizedUser && recognizedUser.status === RECOGNITION_STATUS.SUSPENDED;
               const subject = describeRecognitionSubject(recognizedUser);
 
               playFeedback('denied');
               changeScanState("UNKNOWN_QUERY");
-              setIdentifiedUser(isSuspended ? `${subject.identityLabel} — SUSPENDED` : "UNKNOWN PERSONNEL");
+              setIdentifiedUser(isSuspended ? `${subject.identityLabel} â€” SUSPENDED` : "UNKNOWN PERSONNEL");
               setScanProgress(0);
+              setLastEvaluationDecision({ identityLabel: isSuspended ? subject.identityLabel : 'Unknown', accessLabel: 'Access Denied', action: 'Security log created', result: res.data, message: '' });
 
               const dedupName = isSuspended ? recognizedUser.name : "UNKNOWN";
               if (lastLogRef.current.name !== dedupName || (currentTimestamp - lastLogRef.current.timestamp > 10000)) {
                 const newLog = {
                   id: `SEC-${Date.now()}`,
-                  // New event happening right now — stamped at detection time.
+                  // New event happening right now â€” stamped at detection time.
                   occurredAt: new Date(currentTimestamp).toISOString(),
                   time: logTimeStr,
                   type: isSuspended ? 'Suspended Access Attempt' : 'Intrusion Alert',
@@ -403,7 +433,7 @@ const VPatrol = () => {
                     ? `Suspended account denied at gantry: ${subject.identityLabel}.`
                     : 'Unregistered personnel detected at gantry.',
                   severity: 'critical',
-                  icon: isSuspended ? '⛔' : '🚨',
+                  icon: isSuspended ? 'â›”' : 'ðŸš¨',
                   personnelName: isSuspended ? recognizedUser.name : null,
                   role: isSuspended ? recognizedUser.role : null,
                   confidence: recognizedUser ? recognizedUser.confidence : null,
@@ -424,11 +454,12 @@ const VPatrol = () => {
 
       } else {
         if (scanStatusRef.current !== "LIVENESS_CHECK" && scanStatusRef.current !== "TARGET_LOCKING") {
+          setLastEvaluationDecision({ identityLabel: 'No Face', accessLabel: 'No Decision', action: 'No suspicious log created', result: { ...res.data, detectionOutcome: DETECTION_OUTCOMES.NO_FACE }, message: '' });
           resetScanner();
         }
       }
     } catch (err) {
-      // Node/FastAPI unavailable — back off instead of flooding the endpoint.
+      // Node/FastAPI unavailable â€” back off instead of flooding the endpoint.
       // The camera preview keeps running; webcam fallback is ONLY for Pi failure.
       console.error("AI Command Loop Fault:", err);
       scanGateRef.current.applyBackoff();
@@ -485,9 +516,51 @@ const VPatrol = () => {
           </button>
           <span style={{ color: '#38bdf8', fontSize: '0.82rem' }}>{cameraStatusMsg}</span>
           {serviceNotice && (
-            <span style={{ color: '#f59e0b', fontSize: '0.82rem', fontWeight: 600 }}>⚠ {serviceNotice}</span>
+            <span style={{ color: '#f59e0b', fontSize: '0.82rem', fontWeight: 600 }}>âš  {serviceNotice}</span>
           )}
         </div>
+
+        {lastEvaluationDecision && (
+          <div className="gate-decision-panel evaluation-recorder-panel">
+            <strong>Last V-Patrol Decision</strong>
+            <span>{lastEvaluationDecision.identityLabel} | {lastEvaluationDecision.accessLabel} | {lastEvaluationDecision.action}</span>
+            {lastEvaluationDecision.result && (
+              <button type="button" onClick={() => openEvaluationRecorder(lastEvaluationDecision.result)}>
+                Record for Evaluation
+              </button>
+            )}
+            {lastEvaluationDecision.message && <span>{lastEvaluationDecision.message}</span>}
+          </div>
+        )}
+
+        {evalModal.open && evalModal.draft && (
+          <div className="gate-decision-panel evaluation-recorder-panel">
+            <strong>Record Live V-Patrol Evaluation</strong>
+            <span>Predicted: {evalModal.draft.detectionOutcome === DETECTION_OUTCOMES.NO_FACE ? 'No Face' : (evalModal.draft.predictedLabel || 'Unknown')}</span>
+            <span>Confidence: {evalModal.draft.confidence == null ? 'N/A' : `${Math.round(evalModal.draft.confidence * 100)}%`} | Latency: {evalModal.draft.latencyMs == null ? 'N/A' : `${evalModal.draft.latencyMs} ms`} | Source: Live | Origin: V-Patrol</span>
+            {evalModal.message && <span>{evalModal.message}</span>}
+            {evalModal.draft.needsMapping && <a href="/facial-evaluation">Assign evaluation label first</a>}
+            {evalModal.draft.detectionOutcome !== DETECTION_OUTCOMES.NO_FACE && (
+              <label>
+                Actual label
+                <select value={evalModal.actualLabel} onChange={(e) => setEvalModal((prev) => ({ ...prev, actualLabel: e.target.value }))}>
+                  {IDENTITY_LABELS.map((label) => <option key={label} value={label}>{label}</option>)}
+                </select>
+              </label>
+            )}
+            <label>
+              Test condition
+              <select value={evalModal.condition} onChange={(e) => setEvalModal((prev) => ({ ...prev, condition: e.target.value }))}>
+                {CONDITIONS.map((condition) => <option key={condition} value={condition}>{condition}</option>)}
+              </select>
+            </label>
+            <textarea value={evalModal.notes} onChange={(e) => setEvalModal((prev) => ({ ...prev, notes: e.target.value }))} placeholder="Optional evaluation notes" rows={2} />
+            <div>
+              <button type="button" onClick={saveEvaluationFromModal} disabled={evalModal.draft.needsMapping}>Save evaluation record</button>
+              <button type="button" onClick={() => setEvalModal({ open: false, draft: null, actualLabel: 'P01', condition: 'Front', notes: '', message: '' })}>Cancel</button>
+            </div>
+          </div>
+        )}
 
         <div className="vpatrol-grid">
           <div className="vpatrol-card monitor-section">
@@ -515,7 +588,7 @@ const VPatrol = () => {
                   alignItems: 'center', justifyContent: 'center', textAlign: 'center',
                   background: 'rgba(15,23,42,0.92)', color: '#e2e8f0', padding: '24px', zIndex: 5
                 }}>
-                  <div style={{ fontSize: 40 }}>📷🚫</div>
+                  <div style={{ fontSize: 40 }}>ðŸ“·ðŸš«</div>
                   <h3 style={{ margin: '10px 0 4px' }}>Camera unavailable</h3>
                   <p style={{ color: '#94a3b8', maxWidth: 360 }}>
                     Allow camera access in your browser, close other apps using the webcam, then
@@ -550,9 +623,9 @@ const VPatrol = () => {
                   <div className="box-identity-panel">
                     <span className="access-status-label">
                       {scanStatus === "TARGET_LOCKING" && `ANALYZING: ${scanProgress}%`}
-                      {scanStatus === "LIVENESS_CHECK" && "⚠️ LIVENESS CHECK"}
-                      {scanStatus === "SECURE_MATCH" && "✓ GRANT ACCESS"}
-                      {scanStatus === "UNKNOWN_QUERY" && "🚨 ACCESS DENIED"}
+                      {scanStatus === "LIVENESS_CHECK" && "âš ï¸ LIVENESS CHECK"}
+                      {scanStatus === "SECURE_MATCH" && "âœ“ GRANT ACCESS"}
+                      {scanStatus === "UNKNOWN_QUERY" && "ðŸš¨ ACCESS DENIED"}
                     </span>
                     <span className="person-name-label">
                       {scanStatus === "TARGET_LOCKING" && "LOCKING VECTORS..."}
@@ -569,14 +642,14 @@ const VPatrol = () => {
                   <div className="hud-left-meta">
                     <span className="hud-node">SYS_MODE // BIOMETRIC_GANTRY</span>
                     {scanStatus === "PRESENCE_DETECTED" && (
-                      <span className="hud-radar-alert">⚠️ PROXIMITY SIGNAL DETECTED</span>
+                      <span className="hud-radar-alert">âš ï¸ PROXIMITY SIGNAL DETECTED</span>
                     )}
                   </div>
                   <span className={`hud-status-badge status-${scanStatus.toLowerCase()}`}>
-                    {scanStatus === "SYSTEM_ACTIVE" && "● IDLE MONITORING"}
-                    {scanStatus === "PRESENCE_DETECTED" && "⚡ MOTION ACQUIRED"}
-                    {scanStatus === "TARGET_LOCKING" && "⏳ VECTOR LOCK ACTIVE"}
-                    {scanStatus === "LIVENESS_CHECK" && "🔄 AWAITING MOVEMENT"}
+                    {scanStatus === "SYSTEM_ACTIVE" && "â— IDLE MONITORING"}
+                    {scanStatus === "PRESENCE_DETECTED" && "âš¡ MOTION ACQUIRED"}
+                    {scanStatus === "TARGET_LOCKING" && "â³ VECTOR LOCK ACTIVE"}
+                    {scanStatus === "LIVENESS_CHECK" && "ðŸ”„ AWAITING MOVEMENT"}
                     {scanStatus === "SECURE_MATCH" && "SUCCESS MATCH"}
                     {scanStatus === "UNKNOWN_QUERY" && "ALERT WARNING"}
                   </span>
@@ -584,7 +657,7 @@ const VPatrol = () => {
                 
                 <div className="hud-bottom">
                   <div className="hud-coordinates-telemetry">
-                    <p>LAT: 1.3521° N // LON: 103.8198° E</p>
+                    <p>LAT: 1.3521Â° N // LON: 103.8198Â° E</p>
                     <p className="hud-engine-log">MATRIX_ENGINE: ACTIVE_v3.42</p>
                   </div>
                   <p className="hud-clock">{systemTime}</p>
@@ -598,7 +671,7 @@ const VPatrol = () => {
               <h2>Security Timeline</h2>
             </div>
 
-            {/* Compact filter row — dropdowns + search, frontend filtering only */}
+            {/* Compact filter row â€” dropdowns + search, frontend filtering only */}
             <div className="timeline-filters">
               <select
                 className="timeline-filter"
@@ -619,7 +692,7 @@ const VPatrol = () => {
               <input
                 type="text"
                 className="timeline-filter timeline-search"
-                placeholder="Search name / role / location…"
+                placeholder="Search name / role / locationâ€¦"
                 value={searchFilter}
                 onChange={(e) => setSearchFilter(e.target.value)}
                 aria-label="Search timeline"
@@ -652,7 +725,7 @@ const VPatrol = () => {
               ) : filteredLogs.map((log) => {
                 const accessResult = deriveAccessResult(log);
                 const timestamp = getLogTimestamp(log);
-                const timeLabel = formatSingaporeTimestamp(timestamp) || log.time || '—';
+                const timeLabel = formatSingaporeTimestamp(timestamp) || log.time || 'â€”';
                 const confidencePct = typeof log.confidence === 'number'
                   ? `${Math.round(log.confidence * 100)}%` : null;
                 return (
@@ -669,12 +742,12 @@ const VPatrol = () => {
                         </div>
                         <p className="item-person">
                           {log.personnelName || 'Unknown Person'}
-                          {log.role ? <span className="item-role"> • {log.role}</span> : null}
+                          {log.role ? <span className="item-role"> â€¢ {log.role}</span> : null}
                         </p>
                         <p className="item-meta" title={formatSingaporeFull(timestamp) || undefined}>
-                          🕒 {timeLabel}
-                          {confidencePct ? ` • ${confidencePct} confidence` : ''}
-                          {log.cameraLocation ? ` • 📍 ${log.cameraLocation}` : ''}
+                          ðŸ•’ {timeLabel}
+                          {confidencePct ? ` â€¢ ${confidencePct} confidence` : ''}
+                          {log.cameraLocation ? ` â€¢ ðŸ“ ${log.cameraLocation}` : ''}
                         </p>
                         <p className="item-desc">{log.desc}</p>
                       </div>

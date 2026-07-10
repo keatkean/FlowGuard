@@ -13,6 +13,7 @@ import {
 import { API_BASE_URL } from '../constants/api';
 import { clampBoxToFrame, faceBoxStyle } from '../constants/faceBox';
 import { describeRecognitionSubject, RECOGNITION_STATUS } from '../constants/recognition';
+import { CONDITIONS, IDENTITY_LABELS, DETECTION_OUTCOMES, loadRecords, saveRecords, loadLabelMap, buildEvaluationDraftFromRecognition, saveEvaluationRecordFromDraft } from '../constants/evaluation';
 import {
   SCAN_INTERVAL_MS,
   TARGET_LOCK_MS,
@@ -37,9 +38,10 @@ const GateScanner = () => {
   const [cameraSource, setCameraSource] = useState(CAMERA_SOURCES.PI);
   const [cameraStatusMsg, setCameraStatusMsg] = useState("Connecting to Pi Gate Camera...");
 
-  // Last gate decision — safe display fields only (never biometric data).
+  // Last gate decision â€” safe display fields only (never biometric data).
   // { identityLabel, accountState, accessLabel, action }
   const [lastDecision, setLastDecision] = useState(null);
+  const [evalModal, setEvalModal] = useState({ open: false, draft: null, actualLabel: 'P01', condition: 'Front', notes: '', message: '' });
   const cameraSourceRef = useRef(CAMERA_SOURCES.PI);
   const piFailStreakRef = useRef(0);
 
@@ -51,11 +53,27 @@ const GateScanner = () => {
   const scanGateRef = useRef(createScanGate());
 
   const token = localStorage.getItem("accessToken");
-  // All recognition traffic goes through the Node backend — never FastAPI directly.
+  // All recognition traffic goes through the Node backend â€” never FastAPI directly.
   const ATTENDANCE_SCAN_URL = `${API_BASE_URL}/api/attendance/scan`;
   const RECOGNIZE_URL = `${API_BASE_URL}/api/facial-recognition/recognize`;
   const CAMERA_LOCATION = "South Entrance Turnstile";
 
+
+  const openEvaluationRecorder = (result) => {
+    const draft = buildEvaluationDraftFromRecognition({ result, labelMap: loadLabelMap(), origin: 'Gate Scanner' });
+    setEvalModal({ open: true, draft, actualLabel: 'P01', condition: 'Front', notes: '', message: draft.needsMapping ? 'Assign evaluation label first' : '' });
+  };
+
+  const saveEvaluationFromModal = () => {
+    try {
+      const rec = saveEvaluationRecordFromDraft(evalModal.draft, { actualLabel: evalModal.actualLabel, condition: evalModal.condition, notes: evalModal.notes });
+      saveRecords([rec, ...loadRecords()]);
+      setEvalModal({ open: false, draft: null, actualLabel: 'P01', condition: 'Front', notes: '', message: '' });
+      setLastDecision((prev) => prev ? { ...prev, evaluationMessage: 'Live evaluation result recorded' } : prev);
+    } catch (err) {
+      setEvalModal((prev) => ({ ...prev, message: err.message }));
+    }
+  };
   const changeScanState = (nextState, message) => {
     setScanStatus(nextState);
     scanStatusRef.current = nextState;
@@ -152,8 +170,8 @@ const GateScanner = () => {
     setScanProgress(100);
 
     try {
-      // 🎯 Hit the Node.js automatic clock-in/out controller with the
-      // server-verified unique user ID — never a name.
+      // ðŸŽ¯ Hit the Node.js automatic clock-in/out controller with the
+      // server-verified unique user ID â€” never a name.
       const res = await axios.post(ATTENDANCE_SCAN_URL, {
         userId: verifiedUser.id,
         cameraLocation: CAMERA_LOCATION
@@ -164,22 +182,24 @@ const GateScanner = () => {
       if (res.data && res.data.action) {
         // Render the exact system response action directly onto the kiosk screen
         const actionMessage = res.data.action.replace(/_/g, " ");
-        setDisplayMessage(`🔓 ${subject.identityLabel} — ${actionMessage}`);
+        setDisplayMessage(`ðŸ”“ ${subject.identityLabel} â€” ${actionMessage}`);
         setLastDecision({
           identityLabel: subject.identityLabel,
           accountState: 'Active',
           accessLabel: 'Access Granted',
-          action: `Attendance recorded (${actionMessage.toLowerCase()})`
+          action: `Attendance recorded (${actionMessage.toLowerCase()})`,
+          evaluationResult: verifiedUser._evaluationResult
         });
       }
     } catch (err) {
       console.error("Attendance Sync Failed:", err);
-      setDisplayMessage("🚨 GATE TRANSACTION ROUTING FAULT");
+      setDisplayMessage("ðŸš¨ GATE TRANSACTION ROUTING FAULT");
       setLastDecision({
         identityLabel: subject.identityLabel,
         accountState: 'Active',
         accessLabel: 'Access Granted',
-        action: 'Attendance sync failed — retry at the gate'
+        action: 'Attendance sync failed - retry at the gate',
+        evaluationResult: verifiedUser._evaluationResult
       });
     }
 
@@ -200,7 +220,7 @@ const GateScanner = () => {
         bitmap = await fetchPiSnapshotBitmap();
         piFailStreakRef.current = 0;
       } catch {
-        // Pi snapshot failed mid-session — after 3 misses, fall back to webcam
+        // Pi snapshot failed mid-session â€” after 3 misses, fall back to webcam
         piFailStreakRef.current += 1;
         if (piFailStreakRef.current >= 3) {
           applyCameraSource(CAMERA_SOURCES.WEBCAM, CAMERA_STATUS_MESSAGES.PI_UNAVAILABLE);
@@ -280,7 +300,7 @@ const GateScanner = () => {
           return;
         }
 
-        // 🎯 LIVENESS CHECK: Wait for head swing rotation
+        // ðŸŽ¯ LIVENESS CHECK: Wait for head swing rotation
         if (scanStatusRef.current === "LIVENESS_CHECK") {
           setFaceBox(targetBox);
           if (livenessRatio < 0.35 || livenessRatio > 0.65) {
@@ -307,28 +327,30 @@ const GateScanner = () => {
 
             const recognizedUser = res.data.user;
             if (recognizedUser && recognizedUser.status === RECOGNITION_STATUS.AUTHORIZED) {
-              candidateUserRef.current = recognizedUser;
+              candidateUserRef.current = { ...recognizedUser, _evaluationResult: res.data };
               changeScanState("LIVENESS_CHECK", "VERIFYING LIVENESS: TURN HEAD SLIGHTLY");
             } else if (recognizedUser && recognizedUser.status === RECOGNITION_STATUS.SUSPENDED) {
               // Server already denied access and wrote the security log.
               const subject = describeRecognitionSubject(recognizedUser);
-              changeScanState("UNKNOWN_QUERY", `⛔ ${subject.identityLabel} — ${subject.accessLabel}`);
+              changeScanState("UNKNOWN_QUERY", `â›” ${subject.identityLabel} â€” ${subject.accessLabel}`);
               setLastDecision({
                 identityLabel: subject.identityLabel,
                 accountState: 'Suspended',
                 accessLabel: 'Access Denied',
-                action: 'Security log created'
+                action: 'Security log created',
+                evaluationResult: res.data
               });
               setScanProgress(0);
               setTimeout(() => { resetTurnstileKiosk(); }, 3500);
             } else {
-              // Unknown person — server already wrote the intrusion log.
-              changeScanState("UNKNOWN_QUERY", "🚨 PERIMETER BREACH: ACCESS DENIED");
+              // Unknown person â€” server already wrote the intrusion log.
+              changeScanState("UNKNOWN_QUERY", "ðŸš¨ PERIMETER BREACH: ACCESS DENIED");
               setLastDecision({
                 identityLabel: describeRecognitionSubject(recognizedUser).identityLabel,
                 accountState: 'Unknown',
                 accessLabel: 'Access Denied',
-                action: 'Security log created'
+                action: 'Security log created',
+                evaluationResult: res.data
               });
               setScanProgress(0);
               setTimeout(() => { resetTurnstileKiosk(); }, 3500);
@@ -339,11 +361,18 @@ const GateScanner = () => {
         }
       } else {
         if (scanStatusRef.current !== "LIVENESS_CHECK" && scanStatusRef.current !== "TARGET_LOCKING") {
+          setLastDecision({
+            identityLabel: 'No Face',
+            accountState: 'No Face',
+            accessLabel: 'No Decision',
+            action: 'No suspicious log created',
+            evaluationResult: { ...res.data, detectionOutcome: DETECTION_OUTCOMES.NO_FACE }
+          });
           resetTurnstileKiosk();
         }
       }
     } catch (err) {
-      // Node/FastAPI unavailable — back off instead of flooding the endpoint.
+      // Node/FastAPI unavailable â€” back off instead of flooding the endpoint.
       // The camera preview keeps running; webcam fallback is ONLY for Pi failure.
       console.error("Gate AI Link Fault:", err);
       gate.applyBackoff();
@@ -396,7 +425,7 @@ const GateScanner = () => {
           <span style={{ color: '#38bdf8', fontSize: '0.82rem' }}>{cameraStatusMsg}</span>
         </div>
 
-        {/* Last gate decision — safe recognition fields only */}
+        {/* Last gate decision â€” safe recognition fields only */}
         <div
           className="gate-decision-panel"
           style={{
@@ -417,11 +446,46 @@ const GateScanner = () => {
                 {lastDecision.accessLabel}
               </span>
               <span style={{ color: '#94a3b8' }}>Action: {lastDecision.action}</span>
+              {lastDecision.evaluationResult && (
+                <button type="button" onClick={() => openEvaluationRecorder(lastDecision.evaluationResult)}>
+                  Record for Evaluation
+                </button>
+              )}
+              {lastDecision.evaluationMessage && <span>{lastDecision.evaluationMessage}</span>}
             </>
           ) : (
-            <span style={{ color: '#707a91' }}>No face detected — awaiting scan</span>
+            <span style={{ color: '#707a91' }}>No face detected &mdash; awaiting scan</span>
           )}
         </div>
+
+        {evalModal.open && evalModal.draft && (
+          <div className="gate-decision-panel evaluation-recorder-panel">
+            <strong>Record Live Gate Scanner Evaluation</strong>
+            <span>Predicted: {evalModal.draft.detectionOutcome === DETECTION_OUTCOMES.NO_FACE ? 'No Face' : (evalModal.draft.predictedLabel || 'Unknown')}</span>
+            <span>Confidence: {evalModal.draft.confidence == null ? 'N/A' : `${Math.round(evalModal.draft.confidence * 100)}%`} | Latency: {evalModal.draft.latencyMs == null ? 'N/A' : `${evalModal.draft.latencyMs} ms`} | Source: Live | Origin: Gate Scanner</span>
+            {evalModal.message && <span>{evalModal.message}</span>}
+            {evalModal.draft.needsMapping && <a href="/facial-evaluation">Assign evaluation label first</a>}
+            {evalModal.draft.detectionOutcome !== DETECTION_OUTCOMES.NO_FACE && (
+              <label>
+                Actual label
+                <select value={evalModal.actualLabel} onChange={(e) => setEvalModal((prev) => ({ ...prev, actualLabel: e.target.value }))}>
+                  {IDENTITY_LABELS.map((label) => <option key={label} value={label}>{label}</option>)}
+                </select>
+              </label>
+            )}
+            <label>
+              Test condition
+              <select value={evalModal.condition} onChange={(e) => setEvalModal((prev) => ({ ...prev, condition: e.target.value }))}>
+                {CONDITIONS.map((condition) => <option key={condition} value={condition}>{condition}</option>)}
+              </select>
+            </label>
+            <textarea value={evalModal.notes} onChange={(e) => setEvalModal((prev) => ({ ...prev, notes: e.target.value }))} placeholder="Optional evaluation notes" rows={2} />
+            <div>
+              <button type="button" onClick={saveEvaluationFromModal} disabled={evalModal.draft.needsMapping}>Save evaluation record</button>
+              <button type="button" onClick={() => setEvalModal({ open: false, draft: null, actualLabel: 'P01', condition: 'Front', notes: '', message: '' })}>Cancel</button>
+            </div>
+          </div>
+        )}
 
         <div className="vpatrol-grid" style={{ gridTemplateColumns: '1fr' }}>
           <div className="vpatrol-card monitor-section">
@@ -454,9 +518,9 @@ const GateScanner = () => {
                   <div className="box-identity-panel">
                     <span className="access-status-label">
                       {scanStatus === "TARGET_LOCKING" && `ANALYZING: ${scanProgress}%`}
-                      {scanStatus === "LIVENESS_CHECK" && "⚠️ ANTI-SPOOF ACTIVE"}
-                      {scanStatus === "SECURE_MATCH" && "✓ ACCESS GRANTED"}
-                      {scanStatus === "UNKNOWN_QUERY" && "🚨 PERIMETER ALERT"}
+                      {scanStatus === "LIVENESS_CHECK" && "âš ï¸ ANTI-SPOOF ACTIVE"}
+                      {scanStatus === "SECURE_MATCH" && "âœ“ ACCESS GRANTED"}
+                      {scanStatus === "UNKNOWN_QUERY" && "ðŸš¨ PERIMETER ALERT"}
                     </span>
                     <span className="person-name-label">{displayMessage}</span>
                   </div>
@@ -469,8 +533,8 @@ const GateScanner = () => {
                     <span className="hud-node">PORTAL_NODE // SOUTH_ENTRANCE_TURNSTILE</span>
                   </div>
                   <span className={`hud-status-badge status-${scanStatus.toLowerCase()}`}>
-                    {scanStatus === "SYSTEM_ACTIVE" && "● SYSTEM ARMED"}
-                    {scanStatus === "LIVENESS_CHECK" && "🔄 PROCESSING 3D PROFILE"}
+                    {scanStatus === "SYSTEM_ACTIVE" && "â— SYSTEM ARMED"}
+                    {scanStatus === "LIVENESS_CHECK" && "ðŸ”„ PROCESSING 3D PROFILE"}
                     {scanStatus === "SECURE_MATCH" && "TURNSTILE UNLOCKED"}
                     {scanStatus === "UNKNOWN_QUERY" && "THREAT REJECTED"}
                   </span>

@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const { User } = require('../models');
@@ -24,10 +24,86 @@ const allowFMOrEdgeService = (req, res, next) => {
   return verifyToken(req, res, () => requireRole('FM')(req, res, next));
 };
 
+
+const validateFrame = (image) => {
+  if (typeof image !== 'string' || !image.startsWith('data:image/')) {
+    return { status: 400, error: 'A base64 data-URL image is required.' };
+  }
+  if (image.length > MAX_IMAGE_CHARS) {
+    return { status: 413, error: 'Image payload too large.' };
+  }
+  return null;
+};
+
+const forwardRecognitionFrame = async (image) => {
+  const startedAt = Date.now();
+  const aiResponse = await axios.post(`${FACE_AI_URL()}/user/recognize`, { image }, {
+    timeout: 15000,
+    headers: { 'X-AI-Service-Key': process.env.AI_SERVICE_KEY || '' }
+  });
+  return { aiResult: aiResponse.data || {}, totalRequestMs: Date.now() - startedAt };
+};
+
+const livenessStatus = (ratio) => {
+  if (typeof ratio !== 'number') return 'unavailable';
+  return ratio < 0.35 || ratio > 0.65 ? 'movement-detected' : 'front-facing';
+};
+
+// POST /api/facial-recognition/evaluate
+// FM-only side-effect-free model evaluation. It forwards one temporary frame to
+// FastAPI and returns safe telemetry only. It never creates Attendance,
+// SecurityLogs, User updates, or enrolment changes, and never stores the frame.
+router.post('/evaluate', verifyToken, requireRole('FM'), async (req, res) => {
+  const validation = validateFrame(req.body?.image);
+  if (validation) return res.status(validation.status).json({ error: validation.error });
+
+  try {
+    const { aiResult, totalRequestMs } = await forwardRecognitionFrame(req.body.image);
+    const {
+      matchedUserId = null,
+      confidence = 0,
+      box = null,
+      liveness_ratio = null,
+      faceDetected = false,
+      inference_ms = null
+    } = aiResult;
+
+    const outcome = faceDetected === false || (!box && matchedUserId == null)
+      ? 'NO_FACE'
+      : matchedUserId == null ? 'UNKNOWN' : 'MATCHED';
+
+    return res.status(200).json({
+      matchedUserId: matchedUserId == null ? null : matchedUserId,
+      outcome,
+      confidence,
+      box,
+      liveness: {
+        ratio: liveness_ratio,
+        status: livenessStatus(liveness_ratio)
+      },
+      timings: {
+        inferenceMs: inference_ms,
+        totalRequestMs
+      }
+    });
+  } catch (err) {
+    const isConnError = !err.response &&
+      ['ECONNREFUSED', 'ECONNABORTED', 'ETIMEDOUT', 'ENOTFOUND'].includes(err.code);
+    if (isConnError) {
+      return res.status(503).json({ error: 'Facial recognition service is offline. Please try again shortly.' });
+    }
+    if (err.response) {
+      const status = err.response.status === 400 ? 400 : 502;
+      return res.status(status).json({ error: 'Facial recognition service returned an error.' });
+    }
+    console.error('Evaluation forwarding error:', err.message);
+    return res.status(502).json({ error: 'Facial recognition service returned an error.' });
+  }
+});
 // POST /api/facial-recognition/access-event
 // V-Patrol monitoring: records a server-owned SAFE access audit event for a
 // verified (recognised + liveness-passed) active user WITHOUT touching
-// attendance — V-Patrol must never toggle clock-in/out; that is the Gate
+// attendance â€” V-Patrol must never toggle clock-in/out; that is the Gate
 // Scanner's job via /api/attendance/scan. Deduplicated server-side.
 router.post('/access-event', allowFMOrEdgeService, async (req, res) => {
   try {
@@ -57,14 +133,14 @@ router.post('/access-event', allowFMOrEdgeService, async (req, res) => {
         type: 'Gantry Access',
         desc: `Identity & liveness verified: ${user.name} (${user.role}) at ${location}.`,
         severity: 'safe',
-        icon: '🔓',
+        icon: 'ðŸ”“',
         personnelName: user.name,
         matchedUserId: user.id,
         cameraLocation: location
       });
     }
 
-    // Safe fields only — never the biometric template.
+    // Safe fields only â€” never the biometric template.
     return res.status(200).json({
       status: 'SUCCESS',
       logged,
@@ -78,18 +154,14 @@ router.post('/access-event', allowFMOrEdgeService, async (req, res) => {
 });
 
 // POST /api/facial-recognition/recognize
-// Frontend (Gate Scanner / V-Patrol) → Node → FastAPI → Node resolves the User
-// record from PostgreSQL → safe recognition result. The DB — not the AI cache —
+// Frontend (Gate Scanner / V-Patrol) â†’ Node â†’ FastAPI â†’ Node resolves the User
+// record from PostgreSQL â†’ safe recognition result. The DB â€” not the AI cache â€”
 // decides name, role, account status, and the access outcome.
 router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
   const { image, cameraLocation } = req.body;
 
-  if (typeof image !== 'string' || !image.startsWith('data:image/')) {
-    return res.status(400).json({ error: 'A base64 data-URL image is required.' });
-  }
-  if (image.length > MAX_IMAGE_CHARS) {
-    return res.status(413).json({ error: 'Image payload too large.' });
-  }
+  const validation = validateFrame(image);
+  if (validation) return res.status(validation.status).json({ error: validation.error });
   const location = typeof cameraLocation === 'string' && cameraLocation.trim()
     ? cameraLocation.trim().slice(0, 100)
     : 'Main Gate';
@@ -118,25 +190,26 @@ router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
 
   const { matchedUserId, confidence = 0, box = null, liveness_ratio = 0.5, faceDetected, inference_ms = null } = aiResult || {};
 
-  // Development timing telemetry — durations only, never images or templates.
-  const timings = { nodeToAiMs: Date.now() - aiStartedAt, inferenceMs: inference_ms };
+  // Development timing telemetry â€” durations only, never images or templates.
+  const nodeToAiMs = Date.now() - aiStartedAt;
+  const timings = { nodeToAiMs, inferenceMs: inference_ms, totalRequestMs: nodeToAiMs };
   if (process.env.NODE_ENV !== 'production') {
-    console.log(`[recognize] Node→FastAPI ${timings.nodeToAiMs}ms, InsightFace inference ${inference_ms ?? '?'}ms`);
+    console.log(`[recognize] Nodeâ†’FastAPI ${timings.nodeToAiMs}ms, InsightFace inference ${inference_ms ?? '?'}ms`);
   }
 
-  // No face in frame → no recognition attempt, and no suspicious-person log.
+  // No face in frame â†’ no recognition attempt, and no suspicious-person log.
   if (faceDetected === false || (!box && matchedUserId == null)) {
     return res.status(200).json({ user: null, box: null, liveness_ratio, timings });
   }
 
-  // Face detected but no template match → unknown person.
+  // Face detected but no template match â†’ unknown person.
   if (matchedUserId == null) {
     if (shouldWriteLog(`unknown:${location}`)) {
       await createSecurityLog({
         type: 'Intrusion Alert',
         desc: `Unregistered person detected at ${location} (confidence ${Number(confidence).toFixed(2)}).`,
         severity: 'critical',
-        icon: '🚨',
+        icon: 'ðŸš¨',
         personnelName: null,
         confidence,
         cameraLocation: location
@@ -162,7 +235,7 @@ router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
         type: 'Intrusion Alert',
         desc: `Recognition matched a non-enrolled or removed account (ref #${matchedUserId}) at ${location}. AI cache may need a refresh.`,
         severity: 'critical',
-        icon: '🚨',
+        icon: 'ðŸš¨',
         personnelName: null,
         matchedUserId,
         confidence,
@@ -177,14 +250,14 @@ router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
     });
   }
 
-  // Suspended account → deny access and audit it.
+  // Suspended account â†’ deny access and audit it.
   if (!user.isActive) {
     if (shouldWriteLog(`suspended:${user.id}:${location}`)) {
       await createSecurityLog({
         type: 'Suspended Access Attempt',
         desc: `Suspended account attempted gate access at ${location}: ${user.name} (${user.role}, confidence ${Number(confidence).toFixed(2)}).`,
         severity: 'critical',
-        icon: '⛔',
+        icon: 'â›”',
         personnelName: user.name,
         matchedUserId: user.id,
         role: user.role,
@@ -200,7 +273,7 @@ router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
     });
   }
 
-  // Active, enrolled, recognised → safe fields only.
+  // Active, enrolled, recognised â†’ safe fields only.
   return res.status(200).json({
     user: { id: user.id, name: user.name, role: user.role, status: 'AUTHORIZED', confidence },
     box,

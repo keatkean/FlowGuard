@@ -1,4 +1,4 @@
-// Frontend tests — FM-only Facial Evaluation Lab (Felicia).
+// Frontend tests â€” FM-only Facial Evaluation Lab (Felicia).
 // Simulation-only: verifies the page never calls real attendance/security/user
 // mutation APIs, evaluation-record CRUD + localStorage persistence, the
 // confusion-matrix math (accuracy, macro P/R/F1, FAR, FRR, zero-sample safety),
@@ -81,7 +81,7 @@ describe("Simulation scenarios", () => {
   test("shows the SIMULATION MODE banner", () => {
     renderPage();
     expect(
-      screen.getByText(/SIMULATION MODE — Production users, attendance and security logs are not modified\./)
+      screen.getAllByText(/SIMULATION MODE.*Production users.*attendance and security logs are not modified\./)[0]
     ).toBeInTheDocument();
   });
 
@@ -98,7 +98,7 @@ describe("Simulation scenarios", () => {
     return within(screen.getByTestId("sim-result"));
   };
 
-  test("recognised active user → Access Granted with anonymised label", () => {
+  test("recognised active user â†’ Access Granted with anonymised label", () => {
     renderPage();
     const result = runScenario("1\\. Recognised Active User");
     expect(result.getByText("P01")).toBeInTheDocument();
@@ -107,7 +107,7 @@ describe("Simulation scenarios", () => {
     expect(result.getByText(/attendance clock-in would be recorded/i)).toBeInTheDocument();
   });
 
-  test("recognised suspended user → Access Denied + simulated security log", () => {
+  test("recognised suspended user â†’ Access Denied + simulated security log", () => {
     renderPage();
     const result = runScenario("2\\. Recognised Suspended User");
     expect(result.getByText("P02")).toBeInTheDocument();
@@ -116,7 +116,7 @@ describe("Simulation scenarios", () => {
     expect(result.getByText(/suspended access attempt/i)).toBeInTheDocument();
   });
 
-  test("unknown person → Access Denied + simulated intrusion log", () => {
+  test("unknown person â†’ Access Denied + simulated intrusion log", () => {
     renderPage();
     const result = runScenario("3\\. Unknown Person");
     expect(result.getAllByText("Unknown").length).toBeGreaterThan(0);
@@ -124,21 +124,21 @@ describe("Simulation scenarios", () => {
     expect(result.getByText(/intrusion alert/i)).toBeInTheDocument();
   });
 
-  test("no face detected → NO suspicious log is simulated", () => {
+  test("no face detected â†’ NO suspicious log is simulated", () => {
     renderPage();
     const result = runScenario("4\\. No Face Detected");
     expect(result.getByText("No decision")).toBeInTheDocument();
     expect(result.getByText(/no log created/i)).toBeInTheDocument();
   });
 
-  test("Pi offline → automatic laptop fallback continues recognition", () => {
+  test("Pi offline â†’ automatic laptop fallback continues recognition", () => {
     renderPage();
     const result = runScenario("5\\. Pi Camera Offline");
     expect(result.getByText(/laptop-webcam fallback/i)).toBeInTheDocument();
     expect(result.getByText("Access Granted")).toBeInTheDocument();
   });
 
-  test("recognition service offline → retry/backoff without switching camera", () => {
+  test("recognition service offline â†’ retry/backoff without switching camera", () => {
     renderPage();
     const result = runScenario("6\\. Recognition Service Offline");
     expect(result.getByText(/scan-gate backoff engaged/i)).toBeInTheDocument();
@@ -210,13 +210,13 @@ describe("Evaluation records CRUD", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByLabelText("Edit actual label"), { target: { value: "P03" } });
     fireEvent.change(screen.getByLabelText("Edit predicted label"), { target: { value: "P03" } });
-    fireEvent.change(screen.getByLabelText("Edit condition"), { target: { value: "low-light" } });
+    fireEvent.change(screen.getByLabelText("Edit condition"), { target: { value: "Low Lighting" } });
     fireEvent.change(screen.getByLabelText("Edit notes"), { target: { value: "corrected label" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(screen.getByText("corrected label")).toBeInTheDocument();
     const stored = JSON.parse(localStorage.getItem(EVAL_STORAGE_KEY));
-    expect(stored[0]).toMatchObject({ actualLabel: "P03", predictedLabel: "P03", condition: "low-light" });
+    expect(stored[0]).toMatchObject({ actualLabel: "P03", predictedLabel: "P03", condition: "Low Lighting" });
   });
 
   test("Delete: removes one record", () => {
@@ -231,10 +231,10 @@ describe("Evaluation records CRUD", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     renderPage();
 
-    // One simulated record…
+    // One simulated recordâ€¦
     fireEvent.click(screen.getByRole("button", { name: /1\. Recognised Active User/ }));
     fireEvent.click(screen.getByRole("button", { name: "Log to evaluation records" }));
-    // …and one live record.
+    // â€¦and one live record.
     openRecordsTab();
     addLiveRecord();
 
@@ -257,7 +257,7 @@ describe("Evaluation records CRUD", () => {
     // Records carry ONLY the approved safe fields.
     for (const rec of JSON.parse(raw)) {
       expect(Object.keys(rec).sort()).toEqual(
-        ["actualLabel", "condition", "confidence", "id", "latencyMs", "notes", "predictedLabel", "source", "timestamp"]
+        ["actualLabel", "condition", "confidence", "detectionOutcome", "id", "latencyMs", "notes", "origin", "predictedLabel", "source", "timestamp"]
       );
     }
   });
@@ -291,7 +291,7 @@ describe("computeConfusionMatrix", () => {
     rec("P01", "P01"), rec("P01", "P01"), rec("P01", "Unknown"), // FRR contribution
     rec("P02", "P02"),
     rec("Unknown", "Unknown"), rec("Unknown", "Unknown"), rec("Unknown", "P03"), // FAR contribution
-    rec("P01", "No Face"), // detection failure — excluded from identity matrix
+    rec("P01", "No Face"), // detection failure â€” excluded from identity matrix
   ];
 
   test("matrix counts: rows = actual, columns = predicted", () => {
@@ -323,11 +323,11 @@ describe("computeConfusionMatrix", () => {
   });
 
   test("FRR = enrolled predicted as Unknown / all enrolled", () => {
-    // Enrolled identity samples: 3×P01 + 1×P02 = 4 (the No-Face row is excluded); 1 rejected.
+    // Enrolled identity samples: 3Ã—P01 + 1Ã—P02 = 4 (the No-Face row is excluded); 1 rejected.
     expect(computeConfusionMatrix(SAMPLE).frr).toBeCloseTo(1 / 4, 5);
   });
 
-  test("zero samples → all metrics are 0, never NaN", () => {
+  test("zero samples â†’ all metrics are 0, never NaN", () => {
     const m = computeConfusionMatrix([]);
     for (const v of [m.accuracy, m.macroPrecision, m.macroRecall, m.macroF1, m.far, m.frr, m.avgLatencyMs, m.noFaceRate]) {
       expect(v).toBe(0);
@@ -344,7 +344,7 @@ describe("computeConfusionMatrix", () => {
     expect(screen.getByTestId("stat-accuracy").textContent).toBe("71.4%");
     expect(screen.getByTestId("stat-far").textContent).toBe("33.3%");
     expect(screen.getByTestId("stat-frr").textContent).toBe("25.0%");
-    expect(screen.getByTestId("no-face-stat").textContent).toMatch(/1 “No Face” sample/);
+    expect(screen.getByTestId("no-face-stat").textContent).toMatch(/1 .*No Face.* sample/);
     expect(screen.getByTestId("confusion-matrix")).toBeInTheDocument();
   });
 });
@@ -371,7 +371,7 @@ describe("filterRecords / toCsv", () => {
       notes: 'said "hi", twice', timestamp: "2026-07-10T09:00:00.000Z",
     }]);
     const [header, row] = csv.split("\n");
-    expect(header).toBe("id,actualLabel,predictedLabel,confidence,condition,latencyMs,source,notes,timestamp");
+    expect(header).toBe("id,actualLabel,predictedLabel,confidence,condition,latencyMs,source,origin,notes,detectionOutcome,timestamp");
     expect(row).toContain('"said ""hi"", twice"');
   });
 });
