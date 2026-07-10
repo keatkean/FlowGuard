@@ -1,7 +1,7 @@
 # FlowGuard — Rubric Evidence Map (Felicia)
 
-Maps Week 13 rubric criteria to concrete evidence in the repo. Verified status:
-**Backend 79/79 passed · Frontend 70/70 passed · Frontend build success.**
+Maps Week 13 rubric criteria to concrete evidence in the repo. Verified status (latest run, 2026-07-10):
+**Backend 214/214 passed (19 suites) · Frontend 206/206 passed (25 files) · Frontend build success.**
 Object Detection and Incident Tracking were merged into this branch. **No real secrets are committed.**
 
 - **Primary feature:** Facial Recognition & Access Management — biometric access + security/attendance
@@ -19,7 +19,8 @@ Object Detection and Incident Tracking were merged into this branch. **No real s
 | **Enhanced capabilities** | Face enrol (camera + upload), live recognition + liveness, PDPA off-board, FM security-review workflow, WhatsApp notifications, Driver Pass QR, Gate Scan entry/exit, next-in-line alert, slot-conflict guard, date/status/bay filters. |
 | **Security / RBAC** | JWT + `requireRole` middleware + React `ProtectedRoute`; FM/Tenant/Staff/Public matrix in `design/md/rbac-flow.md`. bcrypt hashing, reCAPTCHA, PDPA delete, ownership checks (Tenant own-staff logs), gate scan FM-only. |
 | **Usability** | Role-aware dashboards/wording, dark theme, loading/empty/error states, password show/hide, responsive Logistics + mobile Driver Pass, friendly 401/403/404/500 pages, error boundary. |
-| **Testing** | `server` Jest 79/79, `client` Vitest 70/70; see `docs/Tan Xiu Li, Felicia/test-results-summary.md`. |
+| **Testing** | `server` Jest 214/214 (19 suites), `client` Vitest 206/206 (25 files); see `docs/Tan Xiu Li, Felicia/test-results-summary.md`. |
+| **Evaluation / metrics** | FM-only Facial Evaluation Lab (`/facial-evaluation`, `client/src/pages/FacialEvaluation.jsx`) — simulation scenarios, anonymised evaluation-record CRUD, confusion matrix with accuracy / macro P-R-F1 / FAR / FRR; plan in `docs/Tan Xiu Li, Felicia/facial-recognition-evaluation-plan.md`. |
 | **Deployment readiness** | `deployment.md` (Vercel/Render/Neon plan), `.env.example` placeholders only, build succeeds. |
 | **AI usage** | `flowguard-ai/Tan Xiu Li, Felicia/ai-logs/` + `ai-reflection.md`; summary in `docs/Tan Xiu Li, Felicia/ai-usage-summary.md`. |
 | **Git evidence** | Meaningful, scoped commits per feature/fix on `feature/smart-logistics-whatsapp` (see `git log`). |
@@ -62,8 +63,8 @@ Scan, and next-in-line alerts.
   off-boarding flow above. See `facial-recognition-api-and-security.md`.
 
 ## Notes
-- **Backend 170/170 passed**, **Frontend 150/150 passed**, **build success** (commands in the
-  test-results summary).
+- **Backend 214/214 passed**, **Frontend 206/206 passed**, **build success** — the single current
+  verified run (commands in the test-results summary; all earlier totals are superseded).
 - **Object Detection** and **Incident Tracking** teammate modules are merged into this branch and
   present in the shared DB/models (`detection_alerts`, `incident_logs`, `monitoring_zones`).
 - **No real secrets committed** — all credentials are placeholders in `.env.example`.

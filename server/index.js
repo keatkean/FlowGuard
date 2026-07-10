@@ -49,6 +49,9 @@ app.use(errorHandler);   // anything thrown/forwarded → 500 JSON (no stack lea
 // Sync DB and Start Server
 const db = require('./models');
 const startCleanupCron = require('./cron/cleanupTranscripts');
+// Cloud-compatible binding: PORT (cloud) → APP_PORT (local .env) → 5001,
+// listening on 0.0.0.0 so deployed containers accept external traffic.
+const { resolvePort, resolveHost } = require('./config/serverConfig');
 
 async function startServer() {
     try {
@@ -63,15 +66,30 @@ async function startServer() {
         );
         const failedModels = [];
 
-        for (const name of modelNames) {
+        // Visible startup progress: the HTTP listener only binds AFTER this
+        // loop, so a slow remote database must never look like a silent hang
+        // (the classic symptom is the Vite proxy timing out on 127.0.0.1:5001).
+        console.log(`Syncing ${modelNames.length} models (alter:true) — port ${resolvePort()} opens when this finishes...`);
+        const syncStart = Date.now();
+
+        for (const [i, name] of modelNames.entries()) {
+            // Heartbeat: if one model sync stalls (slow/unreachable DB), keep
+            // saying so instead of going quiet.
+            const heartbeat = setInterval(() => {
+                console.log(`  … still syncing ${name} (${Math.round((Date.now() - syncStart) / 1000)}s elapsed) — check DB_HOST/network if this persists`);
+            }, 10000);
+            const modelStart = Date.now();
             try {
                 await db[name].sync({ alter: true });
-                console.log(`  ✔ Synced: ${name}`);
+                console.log(`  ✔ [${i + 1}/${modelNames.length}] Synced: ${name} (${Date.now() - modelStart}ms)`);
             } catch (syncErr) {
                 failedModels.push(name);
-                console.error(`  ✖ Failed to sync ${name}:`, syncErr.message);
+                console.error(`  ✖ [${i + 1}/${modelNames.length}] Failed to sync ${name}:`, syncErr.message);
+            } finally {
+                clearInterval(heartbeat);
             }
         }
+        console.log(`Model sync finished in ${Math.round((Date.now() - syncStart) / 1000)}s.`);
 
         if (failedModels.length > 0) {
             console.warn(`\nWARNING: ${failedModels.length} model(s) failed to sync: ${failedModels.join(', ')}`);
@@ -81,9 +99,6 @@ async function startServer() {
         // Start PDPA 90-day transcript cleanup cron
         startCleanupCron(db);
 
-        // Cloud-compatible binding: PORT (cloud) → APP_PORT (local .env) → 5001,
-        // listening on 0.0.0.0 so deployed containers accept external traffic.
-        const { resolvePort, resolveHost } = require('./config/serverConfig');
         const port = resolvePort();
         const host = resolveHost();
         app.listen(port, host, () => {

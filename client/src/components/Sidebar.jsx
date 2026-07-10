@@ -84,6 +84,7 @@ const Sidebar = () => {
             <>
               <NavLink to="/users" onClick={() => setIsOpen(false)}>User Management</NavLink>
               <NavLink to="/security-review" onClick={() => setIsOpen(false)}>Security Review</NavLink>
+              <NavLink to="/facial-evaluation" onClick={() => setIsOpen(false)}>Facial Evaluation</NavLink>
               <NavLink to="/incidents" onClick={() => setIsOpen(false)}>Incident Dashboard</NavLink>
               <NavLink to="/support-dashboard" onClick={() => setIsOpen(false)}>Support Tickets</NavLink>
               <NavLink to="/tenant-management" onClick={() => setIsOpen(false)}>Tenant Onboarding</NavLink>

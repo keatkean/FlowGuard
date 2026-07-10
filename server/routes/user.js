@@ -141,6 +141,21 @@ router.post("/invite-tenant", verifyToken, async (req, res) => {
     }
 });
 
+// --- FM ONLY: list generated tenant invites (the GET the onboarding page
+// calls — previously missing, so the invite list silently rendered empty).
+router.get("/tenant-invites", verifyToken, requireRole('FM'), async (req, res) => {
+    try {
+        const invites = await Invite.findAll({
+            order: [['createdAt', 'DESC']],
+            limit: 25
+        });
+        res.json(invites);
+    } catch (err) {
+        console.error("Invite list error:", err);
+        res.status(500).json({ error: "Failed to load invitations." });
+    }
+});
+
 // --- KEY GENERATION (Updated to reset Hybrid Fields) ---
 router.put("/generate-code", verifyToken, async (req, res) => {
     try {

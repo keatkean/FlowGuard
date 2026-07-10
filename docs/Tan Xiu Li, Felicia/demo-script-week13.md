@@ -62,8 +62,17 @@ cd ai-service && uvicorn main:app --host 0.0.0.0 --port 8501 --reload
   Can create a booking, but **no Gate Scan** and **no Mark Arrived/Completed**.
 - Show a blocked route (e.g. Staff → `/vpatrol` or `/users` → **403 Clearance Denied**).
 
+## 4b. Facial Evaluation Lab (FM only, ~2 min)
+- Sidebar → **Facial Evaluation** (`/facial-evaluation`). Point out the banner:
+  *"SIMULATION MODE — Production users, attendance and security logs are not modified."*
+- Run scenario 1 (active → Access Granted) and scenario 3 (unknown → Access Denied), click
+  **Log to evaluation records**, then open the **Confusion Matrix** tab: sample count, accuracy,
+  macro precision/recall/F1, FAR, FRR, average latency.
+- Mention: labels are anonymised (P01–P05 / Unknown), records live only in localStorage, and real
+  live-scan outcomes from V-Patrol / Gate Scanner are entered manually via the Records tab.
+
 ## 5. Wrap up
-- Mention tests: **backend 79/79**, **frontend 70/70**, **build success**.
+- Mention tests: **backend 214/214 (19 suites)**, **frontend 206/206 (25 files)**, **build success**.
 - Mention deployment plan (Vercel / Render / Neon) and that the AI service runs locally for the demo.
 - Note: no real secrets committed; WhatsApp real-send is env-gated and off by default.
 

@@ -1,39 +1,55 @@
 # FlowGuard — Test Results Summary (Felicia)
 
-Latest verified run on branch `feature/smart-logistics-whatsapp`.
+Latest verified run on branch `feature/smart-logistics-whatsapp` (2026-07-10).
+These are the ONLY current totals — earlier snapshots (79/79, 70/70, 170/170, 150/150) are superseded.
 
 ## Backend — Jest
 ```bash
 cd server
 npm test
 ```
-**Result:** ✅ **7 test suites passed, 79 tests passed.**
+**Result:** ✅ **19 test suites passed, 214 tests passed.**
 
-Covers: JWT/RBAC middleware, manual user creation role rules, face enrol (success / missing images /
-AI-offline 503 / refresh), PDPA delete (vector wipe + log anonymise), security logs + FM review +
-own-staff ownership, attendance role scoping (FM/Tenant/Staff), booking CRUD + validation + slot
-conflict, WhatsApp mock vs real (endpoint/payload/phone-normalization/failure-safe), gate scan
-entry/exit + next-in-line + FM-only, and the 404/500 fallback handlers.
+Covers: DB-backed `verifyToken` (deleted → 401, suspended → 403, tokenVersion revocation, DB role
+authoritative), JWT/RBAC middleware, manual user creation role rules, face enrol permissions
+(self / FM-any / Tenant-own-Staff / Staff-blocked, success / missing images / AI-offline 503 /
+refresh), transactional PDPA off-boarding (vector wipe + attendance delete + log anonymisation +
+booking unlink + row genuinely gone + tenant-with-staff 409), suspension permissions + session
+revocation, change-password, forgot/reset password (generic response, SHA-256 token hash, 15-min
+expiry, rate limit 429), security logs + FM review + own-staff ownership, attendance role scoping
+and gate-scan toggling, recognition orchestration (DB-authoritative identity, dedup logs, no-face
+→ no log), access-event audit-only route, booking CRUD + validation + slot conflict + edit + pass,
+WhatsApp mock vs real, gate scan entry/exit + next-in-line + FM-only, CORS, and 404/500 fallbacks.
 
 ## Frontend — Vitest
 ```bash
 cd client
 npm test -- --run
 ```
-**Result:** ✅ **11 test files passed, 70 tests passed.**
+**Result:** ✅ **25 test files passed, 206 tests passed.**
 
-Covers: ProtectedRoute + RBAC (role route guards + sidebar visibility + roleLabel), FaceEnrollment
-(render / upload validation / submit / error / no-webcam), PasswordInput toggle, Users manual-add +
-no-Re-enroll/no-Add-FM, Settings role-gated content, Attendance role-aware wording, Logistics
-(filters, date filter, create modal, Staff create + no gate/status, gate-scan modal), DriverPass
-(valid + `{booking}` envelope + 404 + missing-fields + QR fallback), and error pages / ErrorBoundary.
+Covers: ProtectedRoute + RBAC, FaceEnrollment (Pi-primary probe, webcam fallback, manual source
+switch, upload validation, submit, error), Facial Evaluation Lab (FM-only route, simulation banner,
+all six scenarios, no real API calls from simulations, evaluation-record CRUD + localStorage
+persistence, confusion-matrix counts/accuracy/macro-P/R/F1/FAR/FRR, zero-sample safety, CSV export,
+no raw image/vector/template rendered or stored), face-box coordinate contract (clamping +
+contain/cover projection), Pi camera helpers, GateScanner camera source, scan control, recognition
+subject mapping, security timeline, Settings (role gating + change-password card), Users/Face ID
+badges + API-base static checks, Attendance, Logistics (filters, create, edit, gate-scan),
+DriverPass (+ fallback), PasswordInput, and error pages / ErrorBoundary.
 
 ## Build — Vite
 ```bash
 cd client
 npm run build
 ```
-**Result:** ✅ **Build succeeded.**
+**Result:** ✅ **Build succeeded** (pre-existing >500 kB chunk-size warning only).
+
+## Syntax / compile checks
+```bash
+node --check server/index.js        # ✅ passes
+python -m py_compile ai-service/main.py   # ✅ passes
+```
 
 ## Note on console output
 Some tests log expected console warnings/errors (e.g. simulated WhatsApp "disabled" messages,
