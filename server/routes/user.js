@@ -15,6 +15,29 @@ const { createRateLimiter } = require('../middlewares/rateLimit');
 const { sendPasswordResetEmail } = require('../services/mailer');
 require('dotenv').config();
 
+const TENANT_INVITE_TTL_MS = 48 * 60 * 60 * 1000;
+
+const getInviteStatus = (invite, now = new Date()) => {
+    if (invite.isUsed) return 'USED';
+    if (now >= new Date(invite.expiresAt)) return 'EXPIRED';
+    return 'PENDING';
+};
+
+const toInviteDto = (invite, now = new Date()) => {
+    const plain = typeof invite.toJSON === 'function' ? invite.toJSON() : invite;
+    const status = getInviteStatus(plain, now);
+    return {
+        id: plain.id,
+        code: plain.code,
+        role: plain.role,
+        expiresAt: plain.expiresAt,
+        createdAt: plain.createdAt,
+        status,
+        isUsed: Boolean(plain.isUsed),
+        isUsable: status === 'PENDING'
+    };
+};
+
 // --- REGISTRATION (Multi-Level Security Gate) ---
 router.post("/register", async (req, res) => {
     const { recaptchaToken, ...userData } = req.body;
@@ -63,7 +86,7 @@ router.post("/register", async (req, res) => {
             }
 
             // Check Expiration (e.g., 24h/48h set when invite was created)
-            if (new Date() > invite.expiresAt) {
+            if (new Date() >= new Date(invite.expiresAt)) {
                 return res.status(401).json({ errors: ["This invitation code has expired."] });
             }
 
@@ -125,7 +148,7 @@ router.post("/invite-tenant", verifyToken, async (req, res) => {
         if (req.user.role !== 'FM') return res.status(403).json({ message: "Access Denied." });
 
         const inviteCode = `INVITE-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-        const expiry = new Date(Date.now() + 48 * 60 * 60 * 1000);
+        const expiry = new Date(Date.now() + TENANT_INVITE_TTL_MS);
 
         // CRITICAL: Ensure Invite is imported at the top of this file
         await Invite.create({
@@ -149,7 +172,8 @@ router.get("/tenant-invites", verifyToken, requireRole('FM'), async (req, res) =
             order: [['createdAt', 'DESC']],
             limit: 25
         });
-        res.json(invites);
+        const now = new Date();
+        res.json(invites.map(invite => toInviteDto(invite, now)));
     } catch (err) {
         console.error("Invite list error:", err);
         res.status(500).json({ error: "Failed to load invitations." });

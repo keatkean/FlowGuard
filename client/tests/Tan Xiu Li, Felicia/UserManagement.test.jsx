@@ -47,17 +47,17 @@ describe("User Management — Add Tenant (FM)", () => {
     expect(screen.getByRole("button", { name: /Add Tenant/i })).toBeTruthy();
   });
 
-  test("a user row keeps Logs/Suspend/Delete but no Face ID action", async () => {
+  test("a user row keeps Logs, Face ID, Suspend and Delete actions", async () => {
     localStorage.setItem("userRole", "FM");
     mockGet.mockResolvedValueOnce({
-      data: [{ id: 5, name: "Jane Tan", email: "jane@x.com", role: "Tenant", isActive: true, createdAt: new Date().toISOString(), locationStatus: "Off-Site" }],
+      data: [{ id: 5, name: "Jane Tan", email: "jane@x.com", role: "Tenant", isActive: true, isEnrolled: false, createdAt: new Date().toISOString(), locationStatus: "Off-Site" }],
     });
     renderUsers();
     await screen.findByText("Jane Tan");
-    expect(screen.getByRole("button", { name: /^Logs$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /View Logs/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Enrol Face ID/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Suspend/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Delete/i })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^Face ID$/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Permanent Delete/i })).toBeTruthy();
   });
 
   test("non-FM does not see the + Add Tenant button", () => {

@@ -14,7 +14,7 @@ const mockUser = {
 jest.mock("../models", () => ({
   User: mockUser,
   Attendance: { findAll: jest.fn(), destroy: jest.fn() },
-  Invite: { findOne: jest.fn(), create: jest.fn() },
+  Invite: { findOne: jest.fn(), findAll: jest.fn(), create: jest.fn() },
   SecurityLog: { update: jest.fn() },
   Booking: { update: jest.fn() },
   // Transactional off-boarding: run the callback with a stub transaction.
@@ -116,6 +116,97 @@ describe("User routes", () => {
     expect(destroy).toHaveBeenCalled();
   });
 
+
+  describe("Tenant invitation expiry", () => {
+    const tenantRegistration = {
+      recaptchaToken: "captcha",
+      name: "Tenant One",
+      email: "tenant@example.com",
+      password: "StrongPass123",
+      role: "Tenant",
+      tenantCode: "INVITE-TEST"
+    };
+
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(new Date("2026-07-10T01:00:00.000Z"));
+      require("axios").post.mockResolvedValue({ data: { success: true, score: 0.9 } });
+      mockUser.create.mockResolvedValue({ id: 12 });
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    const registerWithExpiry = async (expiresAt, inviteExtras = {}) => {
+      const invite = { isUsed: false, expiresAt, update: jest.fn().mockResolvedValue(true), ...inviteExtras };
+      require("../models").Invite.findOne.mockResolvedValue(invite);
+      const res = await request(app).post("/user/register").send(tenantRegistration);
+      return { res, invite };
+    };
+
+    test("valid immediately before 48 hours", async () => {
+      const { res, invite } = await registerWithExpiry(new Date("2026-07-10T01:00:00.001Z"));
+      expect(res.status).toBe(200);
+      expect(invite.update).toHaveBeenCalledWith({ isUsed: true });
+      expect(mockUser.create).toHaveBeenCalled();
+    });
+
+    test("invalid exactly at expiry", async () => {
+      const { res, invite } = await registerWithExpiry(new Date("2026-07-10T01:00:00.000Z"));
+      expect(res.status).toBe(401);
+      expect(res.body.errors[0]).toMatch(/expired/i);
+      expect(invite.update).not.toHaveBeenCalled();
+    });
+
+    test("invalid after expiry", async () => {
+      const { res } = await registerWithExpiry(new Date("2026-07-10T00:59:59.999Z"));
+      expect(res.status).toBe(401);
+      expect(res.body.errors[0]).toMatch(/expired/i);
+    });
+
+    test("used invite rejected", async () => {
+      require("../models").Invite.findOne.mockResolvedValue(null);
+      const res = await request(app).post("/user/register").send(tenantRegistration);
+      expect(res.status).toBe(401);
+      expect(res.body.errors[0]).toMatch(/invalid or used/i);
+    });
+
+    test("invite list returns EXPIRED for expired unused invites", async () => {
+      mockUser.findByPk.mockResolvedValue({ id: 99, role: "FM", isActive: true });
+      require("../models").Invite.findAll.mockResolvedValue([
+        { id: 1, code: "INVITE-OLD", role: "Tenant", isUsed: false, expiresAt: new Date("2026-07-10T01:00:00.000Z"), createdAt: new Date("2026-07-08T01:00:00.000Z") }
+      ]);
+      const res = await request(app).get("/user/tenant-invites").set("Authorization", `Bearer ${fmToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body[0]).toMatchObject({ status: "EXPIRED", isUsable: false });
+    });
+
+    test("invite list returns PENDING for valid unused invites", async () => {
+      mockUser.findByPk.mockResolvedValue({ id: 99, role: "FM", isActive: true });
+      require("../models").Invite.findAll.mockResolvedValue([
+        { id: 2, code: "INVITE-NEW", role: "Tenant", isUsed: false, expiresAt: new Date("2026-07-10T01:00:00.001Z"), createdAt: new Date("2026-07-08T01:00:00.000Z") }
+      ]);
+      const res = await request(app).get("/user/tenant-invites").set("Authorization", `Bearer ${fmToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body[0]).toMatchObject({ status: "PENDING", isUsable: true });
+    });
+  });
+  test("DELETE /user/:id blocks self deletion", async () => {
+    mockUser.findByPk.mockResolvedValue({ id: 99, role: "FM", isActive: true, name: "Self User" });
+    const res = await request(app).delete("/user/99").set("Authorization", `Bearer ${fmToken}`);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/self-deletion/i);
+  });
+
+  test("DELETE /user/:id blocks tenant deletion while linked Staff exist", async () => {
+    const fmAccount = { id: 99, role: "FM", isActive: true };
+    const tenant = { id: 10, name: "Unit Owner", role: "Tenant", managerId: null };
+    mockUser.findByPk.mockImplementation((id) => Promise.resolve(Number(id) === 99 ? fmAccount : tenant));
+    mockUser.count.mockResolvedValue(2);
+    const res = await request(app).delete("/user/10").set("Authorization", `Bearer ${fmToken}`);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/linked Staff/i);
+  });
   // --- Manual user creation (role rules) ---
   describe("POST /user/manual-create", () => {
     const body = { name: "New Person", email: "new@harrison.com", password: "Temp1234!" };

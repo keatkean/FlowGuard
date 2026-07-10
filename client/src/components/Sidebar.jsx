@@ -1,11 +1,14 @@
 // client/src/components/Sidebar.jsx
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import LogoIcon from './LogoIcon';
 import { ROLES, roleLabel } from '../constants/roles';
 
+export const SIDEBAR_SCROLL_STORAGE_KEY = 'flowguard_sidebar_scroll';
+
 const Sidebar = () => {
   const navigate = useNavigate();
+  const navRef = useRef(null);
   const [user] = useState(() => {
     const storedName = localStorage.getItem("userName");
     const storedRole = localStorage.getItem("userRole");
@@ -14,6 +17,31 @@ const Sidebar = () => {
       : { name: 'Guest', role: ROLES.TENANT };
   });
   const [isOpen, setIsOpen] = useState(false);
+
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return undefined;
+
+    const restoreScroll = () => {
+      const stored = Number(sessionStorage.getItem(SIDEBAR_SCROLL_STORAGE_KEY) || 0);
+      if (Number.isFinite(stored) && stored > 0) {
+        nav.scrollTop = stored;
+      }
+    };
+
+    const frame = requestAnimationFrame(restoreScroll);
+
+    const saveScroll = () => {
+      sessionStorage.setItem(SIDEBAR_SCROLL_STORAGE_KEY, String(nav.scrollTop));
+    };
+    nav.addEventListener('scroll', saveScroll, { passive: true });
+
+    return () => {
+      cancelAnimationFrame(frame);
+      nav.removeEventListener('scroll', saveScroll);
+      saveScroll();
+    };
+  }, []);
 
   // Visibility helpers — keep these in lock-step with the route wrappers in App.jsx
   // so a user never sees a link that would only bounce them to the 403 page.
@@ -48,7 +76,7 @@ const Sidebar = () => {
           </button>
         </div>
         
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" ref={navRef}>
           {/* Everyone with a session */}
           <NavLink to="/dashboard" onClick={() => setIsOpen(false)}>Dashboard</NavLink>
 
