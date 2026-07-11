@@ -57,6 +57,18 @@ router.get('/', requireRole('FM', 'Staff'), async (req, res) => {
     }
 });
 
+router.get('/:id', requireRole('FM', 'Staff'), async (req, res) => {
+    try {
+        // Non-numeric ids would make Postgres throw on an integer PK lookup — treat as not found.
+        if (!/^\d+$/.test(req.params.id)) return res.sendStatus(404);
+        const zone = await MonitoringZone.findByPk(req.params.id);
+        if (!zone) return res.sendStatus(404);
+        res.json(serializeZone(zone));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 router.post('/', requireRole('FM'), async (req, res) => {
     try {
         const { zone_name, location, time_threshold, density_threshold, unattended_threshold_seconds,

@@ -57,6 +57,34 @@ describe("GET /api/zones", () => {
   });
 });
 
+describe("GET /api/zones/:id", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test("Staff can fetch a single zone by valid id (200) with parsed monitored_classes", async () => {
+    mockMonitoringZone.findByPk.mockResolvedValue(makeZoneInstance({ monitored_classes: '["suitcase","backpack"]' }));
+    const res = await request(app).get("/api/zones/1").set("Authorization", `Bearer ${staffToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.monitored_classes).toEqual(["suitcase", "backpack"]);
+  });
+
+  test("missing zone returns 404", async () => {
+    mockMonitoringZone.findByPk.mockResolvedValue(null);
+    const res = await request(app).get("/api/zones/999").set("Authorization", `Bearer ${fmToken}`);
+    expect(res.status).toBe(404);
+  });
+
+  test("non-numeric id is handled cleanly (404, no DB lookup)", async () => {
+    const res = await request(app).get("/api/zones/not-a-number").set("Authorization", `Bearer ${fmToken}`);
+    expect(res.status).toBe(404);
+    expect(mockMonitoringZone.findByPk).not.toHaveBeenCalled();
+  });
+
+  test("unauthenticated user cannot fetch a zone (401)", async () => {
+    const res = await request(app).get("/api/zones/1");
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("POST /api/zones", () => {
   beforeEach(() => jest.clearAllMocks());
 

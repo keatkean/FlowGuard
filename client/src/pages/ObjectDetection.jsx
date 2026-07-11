@@ -42,6 +42,7 @@ const ObjectDetection = () => {
   const [detectionActive, setDetectionActive] = useState(false);
   const [workflowMessage, setWorkflowMessage] = useState('');
   const [alertActionBusy, setAlertActionBusy] = useState(false);
+  const [selectedAlertId, setSelectedAlertId] = useState(null);
 
   const [streamError, setStreamError] = useState(false);
   const [aiOffline, setAiOffline] = useState(false);
@@ -330,6 +331,28 @@ const ObjectDetection = () => {
     handleUpdateAlertStatus(id, 'Cleared');
   };
 
+  const handleClearAllAlerts = async () => {
+    const openAlerts = alerts.filter((a) => OPEN_ALERT_STATUSES.includes(a.status));
+    if (openAlerts.length === 0) return;
+    setAlertActionBusy(true);
+    setWorkflowMessage('');
+    try {
+      const results = await Promise.all(
+        openAlerts.map((a) => axios.put(`${ALERTS_URL}/${a.id}`, { status: 'Cleared' }, { headers }))
+      );
+      setAlerts((prev) => prev.map((a) => {
+        const updated = results.find((r) => r.data.id === a.id);
+        return updated ? updated.data : a;
+      }));
+      setWorkflowMessage('All active alerts cleared.');
+    } catch (err) {
+      console.error('Clear all alerts error:', err);
+      setWorkflowMessage('Could not clear all alerts. Check that the Node.js server is running.');
+    } finally {
+      setAlertActionBusy(false);
+    }
+  };
+
   const handleVideoUpload = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -346,10 +369,16 @@ const ObjectDetection = () => {
   const latestOpenAlert = useMemo(() => (
     alerts.find(alert => OPEN_ALERT_STATUSES.includes(alert.status)) || null
   ), [alerts]);
+  const displayedAlert = useMemo(() => {
+    const selected = selectedAlertId
+      ? alerts.find(alert => alert.id === selectedAlertId && OPEN_ALERT_STATUSES.includes(alert.status))
+      : null;
+    return selected || latestOpenAlert;
+  }, [alerts, selectedAlertId, latestOpenAlert]);
   const latestIncidentTitle = useMemo(() => {
-    if (!latestOpenAlert) return '';
-    return alertTitle(latestOpenAlert);
-  }, [latestOpenAlert]);
+    if (!displayedAlert) return '';
+    return alertTitle(displayedAlert);
+  }, [displayedAlert]);
   const sourceTitle = sourceMode === 'hardware'
     ? 'SecurePi Edge Live'
     : sourceMode === 'file'
@@ -561,31 +590,31 @@ const ObjectDetection = () => {
               <div className="od-incident-title">
                 <Icon name="alert" />
                 <div>
-                  <span className={latestOpenAlert ? 'critical' : 'clear'}>
-                    {latestOpenAlert ? latestOpenAlert.status : 'CLEAR'}
+                  <span className={displayedAlert ? 'critical' : 'clear'}>
+                    {displayedAlert ? displayedAlert.status : 'CLEAR'}
                   </span>
-                  <h2>{latestOpenAlert ? latestIncidentTitle : 'No Active Incident'}</h2>
-                  <p>{latestOpenAlert ? 'Incident console - resolution workflow' : 'Live alerts will appear here when created'}</p>
+                  <h2>{displayedAlert ? latestIncidentTitle : 'No Active Incident'}</h2>
+                  <p>{displayedAlert ? 'Incident console - resolution workflow' : 'Live alerts will appear here when created'}</p>
                 </div>
               </div>
 
-              {latestOpenAlert ? (
+              {displayedAlert ? (
                 <>
                   <div className="od-incident-body">
-                    <p>{latestOpenAlert.zone_name} - {latestOpenAlert.camera_location}</p>
+                    <p>{displayedAlert.zone_name} - {displayedAlert.camera_location}</p>
                     <div className="od-incident-meta">
-                      <span>Camera <strong>{latestOpenAlert.camera_location}</strong></span>
-                      <span>Status <strong>{latestOpenAlert.status}</strong></span>
-                      <span>Object <strong>{latestOpenAlert.object_class || 'Package-like object'}</strong></span>
-                      <span>Source <strong>{alertSource(latestOpenAlert)}</strong></span>
-                      <span>Severity <strong>{latestOpenAlert.severity || 'High'}</strong></span>
-                      <span>Timestamp <strong>{alertTimestamp(latestOpenAlert)}</strong></span>
-                      {latestOpenAlert.duration_seconds != null && (
-                        <span>Duration <strong>{latestOpenAlert.duration_seconds}s</strong></span>
+                      <span>Camera <strong>{displayedAlert.camera_location}</strong></span>
+                      <span>Status <strong>{displayedAlert.status}</strong></span>
+                      <span>Object <strong>{displayedAlert.object_class || 'Package-like object'}</strong></span>
+                      <span>Source <strong>{alertSource(displayedAlert)}</strong></span>
+                      <span>Severity <strong>{displayedAlert.severity || 'High'}</strong></span>
+                      <span>Timestamp <strong>{alertTimestamp(displayedAlert)}</strong></span>
+                      {displayedAlert.duration_seconds != null && (
+                        <span>Duration <strong>{displayedAlert.duration_seconds}s</strong></span>
                       )}
                     </div>
-                    {latestOpenAlert.snapshot_url && (
-                      <a className="od-snapshot-link" href={latestOpenAlert.snapshot_url} target="_blank" rel="noreferrer">
+                    {displayedAlert.snapshot_url && (
+                      <a className="od-snapshot-link" href={displayedAlert.snapshot_url} target="_blank" rel="noreferrer">
                         View edge snapshot
                       </a>
                     )}
@@ -595,31 +624,31 @@ const ObjectDetection = () => {
                     <button
                       type="button"
                       className="green"
-                      onClick={() => handleAcknowledgeAlert(latestOpenAlert.id)}
-                      disabled={alertActionBusy || latestOpenAlert.status !== 'Active'}
+                      onClick={() => handleAcknowledgeAlert(displayedAlert.id)}
+                      disabled={alertActionBusy || displayedAlert.status !== 'Active'}
                     >
                       Acknowledge
                     </button>
                     <button
                       type="button"
                       className="dispatch"
-                      onClick={() => handleInvestigateAlert(latestOpenAlert.id)}
-                      disabled={alertActionBusy || latestOpenAlert.status === 'Investigating'}
+                      onClick={() => handleInvestigateAlert(displayedAlert.id)}
+                      disabled={alertActionBusy || displayedAlert.status === 'Investigating'}
                     >
                       Mark Investigating
                     </button>
                     <button
                       type="button"
                       className="escalate"
-                      onClick={() => handleEscalateAlert(latestOpenAlert.id)}
-                      disabled={alertActionBusy || latestOpenAlert.status === 'Escalated'}
+                      onClick={() => handleEscalateAlert(displayedAlert.id)}
+                      disabled={alertActionBusy || displayedAlert.status === 'Escalated'}
                     >
                       Escalate
                     </button>
                     <button
                       type="button"
                       className="resolve"
-                      onClick={() => handleClearAlert(latestOpenAlert.id)}
+                      onClick={() => handleClearAlert(displayedAlert.id)}
                       disabled={alertActionBusy}
                     >
                       Mark Resolved / Cleared
@@ -641,10 +670,23 @@ const ObjectDetection = () => {
                   <span><Icon name="alert" /> Active Alerts</span>
                   <h2>Latest Detection Alerts</h2>
                 </div>
+                <button
+                  type="button"
+                  className="od-clear-all-btn"
+                  onClick={handleClearAllAlerts}
+                  disabled={alertActionBusy || activeAlertCount === 0}
+                >
+                  Clear All
+                </button>
               </div>
               <div className="od-live-alert-list">
-                {alerts.filter((alert) => OPEN_ALERT_STATUSES.includes(alert.status)).slice(0, 4).map((alert) => (
-                  <button key={alert.id} type="button" className="od-live-alert-item" onClick={() => handleInvestigateAlert(alert.id)} disabled={alertActionBusy}>
+                {alerts.filter((alert) => OPEN_ALERT_STATUSES.includes(alert.status)).map((alert) => (
+                  <button
+                    key={alert.id}
+                    type="button"
+                    className={`od-live-alert-item ${displayedAlert?.id === alert.id ? 'active' : ''}`}
+                    onClick={() => setSelectedAlertId(alert.id)}
+                  >
                     <span>{alertTitle(alert)}</span>
                     <strong>{alert.status}</strong>
                     <small>{alert.zone_name} - {alert.camera_location}</small>

@@ -1,7 +1,24 @@
 const express = require('express');
 const router = express.Router();
-const { DetectionAlert, MonitoringZone, Camera } = require('../models');
+const { DetectionAlert, IncidentLog, MonitoringZone, Camera, sequelize } = require('../models');
 const { Op } = require('sequelize');
+
+// Mirrors the fallback in detectionAlerts.js so edge and AI alerts get consistent severities
+function severityFromDuration(seconds) {
+    if (!seconds || seconds < 120) return 'Low';
+    if (seconds < 300) return 'Medium';
+    if (seconds < 600) return 'High';
+    return 'Critical';
+}
+
+// Runs fn inside a managed transaction when the connection is available; unit tests that
+// mock ../models without a sequelize instance fall back to running fn untransacted.
+const withTransaction = (fn) => {
+    if (sequelize && typeof sequelize.transaction === 'function') {
+        return sequelize.transaction(fn);
+    }
+    return fn(null);
+};
 
 const SEVERITIES = ['Low', 'Medium', 'High', 'Critical'];
 const VALID_STATUSES = ['Active', 'Acknowledged', 'Investigating', 'Dispatched', 'Escalated', 'Cleared'];
@@ -98,22 +115,43 @@ router.post('/detection-alerts', verifyEdgeIngestToken, async (req, res) => {
         }
 
         const links = await resolveLinks(cleanedZone, cleanedCamera);
-        const alert = await DetectionAlert.create({
-            zone_name: cleanedZone,
-            camera_location: cleanedCamera,
-            status: status || 'Active',
-            object_class: cleanText(object_class, 100) || 'package-like object',
-            duration_seconds: parsePositiveInt(duration_seconds),
-            person_name: cleanText(person_name, 255),
-            alert_type: cleanText(alert_type, 100) || 'Unattended Object',
-            severity: severity || 'High',
-            source: cleanText(source, 100) || 'SecurePi Edge Node',
-            confidence: parseConfidence(confidence),
-            snapshot_url: cleanText(snapshot_url || snapshot_path, 500),
-            device_id: cleanText(device_id, 100),
-            occurred_at: parseOccurredAt(timestamp || occurred_at),
-            ...links
+        const resolvedSeverity = severity || severityFromDuration(duration_seconds);
+
+        // Alert + linked incident are created atomically: a failed incident create rolls
+        // back the detection alert so the edge node can safely retry the whole event.
+        const alert = await withTransaction(async (t) => {
+            const created = await DetectionAlert.create({
+                zone_name: cleanedZone,
+                camera_location: cleanedCamera,
+                status: status || 'Active',
+                object_class: cleanText(object_class, 100) || 'package-like object',
+                duration_seconds: parsePositiveInt(duration_seconds),
+                person_name: cleanText(person_name, 255),
+                alert_type: cleanText(alert_type, 100) || 'Unattended Object',
+                severity: resolvedSeverity,
+                source: cleanText(source, 100) || 'SecurePi Edge Node',
+                confidence: parseConfidence(confidence),
+                snapshot_url: cleanText(snapshot_url || snapshot_path, 500),
+                device_id: cleanText(device_id, 100),
+                occurred_at: parseOccurredAt(timestamp || occurred_at),
+                ...links
+            }, { transaction: t });
+
+            const incident = await IncidentLog.create({
+                camera_location: cleanedCamera,
+                status: 'UNATTENDED_OBJECT',
+                source: 'Object Detection',
+                severity: resolvedSeverity,
+                person_name: (person_name && person_name !== 'UNKNOWN') ? cleanText(person_name, 255) : null,
+                confidence_score: null,
+                resolutionStatus: 'Active',
+                notes: `[Object Detection] Zone: ${cleanedZone}`
+            }, { transaction: t });
+
+            await created.update({ incident_log_id: incident.id }, { transaction: t });
+            return created;
         });
+
         return res.status(201).json(alert);
     } catch (err) {
         return res.status(500).json({ error: err.message });

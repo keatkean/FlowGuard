@@ -384,7 +384,7 @@ def _get_nearby_person(person_entries, ox, oy):
     return False, None
 
 
-def _fire_alert(class_name, zone_name, duration_sec, person_name=None):
+def _fire_alert(class_name, zone_name, duration_sec, person_name=None, severity=None):
     if not _REQUESTS_OK:
         return
     try:
@@ -392,11 +392,12 @@ def _fire_alert(class_name, zone_name, duration_sec, person_name=None):
             f"{_NODE_URL}/api/detection-alerts",
             json={
                 "zone_name": zone_name,
-                "camera_location": "Webcam Feed",
+                "camera_location": os.getenv("AI_CAMERA_LOCATION", "Webcam Feed"),
                 "status": "Active",
                 "object_class": class_name,
                 "duration_seconds": duration_sec,
-                "person_name": person_name
+                "person_name": person_name,
+                "severity": severity
             },
             headers={"x-service-key": os.getenv("AI_SERVICE_KEY", "")},
             timeout=5
@@ -425,9 +426,10 @@ def _maybe_fire_person_alert(person_count, zone_name):
         if person_count > 1
         else f"{level}: Person Detected"
     )
+    severity = "Critical" if level == "Critical" else "Medium"
     threading.Thread(
         target=_fire_alert,
-        args=(label, zone_name, None, None),
+        args=(label, zone_name, None, None, severity),
         daemon=True
     ).start()
 
