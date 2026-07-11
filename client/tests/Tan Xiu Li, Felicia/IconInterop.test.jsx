@@ -148,13 +148,12 @@ describe("Runtime icon-bearing components", () => {
     localStorage.setItem(EVAL_STORAGE_KEY, JSON.stringify([
       { id: "LM-1", actualLabel: "P01", predictedLabel: "P01", condition: "Front", source: "Live", origin: "Gate Scanner", timestamp: "2026-07-10T02:00:00.000Z" },
     ]));
-    render(<MemoryRouter><LiveConfusionMatrixPanel origin="Gate Scanner" title="Gate Scanner — Live Recognition Performance" /></MemoryRouter>);
+    render(<MemoryRouter><LiveConfusionMatrixPanel origin="Gate Scanner" /></MemoryRouter>);
 
-    const toggle = screen.getByRole("button", { name: /Live Recognition Performance/ });
-    expect(toggle.querySelector("svg")).toBeTruthy(); // expanded by default (ExpandLess)
+    const toggle = screen.getByRole("button", { name: /Facial Recognition Evaluation/ });
+    expect(toggle.querySelector("svg")).toBeTruthy(); // collapsed by default (ExpandMore)
     fireEvent.click(toggle);
-    expect(toggle.querySelector("svg")).toBeTruthy(); // collapsed (ExpandMore)
-    fireEvent.click(toggle);
+    expect(toggle.querySelector("svg")).toBeTruthy(); // expanded (ExpandLess)
     fireEvent.click(screen.getByRole("button", { name: "Advanced Matrix Details" }));
     expect(screen.getByTestId("live-matrix-gatescanner-table")).toBeTruthy();
   });
@@ -184,7 +183,9 @@ describe("Runtime icon-bearing components", () => {
     mockAxios.get.mockResolvedValue({ data: [] });
     render(<MemoryRouter><GateScanner /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText("Pi Gate Camera connected")).toBeTruthy());
-    expect(screen.getByText(/Awaiting scan/)).toBeTruthy();
+    // The large decision card is gone; the kiosk HUD reports state instead.
+    expect(screen.queryByText(/Awaiting scan/)).toBeNull();
+    expect(screen.getByText(/TERMINAL STATE:/)).toBeTruthy();
   });
 
   test("VPatrol renders without invalid-element errors", async () => {

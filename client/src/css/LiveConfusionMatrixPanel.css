@@ -34,6 +34,53 @@
     font-weight: 800;
     font-size: 0.95rem;
     text-align: left;
+    flex: 1;
+}
+
+.live-matrix-count {
+    color: #94a3b8;
+    font-size: 0.8rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.live-matrix-banner {
+    color: #b6c2d6;
+    background: rgba(59, 130, 246, 0.07);
+    border-left: 3px solid #3b82f6;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 0.85rem;
+    margin: 0 0 12px;
+}
+
+.eval-last-result {
+    background: #111a2e;
+    border: 1px solid #27314f;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: 0 0 12px;
+    color: #e2e8f0;
+    font-size: 0.86rem;
+}
+
+.eval-last-result p {
+    margin: 0 0 8px;
+}
+
+.eval-last-result-message {
+    color: #34d399;
+    font-weight: 700;
+}
+
+.eval-last-result button {
+    border: 1px solid rgba(96, 165, 250, 0.35);
+    border-radius: 8px;
+    background: transparent;
+    color: #60a5fa;
+    font-weight: 700;
+    padding: 6px 12px;
+    cursor: pointer;
 }
 
 .live-matrix-body {

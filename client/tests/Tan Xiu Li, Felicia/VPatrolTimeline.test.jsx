@@ -106,6 +106,44 @@ describe("V-Patrol attendance separation", () => {
   });
 });
 
+describe("V-Patrol operational layout", () => {
+  test("the large recognition-result card is removed; camera and Security Timeline remain", async () => {
+    const { container } = await renderTimeline();
+    // No big decision card (idle text, detail rows or record button).
+    expect(screen.queryByTestId("recognition-decision-card")).toBeNull();
+    expect(screen.queryByText(/Awaiting scan — no recognition decision yet/)).toBeNull();
+    expect(screen.queryByText("Record for Evaluation")).toBeNull();
+    // Live camera feed + HUD on the left, Security Timeline on the right.
+    expect(container.querySelector("video.video-feed")).toBeTruthy();
+    expect(screen.getByText(/SYS_MODE \/\/ BIOMETRIC_GANTRY/)).toBeTruthy();
+    expect(screen.getByText("Security Timeline")).toBeTruthy();
+    // Camera source switching stays available.
+    expect(screen.getByRole("button", { name: "Raspberry Pi Gate Camera" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Laptop Webcam" })).toBeTruthy();
+  });
+
+  test("Operational Mode hides the evaluation section; Live Evaluation Mode shows the collapsed accordion", async () => {
+    await renderTimeline();
+    expect(screen.queryByText("Facial Recognition Evaluation")).toBeNull();
+    expect(screen.queryByTestId("live-matrix-vpatrol")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Live Evaluation Mode" }));
+    const accordion = screen.getByRole("button", { name: /Facial Recognition Evaluation/ });
+    expect(accordion.getAttribute("aria-expanded")).toBe("false");
+    // Controls stay hidden until expanded.
+    expect(screen.queryByText("Select ground-truth identity")).toBeNull();
+
+    fireEvent.click(accordion);
+    expect(screen.getByText(/compares evaluator-confirmed ground truth against the real AI prediction/)).toBeTruthy();
+    expect(screen.getByText("Select ground-truth identity")).toBeTruthy();
+    expect(screen.getByText(/Auto-record completed scans/)).toBeTruthy();
+    expect(screen.queryByText("No Face Tests")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Operational Mode" }));
+    expect(screen.queryByTestId("live-matrix-vpatrol")).toBeNull();
+  });
+});
+
 describe("V-Patrol timeline filters", () => {
   test("event-type filter hides non-matching cards", async () => {
     await renderTimeline();

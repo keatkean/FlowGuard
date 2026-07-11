@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import axios from 'axios';
 import Sidebar from '../components/Sidebar';
-import RecognitionDecisionCard, { DECISION_STATES } from '../components/RecognitionDecisionCard';
+import { DECISION_STATES } from '../components/RecognitionDecisionCard';
 import EvaluationRecorderModal from '../components/EvaluationRecorderModal';
 import LiveConfusionMatrixPanel from '../components/LiveConfusionMatrixPanel';
 import useEvaluationParticipants from '../hooks/useEvaluationParticipants';
@@ -53,7 +53,9 @@ const GateScanner = () => {
   const scanModeRef = useRef('operational');
   const evaluationConfigRef = useRef({ actualLabel: '', condition: 'Front', autoRecord: true });
   const lastRecordedScanRef = useRef(null);
-  const updateScanMode = (mode) => { setScanMode(mode); scanModeRef.current = mode; lastRecordedScanRef.current = null; };
+  // Switching modes clears the previous decision so the evaluation accordion
+  // only ever shows results produced in Live Evaluation Mode.
+  const updateScanMode = (mode) => { setScanMode(mode); scanModeRef.current = mode; lastRecordedScanRef.current = null; setLastDecision(null); };
   const updateEvaluationConfig = (next) => { setEvaluationConfig(next); evaluationConfigRef.current = next; };
   const cameraSourceRef = useRef(CAMERA_SOURCES.PI);
   const piFailStreakRef = useRef(0);
@@ -480,15 +482,7 @@ const GateScanner = () => {
             <button type="button" aria-pressed={scanMode === 'operational'} className={scanMode === 'operational' ? 'active' : ''} onClick={() => updateScanMode('operational')}>Operational Mode</button>
             <button type="button" aria-pressed={scanMode === 'evaluation'} className={scanMode === 'evaluation' ? 'active' : ''} onClick={() => updateScanMode('evaluation')}>Live Evaluation Mode</button>
           </div>
-          {scanMode === 'evaluation' && <div className="evaluation-config"><h3>Evaluation Mode</h3><p className="evaluation-mode-banner">Live Evaluation Mode uses real AI recognition and compares it with evaluator-confirmed ground truth. Attendance and SecurityLog writes are disabled.</p><label>Actual participant:<select value={evaluationConfig.actualLabel} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, actualLabel: e.target.value })}><option value="">Select ground-truth identity</option>{participants.map((participant) => <option key={participant.evaluationLabel} value={participant.evaluationLabel}>{participant.evaluationLabel} — {participant.name}</option>)}<option value="Unknown">Unknown Person</option></select>{participantsLoading && <span>Loading participants...</span>}{participantsError && <span role="alert">{participantsError}</span>}{!participantsLoading && !participantsError && participants.length === 0 && <span>No enrolled evaluation participants available.</span>}</label><label>Condition:<select value={evaluationConfig.condition} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, condition: e.target.value })}>{['Front','Left Angle','Right Angle','Normal Lighting','Low Lighting','Glasses','Other'].map((condition) => <option key={condition}>{condition}</option>)}</select></label><label><input type="checkbox" checked={evaluationConfig.autoRecord} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, autoRecord: e.target.checked })} /> Auto-record completed scans</label></div>}
         </section>
-        {/* Last gate decision - safe recognition fields only */}
-        <RecognitionDecisionCard
-          decision={lastDecision}
-          page="gate"
-          matrixOrigin={MATRIX_ORIGIN}
-          onRecordEvaluation={lastDecision?.evaluationResult ? () => openEvaluationRecorder(lastDecision.evaluationResult) : undefined}
-        />
 
         <EvaluationRecorderModal
           open={evalModal.open}
@@ -558,12 +552,35 @@ const GateScanner = () => {
           </div>
         </div>
 
-        {/* Below the operational scanning area so it never obstructs the kiosk */}
-        {scanMode === 'evaluation' && <LiveConfusionMatrixPanel
-          origin={MATRIX_ORIGIN}
-          title="Gate Scanner — Live Recognition Performance"
-          participantLabels={participantLabels}
-        />}
+        {/* Collapsed evaluation accordion below the kiosk — Live Evaluation Mode only */}
+        {scanMode === 'evaluation' && <LiveConfusionMatrixPanel origin={MATRIX_ORIGIN} participantLabels={participantLabels}>
+          <div className="evaluation-config">
+            <label>Actual participant:<select value={evaluationConfig.actualLabel} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, actualLabel: e.target.value })}><option value="">Select ground-truth identity</option>{participants.map((participant) => <option key={participant.evaluationLabel} value={participant.evaluationLabel}>{participant.evaluationLabel} — {participant.name}</option>)}<option value="Unknown">Unknown Person</option></select>{participantsLoading && <span>Loading participants...</span>}{participantsError && <span role="alert">{participantsError}</span>}{!participantsLoading && !participantsError && participants.length === 0 && <span>No enrolled evaluation participants available.</span>}</label>
+            <label>Condition:<select value={evaluationConfig.condition} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, condition: e.target.value })}>{['Front','Left Angle','Right Angle','Normal Lighting','Low Lighting','Glasses','Other'].map((condition) => <option key={condition}>{condition}</option>)}</select></label>
+            <label><input type="checkbox" checked={evaluationConfig.autoRecord} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, autoRecord: e.target.checked })} /> Auto-record completed scans</label>
+          </div>
+          <div className="eval-last-result" role="status">
+            {lastDecision ? (
+              <>
+                <p>
+                  Last evaluation result: {lastDecision.state === DECISION_STATES.NO_FACE
+                    ? 'No face detected'
+                    : `${lastDecision.identityLabel || 'Unknown'} — ${lastDecision.state === DECISION_STATES.GRANTED ? 'Access Granted' : 'Access Denied'}`}
+                  {lastDecision.confidence != null ? ` · Confidence ${Math.round(lastDecision.confidence * 100)}%` : ''}
+                  {lastDecision.latencyMs != null ? ` · ${Math.round(lastDecision.latencyMs)} ms` : ''}
+                </p>
+                {lastDecision.evaluationMessage && <p className="eval-last-result-message">{lastDecision.evaluationMessage}</p>}
+                {lastDecision.evaluationResult && (
+                  <button type="button" className="decision-record-btn" onClick={() => openEvaluationRecorder(lastDecision.evaluationResult)}>
+                    {lastDecision.state === DECISION_STATES.NO_FACE ? 'Record No-Face Test' : 'Record for Evaluation'}
+                  </button>
+                )}
+              </>
+            ) : (
+              <p>No evaluation result yet — run a scan in Live Evaluation Mode.</p>
+            )}
+          </div>
+        </LiveConfusionMatrixPanel>}
       </main>
     </div>
   );
