@@ -176,6 +176,7 @@
 /* --- Dark Mode Table Styling --- */
 .users-table {
     width: 100%;
+    min-width: 1280px;
     border-collapse: collapse;
     table-layout: fixed;
     text-align: left;
@@ -184,22 +185,22 @@
 
 .users-table th:nth-child(1),
 .users-table td:nth-child(1) {
-    width: 18%;
+    width: 20%;
 }
 
 .users-table th:nth-child(2),
 .users-table td:nth-child(2) {
-    width: 16%;
+    width: 13%;
 }
 
 .users-table th:nth-child(3),
 .users-table td:nth-child(3) {
-    width: 16%;
+    width: 22%;
 }
 
 .users-table th:nth-child(4),
 .users-table td:nth-child(4) {
-    width: 11%;
+    width: 10%;
 }
 
 .users-table th:nth-child(5),
@@ -214,7 +215,7 @@
 
 .users-table th:nth-child(7),
 .users-table td:nth-child(7) {
-    width: 18%;
+    width: 14%;
 }
 
 .users-table th {
@@ -247,6 +248,8 @@
 /* --- User Info Section --- */
 .user-name-cell {
     font-weight: 700;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .user-identity {
@@ -274,15 +277,19 @@
     display: inline-flex;
     align-items: baseline;
     min-width: 0;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
+
+.email-cell { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 
 /* --- Presence Status Tags --- */
 .presence-tag {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 14px;
+    gap: 6px;
+    padding: 6px 10px;
+    white-space: nowrap;
     border-radius: 8px;
     font-size: 0.85rem;
     font-weight: 600;
@@ -341,6 +348,9 @@
     white-space: nowrap;
     border-radius: 8px;
     padding: 8px 10px;
+    width: 118px;
+    min-height: 36px;
+    justify-content: center;
     background: rgba(15, 23, 42, 0.45);
     line-height: 1.1;
     transition: all 0.18s ease;
@@ -357,7 +367,8 @@
 /* Compact horizontal group; wraps instead of clipping on narrow layouts */
 .action-button-group {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
+    align-items: center;
     justify-content: center;
     gap: 8px;
 }

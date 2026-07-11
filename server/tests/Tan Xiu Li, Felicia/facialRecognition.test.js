@@ -1,4 +1,4 @@
-﻿// Backend tests - POST /api/facial-recognition/recognize orchestration.
+// Backend tests - POST /api/facial-recognition/recognize orchestration.
 // The Node route forwards frames to FastAPI, then resolves identity, role and
 // account status from PostgreSQL (the source of truth), never from AI metadata.
 const request = require("supertest");
@@ -280,9 +280,9 @@ describe("POST /api/facial-recognition/evaluate — side-effect-free model evalu
       liveness: { ratio: 0.31, status: "movement-detected" },
       timings: { inferenceMs: 77 }
     });
-    expect(JSON.stringify(res.body)).not.toMatch(/data:image|template|vector|embedding|name|email/i);
+    expect(JSON.stringify(res.body)).not.toMatch(/data:image|template|vector|embedding|email|password/i);
     expect(mockSecurityLog.create).not.toHaveBeenCalled();
-    expect(mockUser.findByPk).toHaveBeenCalledTimes(1); // auth lookup only; no matched-user DB resolution or mutation
+    expect(mockUser.findByPk).toHaveBeenCalledTimes(2); // auth plus authoritative safe matched-subject lookup
   });
 
   test("no face returns NO_FACE without suspicious log", async () => {

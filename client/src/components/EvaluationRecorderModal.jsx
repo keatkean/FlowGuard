@@ -16,14 +16,14 @@ import {
 // writes one local evaluation record — it never re-runs recognition and never
 // creates Attendance, access events, SecurityLogs or User changes.
 const EvaluationRecorderModal = ({ open, draft, onSaved, onClose }) => {
-  const [actualLabel, setActualLabel] = useState('P01');
+  const [actualLabel, setActualLabel] = useState('');
   const [condition, setCondition] = useState('Front');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (open) {
-      setActualLabel('P01');
+      setActualLabel('');
       setCondition('Front');
       setNotes('');
       setError(draft?.needsMapping ? 'Assign evaluation label first' : '');
@@ -81,6 +81,7 @@ const EvaluationRecorderModal = ({ open, draft, onSaved, onClose }) => {
             <label>
               Actual label
               <select value={actualLabel} onChange={(e) => setActualLabel(e.target.value)}>
+                <option value="">Select ground-truth identity</option>
                 {IDENTITY_LABELS.map((label) => <option key={label} value={label}>{label}</option>)}
               </select>
             </label>
@@ -99,7 +100,7 @@ const EvaluationRecorderModal = ({ open, draft, onSaved, onClose }) => {
 
         <div className="eval-recorder-actions">
           <button type="button" className="eval-recorder-cancel" onClick={onClose}>Cancel</button>
-          <button type="button" className="eval-recorder-save" onClick={handleSave} disabled={Boolean(draft.needsMapping)}>
+          <button type="button" className="eval-recorder-save" onClick={handleSave} disabled={Boolean(draft.needsMapping) || (!isNoFace && !actualLabel)}>
             Save Evaluation
           </button>
         </div>

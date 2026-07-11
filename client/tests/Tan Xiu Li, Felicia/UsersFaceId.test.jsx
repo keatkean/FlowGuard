@@ -45,8 +45,12 @@ const renderUsers = async () => {
 describe("User Management — Face ID badge", () => {
   test("shows Enrolled / Not Enrolled per user", async () => {
     await renderUsers();
-    expect(screen.getByText(/✅ Enrolled/)).toBeTruthy();
-    expect(screen.getByText(/❌ Not Enrolled/)).toBeTruthy();
+    const enrolled = document.querySelector('.presence-tag.on-site');
+    const notEnrolled = document.querySelector('.presence-tag.off-site');
+    expect(enrolled?.classList.contains('presence-tag')).toBe(true);
+    expect(notEnrolled?.classList.contains('presence-tag')).toBe(true);
+    expect(enrolled?.querySelector('svg')).toBeTruthy();
+    expect(notEnrolled?.querySelector('svg')).toBeTruthy();
   });
 
   test("badge never renders biometric data", async () => {

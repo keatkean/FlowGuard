@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import Sidebar from '../components/Sidebar';
 import RecognitionDecisionCard, { DECISION_STATES } from '../components/RecognitionDecisionCard';
+import ImageBasedEvaluation from '../components/ImageBasedEvaluation';
 import '../css/Dashboard.css';
 import '../css/FacialEvaluation.css';
 import { API_BASE_URL } from '../constants/api';
@@ -111,7 +112,7 @@ const FacialEvaluation = () => {
   const [mappingDraft, setMappingDraft] = useState({ userId: '', label: 'P01' });
   const [mappingError, setMappingError] = useState('');
 
-  const [liveInput, setLiveInput] = useState({ actualLabel: 'P01', condition: 'Front', notes: '' });
+  const [liveInput, setLiveInput] = useState({ actualLabel: '', condition: 'Front', notes: '' });
   const [liveResult, setLiveResult] = useState(null);
   const [liveDraft, setLiveDraft] = useState(null);
   const [liveError, setLiveError] = useState('');
@@ -134,7 +135,7 @@ const FacialEvaluation = () => {
   const [wizard, setWizard] = useState(null);
   const [wizardUploadUrl, setWizardUploadUrl] = useState(null);
 
-  const [liveForm, setLiveForm] = useState({ actualLabel: 'P01', predictedLabel: 'P01', confidence: '', condition: 'Front', latencyMs: '', origin: 'Manual', notes: '' });
+  const [liveForm, setLiveForm] = useState({ actualLabel: '', predictedLabel: '', confidence: '', condition: 'Front', latencyMs: '', origin: 'Manual', notes: '' });
 
   const token = localStorage.getItem('accessToken');
 
@@ -489,6 +490,8 @@ const FacialEvaluation = () => {
           {liveResult && <div className="eval-result"><h3>Model telemetry</h3><p>Predicted: {liveDraft?.detectionOutcome === DETECTION_OUTCOMES.NO_FACE ? 'No Face' : liveDraft?.predictedLabel || 'Assign evaluation label first'}</p><p>Confidence: {liveDraft?.confidence ?? 0}</p><p>Latency: {liveDraft?.latencyMs ?? 0} ms</p><p>Liveness: {liveResult.liveness?.status || 'unavailable'}</p>{liveDraft?.needsMapping && <p className="eval-error">Assign evaluation label first</p>}<button className="eval-primary-btn" disabled={liveDraft?.needsMapping} onClick={saveLiveDraft}>Save Live Evaluation Record</button></div>}
           {liveError && <p className={liveError.includes('recorded') ? 'eval-success' : 'eval-error'}>{liveError}</p>}
         </section>}
+
+        {activeTab === 'sim' && <ImageBasedEvaluation />}
 
         {activeTab === 'sim' && <section className="eval-card"><h2>Simulated Facial CRUD</h2>
           <p className="eval-muted">Demonstrates the Create / Read / Update / Delete workflow with safe metadata in {SIM_USERS_KEY} only — no production API is ever called, and simulated results never represent real model accuracy (Live Model Evaluation does that).</p>

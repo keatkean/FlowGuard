@@ -6,6 +6,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../../src/components/Sidebar", () => ({ default: () => <div data-testid="sidebar" /> }));
+vi.mock("react-qr-code", () => ({ default: ({ value }) => <div data-testid="qr-code" /> }));
 
 const mockAxios = { get: vi.fn(), post: vi.fn(), patch: vi.fn() };
 vi.mock("axios", () => ({ default: mockAxios }));

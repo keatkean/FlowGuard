@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import SafeMuiIcon from './SafeMuiIcon';
@@ -28,7 +27,8 @@ const LiveConfusionMatrixPanel = ({ origin, title, defaultExpanded = false }) =>
   const reload = useCallback(() => setRecords(loadRecords()), []);
 
   useEffect(() => {
-    const onUpdated = () => {
+    const onUpdated = (event) => {
+      if (event.detail?.origin && normalizeOriginKey(event.detail.origin) !== normalizeOriginKey(origin)) return;
       reload();
       // A new confirmed record: surface the panel so the tester sees the
       // matrix change without a page refresh.
@@ -134,12 +134,12 @@ const LiveConfusionMatrixPanel = ({ origin, title, defaultExpanded = false }) =>
               )}
             </>
           )}
-          <Link
+          <a
             className="live-matrix-full-link"
-            to={`/facial-evaluation?tab=matrix&source=Live&origin=${encodeURIComponent(origin)}`}
+            href={`/facial-evaluation?tab=matrix&source=Live&origin=${encodeURIComponent(origin)}`}
           >
             View Full Live Confusion Matrix
-          </Link>
+          </a>
         </div>
       )}
     </section>

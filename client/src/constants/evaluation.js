@@ -1,7 +1,8 @@
-﻿export const EVAL_STORAGE_KEY = 'flowguard_facial_evaluation_records';
+export const EVAL_STORAGE_KEY = 'flowguard_facial_evaluation_records';
 export const EVAL_RECORDS_UPDATED_EVENT = 'flowguard:evaluation-records-updated';
 export const EVAL_LABEL_MAP_KEY = 'flowguard_facial_evaluation_label_map';
 export const SIM_USERS_KEY = 'flowguard_facial_simulation_users';
+export const ACCESS_EVAL_STORAGE_KEY = 'flowguard_access_evaluation_records';
 
 export const ENROLLED_LABELS = ['P01', 'P02', 'P03', 'P04', 'P05'];
 export const UNKNOWN_LABEL = 'Unknown';
@@ -11,7 +12,7 @@ export const DETECTION_OUTCOMES = { NO_FACE: 'NO_FACE' };
 
 export const CONDITIONS = ['Front', 'Left Angle', 'Right Angle', 'Normal Lighting', 'Low Lighting', 'Glasses', 'Other'];
 export const SOURCES = ['Live', 'Simulated'];
-export const ORIGINS = ['Manual', 'Gate Scanner', 'V-Patrol', 'Live Model Evaluation', 'Simulated CRUD'];
+export const ORIGINS = ['Manual', 'Gate Scanner', 'V-Patrol', 'Live Model Evaluation', 'Image-Based Evaluation', 'Simulated CRUD'];
 export const LEGACY_CONDITION_MAP = {
   front: 'Front',
   left: 'Left Angle',
@@ -253,9 +254,9 @@ export function toCsv(records) {
 }
 
 export function buildEvaluationDraftFromRecognition({ result, labelMap = {}, source = 'Live', origin = 'Manual' }) {
-  const user = result?.user || null;
+  const user = result?.user || result?.subject || null;
   const timings = result?.timings || {};
-  const noFace = result?.detectionOutcome === DETECTION_OUTCOMES.NO_FACE || (result && !result.box && !user);
+  const noFace = result?.detectionOutcome === DETECTION_OUTCOMES.NO_FACE || result?.outcome === 'NO_FACE';
   if (noFace) {
     return {
       detectionOutcome: DETECTION_OUTCOMES.NO_FACE,
@@ -268,12 +269,13 @@ export function buildEvaluationDraftFromRecognition({ result, labelMap = {}, sou
       notes: ''
     };
   }
-  const mapped = labelForUserId(user?.id, labelMap);
+  const matchedUserId = user?.id ?? result?.matchedUserId ?? null;
+  const mapped = labelForUserId(matchedUserId, labelMap);
   return {
     actualLabel: UNKNOWN_LABEL,
     predictedLabel: user?.id == null ? UNKNOWN_LABEL : mapped,
     needsMapping: Boolean(user?.id != null && !mapped),
-    matchedUserId: user?.id ?? result?.matchedUserId ?? null,
+    matchedUserId,
     confidence: user?.confidence ?? result?.confidence ?? null,
     latencyMs: timings.totalRequestMs ?? timings.nodeToAiMs ?? result?.latencyMs ?? null,
     source,
@@ -291,6 +293,31 @@ export function saveEvaluationRecordFromDraft(draft, { actualLabel, condition, n
   return createRecord({ actualLabel, predictedLabel: draft.predictedLabel || UNKNOWN_LABEL, confidence: draft.confidence, condition, latencyMs: draft.latencyMs, source: draft.source, origin: draft.origin, notes });
 }
 
+export const ACTUAL_AUTHORIZATION = { AUTHORIZED: 'Actually Authorised', UNAUTHORIZED: 'Actually Unauthorised' };
+export const ACCESS_DECISIONS = { GRANTED: 'Access Granted', DENIED: 'Access Denied' };
+
+export function sanitizeAccessEvaluationRecord(record) {
+  if (!record || !Object.values(ACTUAL_AUTHORIZATION).includes(record.actualAuthorization)) return null;
+  return {
+    id: String(record.id || `AE-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`),
+    actualAuthorization: record.actualAuthorization,
+    predictedDecision: Object.values(ACCESS_DECISIONS).includes(record.predictedDecision) ? record.predictedDecision : null,
+    reason: String(record.reason || '').slice(0, 120), actualLabel: normalizeLabel(record.actualLabel),
+    predictedLabel: normalizeLabel(record.predictedLabel), confidence: record.confidence == null ? null : Number(record.confidence),
+    latencyMs: record.latencyMs == null ? null : Math.round(Number(record.latencyMs)),
+    origin: String(record.origin || 'Image-Based Evaluation').slice(0, 80), timestamp: record.timestamp || new Date().toISOString()
+  };
+}
+export const createAccessEvaluationRecord = (input) => sanitizeAccessEvaluationRecord({ ...input, id: `AE-${Date.now().toString(36)}-${++idSeq}` });
+export function loadAccessEvaluationRecords(storage = defaultStorage()) { if (!storage) return []; const parsed = safeJson(storage.getItem(ACCESS_EVAL_STORAGE_KEY), []); return Array.isArray(parsed) ? parsed.map(sanitizeAccessEvaluationRecord).filter(Boolean) : []; }
+export function saveAccessEvaluationRecords(records, storage = defaultStorage()) { if (storage) storage.setItem(ACCESS_EVAL_STORAGE_KEY, JSON.stringify((records || []).map(sanitizeAccessEvaluationRecord).filter(Boolean))); }
+export function computeAccessDecisionMatrix(records = []) {
+  const matrix = [[0, 0], [0, 0]]; let noDecisionCount = 0;
+  records.forEach((r) => { const row = r.actualAuthorization === ACTUAL_AUTHORIZATION.AUTHORIZED ? 0 : r.actualAuthorization === ACTUAL_AUTHORIZATION.UNAUTHORIZED ? 1 : -1; const col = r.predictedDecision === ACCESS_DECISIONS.GRANTED ? 0 : r.predictedDecision === ACCESS_DECISIONS.DENIED ? 1 : -1; if (row < 0) return; if (col < 0) noDecisionCount += 1; else matrix[row][col] += 1; });
+  const trueGrants = matrix[0][0], falseDenials = matrix[0][1], falseGrants = matrix[1][0], trueDenials = matrix[1][1];
+  const sampleCount = trueGrants + falseDenials + falseGrants + trueDenials, correctCount = trueGrants + trueDenials;
+  return { matrix, sampleCount, correctCount, accuracy: safeDiv(correctCount, sampleCount), trueGrants, falseDenials, falseGrants, trueDenials, falseGrantRate: safeDiv(falseGrants, falseGrants + trueDenials), falseDenialRate: safeDiv(falseDenials, falseDenials + trueGrants), noDecisionCount };
+}
 const jitter = (base, spread) => Math.round(base + Math.random() * spread);
 export const SCENARIOS = [
   { key: 'active', title: '1. Recognised Active User', description: 'Enrolled, active account passes recognition and liveness.', run: () => ({ personLabel: 'P01', role: 'Staff', confidence: 0.93, accountState: 'Active', access: 'Access Granted', action: 'Simulated: attendance clock-in would be recorded (Gate Scanner only).', latencyMs: jitter(220, 180), predictedLabel: 'P01', actualLabel: 'P01', recordable: true }) },

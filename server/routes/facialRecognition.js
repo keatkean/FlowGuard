@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const { User } = require('../models');
@@ -72,11 +72,32 @@ router.post('/evaluate', verifyToken, requireRole('FM'), async (req, res) => {
       ? 'NO_FACE'
       : matchedUserId == null ? 'UNKNOWN' : 'MATCHED';
 
+    let subject = null;
+    if (matchedUserId != null) {
+      const user = await User.findByPk(matchedUserId, {
+        attributes: ['id', 'name', 'role', 'isActive', 'isEnrolled']
+      });
+      if (user) {
+        subject = {
+          id: user.id,
+          name: user.name,
+          role: user.role,
+          isActive: Boolean(user.isActive),
+          isEnrolled: Boolean(user.isEnrolled)
+        };
+      }
+    }
+    const policyDecision = outcome === 'NO_FACE' ? 'NONE'
+      : subject?.isActive && subject?.isEnrolled ? 'GRANTED' : 'DENIED';
+
+    // Still-image policy evaluation excludes live anti-spoofing/head-turn verification.
     return res.status(200).json({
       matchedUserId: matchedUserId == null ? null : matchedUserId,
       outcome,
       confidence,
       box,
+      subject,
+      policyDecision,
       liveness: {
         ratio: liveness_ratio,
         status: livenessStatus(liveness_ratio)

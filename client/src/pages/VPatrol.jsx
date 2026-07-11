@@ -20,7 +20,7 @@ import { API_BASE_URL } from '../constants/api';
 import { clampBoxToFrame, faceBoxStyle } from '../constants/faceBox';
 import { describeRecognitionSubject, RECOGNITION_STATUS } from '../constants/recognition';
 import { formatSingaporeTimestamp, formatSingaporeFull } from '../constants/datetime';
-import { loadLabelMap, buildEvaluationDraftFromRecognition } from '../constants/evaluation';
+import { loadLabelMap, buildEvaluationDraftFromRecognition, loadRecords, saveRecords, saveEvaluationRecordFromDraft, notifyEvaluationRecordsUpdated, DETECTION_OUTCOMES } from '../constants/evaluation';
 import {
   deriveAccessResult,
   getLogTimestamp,
@@ -67,6 +67,13 @@ const VPatrol = () => {
   const [serviceNotice, setServiceNotice] = useState('');
   const [lastDecision, setLastDecision] = useState(null);
   const [evalModal, setEvalModal] = useState({ open: false, draft: null });
+  const [scanMode, setScanMode] = useState('operational');
+  const [evaluationConfig, setEvaluationConfig] = useState({ actualLabel: '', condition: 'Front', autoRecord: true });
+  const scanModeRef = useRef('operational');
+  const evaluationConfigRef = useRef({ actualLabel: '', condition: 'Front', autoRecord: true });
+  const lastRecordedScanRef = useRef(null);
+  const updateScanMode = (mode) => { setScanMode(mode); scanModeRef.current = mode; lastRecordedScanRef.current = null; };
+  const updateEvaluationConfig = (next) => { setEvaluationConfig(next); evaluationConfigRef.current = next; };
 
   // LIVENESS MEMORY: Tracks the head-turn validation
   const candidateUserRef = useRef(null);
@@ -87,6 +94,7 @@ const VPatrol = () => {
   // All recognition traffic goes through the Node backend - never FastAPI directly.
   const NODE_SERVER_URL = `${API_BASE_URL}/api/security/logs`;
   const RECOGNIZE_URL = `${API_BASE_URL}/api/facial-recognition/recognize`;
+  const EVALUATE_URL = `${API_BASE_URL}/api/facial-recognition/evaluate`;
   // V-Patrol is a monitoring post: it records access AUDIT events only and must
   // never toggle clock-in/out (that belongs to the Gate Scanner's scan endpoint).
   const ACCESS_EVENT_URL = `${API_BASE_URL}/api/facial-recognition/access-event`;
@@ -338,6 +346,26 @@ const VPatrol = () => {
       const captureMs = captureTimer();
       if (!imageBase64) return;
 
+      if (scanModeRef.current === 'evaluation') {
+        const cycleId = lastRecordedScanRef.current || `EVAL-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const res = await axios.post(EVALUATE_URL, { image: imageBase64 }, { headers: { Authorization: `Bearer ${token}` } });
+        const draft = buildEvaluationDraftFromRecognition({ result: res.data, labelMap: loadLabelMap(), source: 'Live', origin: 'V-Patrol' });
+        if (draft.detectionOutcome === DETECTION_OUTCOMES.NO_FACE) {
+          setLastDecision({ state: DECISION_STATES.NO_FACE, cameraSourceLabel, evaluationResult: res.data });
+          return;
+        }
+        const config = evaluationConfigRef.current;
+        if (config.autoRecord && config.actualLabel && !lastRecordedScanRef.current && !draft.needsMapping) {
+          lastRecordedScanRef.current = cycleId;
+          const record = saveEvaluationRecordFromDraft(draft, { actualLabel: config.actualLabel, condition: config.condition });
+          saveRecords([record, ...loadRecords()]);
+          notifyEvaluationRecordsUpdated({ origin: 'V-Patrol' });
+          setLastDecision({ state: res.data.policyDecision === 'GRANTED' ? DECISION_STATES.GRANTED : DECISION_STATES.UNKNOWN, identityLabel: draft.predictedLabel, confidence: draft.confidence, latencyMs: draft.latencyMs, cameraSourceLabel, evaluationResult: res.data, evaluationMessage: 'Live evaluation sample recorded' });
+          setTimeout(() => { lastRecordedScanRef.current = null; }, 3500);
+        }
+        return;
+      }
+
       const apiTimer = startTimer();
       const res = await axios.post(RECOGNIZE_URL,
         { image: imageBase64, cameraLocation: CAMERA_LOCATION },
@@ -382,6 +410,11 @@ const VPatrol = () => {
 
         if (scanStatusRef.current === "LIVENESS_CHECK") {
           setFaceBox(targetBox);
+          const currentRecognitionUser = res.data.user;
+          if (!candidateUserRef.current || !currentRecognitionUser || candidateUserRef.current.id !== currentRecognitionUser.id) {
+            resetScanner();
+            return;
+          }
 
           if (livenessRatio < 0.45 || livenessRatio > 0.55) {
             grantFinalAccess(candidateUserRef.current);
@@ -538,6 +571,13 @@ const VPatrol = () => {
           )}
         </div>
 
+        <section className="evaluation-mode-controls" aria-label="Scanner mode">
+          <div className="scan-mode-selector">
+            <button type="button" className={scanMode === 'operational' ? 'active' : ''} onClick={() => updateScanMode('operational')}>Operational Mode</button>
+            <button type="button" className={scanMode === 'evaluation' ? 'active' : ''} onClick={() => updateScanMode('evaluation')}>Live Evaluation Mode</button>
+          </div>
+          {scanMode === 'evaluation' && <div className="evaluation-config"><h3>Evaluation Mode</h3><p className="evaluation-mode-banner">Evaluation Mode - real AI recognition is used, but operational Attendance and SecurityLog records are disabled.</p><label>Actual participant:<select value={evaluationConfig.actualLabel} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, actualLabel: e.target.value })}><option value="">Select ground-truth identity</option>{['P01','P02','P03','P04','P05','Unknown'].map((label) => <option key={label} value={label}>{label}</option>)}</select></label><label>Condition:<select value={evaluationConfig.condition} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, condition: e.target.value })}>{['Front','Left Angle','Right Angle','Normal Lighting','Low Lighting','Glasses','Other'].map((condition) => <option key={condition}>{condition}</option>)}</select></label><label><input type="checkbox" checked={evaluationConfig.autoRecord} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, autoRecord: e.target.checked })} /> Auto-record completed scans</label></div>}
+        </section>
         {/* Last V-Patrol decision - safe recognition fields only, audit-only actions */}
         <RecognitionDecisionCard
           decision={lastDecision}
@@ -758,6 +798,7 @@ const VPatrol = () => {
         {/* Below the operational monitoring area so it never obstructs patrols */}
         <LiveConfusionMatrixPanel
           origin={MATRIX_ORIGIN}
+          defaultExpanded
           title="V-Patrol — Live Recognition Performance"
         />
       </main>

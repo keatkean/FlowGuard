@@ -1,9 +1,10 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import BlockIcon from '@mui/icons-material/Block';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import CancelIcon from '@mui/icons-material/Cancel';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import Sidebar from '../components/Sidebar';
 import SafeMuiIcon from '../components/SafeMuiIcon';
@@ -314,11 +315,11 @@ const Users = () => {
                           </div>
                         </td>
                         <td data-label="Role">{renderRoleBadge(u.role)}</td>
-                        <td className="access-cell" data-label="Email">{u.email}</td>
+                        <td className="access-cell email-cell" data-label="Email" title={u.email}>{u.email}</td>
                         <td data-label="Status">{renderStatusBadge(u)}</td>
                         <td data-label="Face ID">
                           <span className={`presence-tag ${u.isEnrolled ? 'on-site' : 'off-site'}`} title={u.isEnrolled ? 'A protected biometric template is enrolled' : 'No Face ID enrolled yet'}>
-                            {u.isEnrolled ? '\u2705 Enrolled' : '\u274C Not Enrolled'}
+                            {u.isEnrolled ? <><SafeMuiIcon icon={CheckCircleIcon} fontSize="small" aria-hidden="true" /> Enrolled</> : <><SafeMuiIcon icon={CancelIcon} fontSize="small" aria-hidden="true" /> Not Enrolled</>}
                           </span>
                         </td>
                         <td className="time-cell" data-label="Joined">{new Date(u.createdAt).toLocaleDateString('en-SG')}</td>
