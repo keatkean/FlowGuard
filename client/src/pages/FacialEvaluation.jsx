@@ -142,7 +142,32 @@ const FacialEvaluation = () => {
   const token = localStorage.getItem('accessToken');
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [clearAccessToo, setClearAccessToo] = useState(false);
-  const { participants: evaluationParticipants, labels: participantLabels, namesByLabel } = useEvaluationParticipants();
+  const { participants: evaluationParticipants, labels: participantLabels, namesByLabel, reload: reloadParticipants } = useEvaluationParticipants();
+
+  // Explicit FM-controlled backfill only — never triggered on page load.
+  const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState('');
+  const [syncError, setSyncError] = useState('');
+
+  const runParticipantSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncMessage('');
+    setSyncError('');
+    try {
+      const response = await axios.post(`${API_BASE_URL}/api/facial-recognition/evaluation-participants/sync`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      const created = Number(response.data?.synced) || 0;
+      setSyncMessage(`Participant sync completed. ${created} new mapping(s) created.`);
+      setSyncConfirmOpen(false);
+      await reloadParticipants();
+    } catch {
+      setSyncError('Participant sync failed. Existing labels were not changed; retry when the server is available.');
+      setSyncConfirmOpen(false);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const persist = (next) => {
     const clean = next.filter(Boolean);
@@ -260,6 +285,10 @@ const FacialEvaluation = () => {
       const result = {
         matchedUserId: res.data.matchedUserId,
         outcome: res.data.outcome,
+        // The database-backed label is the ONLY prediction source: a
+        // recognised-but-unmapped user must never degrade to Unknown or be
+        // blocked by the legacy browser-local label map.
+        predictedEvaluationLabel: res.data.predictedEvaluationLabel,
         confidence: res.data.confidence,
         box: res.data.box,
         liveness: res.data.liveness,
@@ -478,7 +507,29 @@ const FacialEvaluation = () => {
         <div className="eval-banner" role="status">SIMULATION MODE — Production users, Face IDs, attendance and security logs are not modified.</div><p className="eval-warning">Some historical evaluation records were created before database-backed identity labels were enabled and may be inaccurate.</p>
         <div className="eval-live-links"><span>Production workflows remain on their live pages:</span><Link to="/enrollment" className="eval-link-btn">Open Face Enrollment</Link><Link to="/vpatrol" className="eval-link-btn">Open V-Patrol</Link><Link to="/gate-scanner" className="eval-link-btn">Open Gate Scanner</Link></div>
 
-        {clearDialogOpen && <div className="eval-recorder-overlay" role="dialog" aria-modal="true" aria-label="Clear Local Evaluation Records"><div className="eval-recorder-modal"><h3>Clear Local Evaluation Records</h3><p>This removes local identity evaluation metadata only. It does not remove Users, Attendance, SecurityLogs, face enrolment, or modify PostgreSQL.</p><label><input type="checkbox" checked={clearAccessToo} onChange={(event) => setClearAccessToo(event.target.checked)} /> Also clear local access evaluation records</label><div className="eval-recorder-actions"><button onClick={() => setClearDialogOpen(false)}>Cancel</button><button className="eval-danger-btn" onClick={() => { saveRecords([]); setRecords([]); if (clearAccessToo) saveAccessEvaluationRecords([]); notifyEvaluationRecordsUpdated(); setClearDialogOpen(false); }}>Confirm Clear</button></div></div></div>}        <div className="eval-tabs" role="tablist">
+        <section className="eval-card" data-testid="evaluation-participants-card"><h2>Evaluation Participants</h2>
+          <p><strong>Active participants: {evaluationParticipants.length}</strong></p>
+          <p className="eval-muted">Assign stable evaluation labels to existing Face ID-enrolled users.</p>
+          <div className="eval-map-list" data-testid="participant-legend">{evaluationParticipants.map((participant) => <div className="eval-map-row" key={participant.evaluationLabel}><strong>{participant.evaluationLabel}</strong><span>{participant.name}</span></div>)}</div>
+          <button className="eval-primary-btn" disabled={syncing} onClick={() => setSyncConfirmOpen(true)}>Sync Enrolled Participants</button>
+          {syncMessage && <p className="eval-success" role="status">{syncMessage}</p>}
+          {syncError && <p className="eval-error" role="alert">{syncError}</p>}
+        </section>
+
+        {syncConfirmOpen && <div className="eval-recorder-overlay" role="dialog" aria-modal="true" aria-label="Sync Enrolled Participants"><div className="eval-recorder-modal"><h3>Sync Enrolled Participants</h3><p>This assigns the next stable P-labels to eligible Face ID-enrolled users that do not have one yet. Existing labels will not be changed, and only eligible Face ID-enrolled users receive labels.</p><div className="eval-recorder-actions"><button onClick={() => setSyncConfirmOpen(false)} disabled={syncing}>Cancel</button><button className="eval-primary-btn" disabled={syncing} onClick={runParticipantSync}>{syncing ? 'Syncing…' : 'Confirm Sync'}</button></div></div></div>}
+
+        {clearDialogOpen && <div className="eval-recorder-overlay" role="dialog" aria-modal="true" aria-label="Clear Local Evaluation Records"><div className="eval-recorder-modal"><h3>Clear Local Evaluation Records</h3>
+          <p>Identity evaluation records are stored locally in this browser only. Clearing this local evaluation metadata does not remove or modify:</p>
+          <ul className="eval-clear-unaffected">
+            <li>PostgreSQL Users</li>
+            <li>Face ID enrolments</li>
+            <li>Biometric templates</li>
+            <li>Attendance</li>
+            <li>SecurityLogs</li>
+            <li>Bookings</li>
+          </ul>
+          <p>Access-decision records are cleared only when you separately select the option below. These records never contain uploaded images, base64 data or embeddings.</p>
+          <label><input type="checkbox" checked={clearAccessToo} onChange={(event) => setClearAccessToo(event.target.checked)} /> Also clear local access evaluation records</label><div className="eval-recorder-actions"><button onClick={() => setClearDialogOpen(false)}>Cancel</button><button className="eval-danger-btn" onClick={() => { saveRecords([]); setRecords([]); if (clearAccessToo) saveAccessEvaluationRecords([]); notifyEvaluationRecordsUpdated(); setClearDialogOpen(false); }}>Confirm Clear</button></div></div></div>}        <div className="eval-tabs" role="tablist">
           <button role="tab" aria-selected={activeTab === 'live'} className={`eval-tab ${activeTab === 'live' ? 'active' : ''}`} onClick={() => setActiveTab('live')}>Live Model Evaluation</button>
           <button role="tab" aria-selected={activeTab === 'sim'} className={`eval-tab ${activeTab === 'sim' ? 'active' : ''}`} onClick={() => setActiveTab('sim')}>Simulated Facial CRUD</button>
           <button role="tab" aria-selected={activeTab === 'records'} className={`eval-tab ${activeTab === 'records' ? 'active' : ''}`} onClick={() => setActiveTab('records')}>Evaluation Records</button>

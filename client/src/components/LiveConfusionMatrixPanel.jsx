@@ -18,9 +18,12 @@ const EMPTY_STATE_MESSAGE =
 // Reusable, origin-scoped LIVE confusion matrix. Reads only the confirmed
 // ground-truth evaluation records in localStorage — it never runs recognition
 // and never touches Attendance, SecurityLogs or Users.
-const LiveConfusionMatrixPanel = ({ origin, title, participantLabels = [], defaultExpanded = false }) => {
+const LiveConfusionMatrixPanel = ({ origin, title, participantLabels = [] }) => {
   const [records, setRecords] = useState(() => loadRecords());
-  const [expanded, setExpanded] = useState(defaultExpanded);
+  // The compact summary is visible whenever the panel renders (evaluation
+  // mode only); the detailed matrix stays behind "Advanced Matrix Details"
+  // and is NEVER opened automatically — only by the user.
+  const [expanded, setExpanded] = useState(true);
   const [highlighted, setHighlighted] = useState(false);
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
   const highlightTimerRef = useRef(null);
@@ -31,8 +34,9 @@ const LiveConfusionMatrixPanel = ({ origin, title, participantLabels = [], defau
     const onUpdated = (event) => {
       if (event.detail?.origin && normalizeOriginKey(event.detail.origin) !== normalizeOriginKey(origin)) return;
       reload();
-      // A new confirmed record: surface the panel so the tester sees the
-      // matrix change without a page refresh.
+      // A new confirmed record: surface the compact summary so the tester
+      // sees the metrics change without a page refresh. The detailed matrix
+      // (advancedExpanded) is deliberately left alone.
       setExpanded(true);
       setHighlighted(true);
       if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);

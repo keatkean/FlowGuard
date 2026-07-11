@@ -2,7 +2,7 @@
 // Raspberry Pi Gate Camera stays the primary source; the laptop webcam is the
 // automatic fallback when the Pi is unreachable.
 import React from "react";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, cleanup, fireEvent, within } from "@testing-library/react";
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../../src/components/Sidebar", () => ({ default: () => <div data-testid="sidebar" /> }));
@@ -75,5 +75,41 @@ describe("GateScanner camera source", () => {
     const { container } = render(<GateScanner />);
     await waitFor(() => expect(screen.getByText("Pi Gate Camera connected")).toBeTruthy());
     expect(container.textContent).not.toMatch(/faceVector|embedding|\[\s*-?0\.\d+\s*,/);
+  });
+});
+
+describe("GateScanner evaluation analytics visibility", () => {
+  const renderScanner = () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+    return render(<GateScanner />);
+  };
+
+  test("Operational Mode (default) hides all evaluation analytics", () => {
+    renderScanner();
+    expect(screen.getByRole("button", { name: "Operational Mode" }).getAttribute("aria-pressed")).toBe("true");
+    // No ground-truth selector, no evaluation summary, no matrix.
+    expect(screen.queryByText(/Select ground-truth identity/)).toBeNull();
+    expect(screen.queryByText(/Recognition Evaluation Summary/)).toBeNull();
+    expect(screen.queryByTestId("live-matrix-gatescanner")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Advanced Matrix Details" })).toBeNull();
+  });
+
+  test("Live Evaluation Mode shows the compact summary with the detailed matrix collapsed", () => {
+    renderScanner();
+    fireEvent.click(screen.getByRole("button", { name: "Live Evaluation Mode" }));
+
+    // Ground-truth, condition and auto-record controls appear.
+    expect(screen.getByText("Select ground-truth identity")).toBeTruthy();
+    expect(screen.getByText(/Auto-record completed scans/)).toBeTruthy();
+
+    // Compact Recognition Evaluation Summary is visible without a click…
+    const panel = screen.getByTestId("live-matrix-gatescanner");
+    expect(within(panel).getByText(/Recognition Evaluation Summary/)).toBeTruthy();
+    // …while the detailed matrix table stays hidden until manually expanded.
+    expect(within(panel).queryByTestId("live-matrix-gatescanner-table")).toBeNull();
+
+    // Switching back to Operational Mode hides the analytics again.
+    fireEvent.click(screen.getByRole("button", { name: "Operational Mode" }));
+    expect(screen.queryByTestId("live-matrix-gatescanner")).toBeNull();
   });
 });

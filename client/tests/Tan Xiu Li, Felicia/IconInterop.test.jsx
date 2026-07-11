@@ -151,9 +151,10 @@ describe("Runtime icon-bearing components", () => {
     render(<MemoryRouter><LiveConfusionMatrixPanel origin="Gate Scanner" title="Gate Scanner — Live Recognition Performance" /></MemoryRouter>);
 
     const toggle = screen.getByRole("button", { name: /Live Recognition Performance/ });
+    expect(toggle.querySelector("svg")).toBeTruthy(); // expanded by default (ExpandLess)
+    fireEvent.click(toggle);
     expect(toggle.querySelector("svg")).toBeTruthy(); // collapsed (ExpandMore)
     fireEvent.click(toggle);
-    expect(toggle.querySelector("svg")).toBeTruthy(); // expanded (ExpandLess)
     fireEvent.click(screen.getByRole("button", { name: "Advanced Matrix Details" }));
     expect(screen.getByTestId("live-matrix-gatescanner-table")).toBeTruthy();
   });

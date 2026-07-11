@@ -4,7 +4,7 @@
 // confusion-matrix math (accuracy, macro P/R/F1, FAR, FRR, zero-sample safety),
 // CSV export, and that no raw image/vector/template data is rendered or stored.
 import React from "react";
-import { render, screen, fireEvent, within, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, within, cleanup, act } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
@@ -350,6 +350,92 @@ describe("computeConfusionMatrix", () => {
     expect(screen.getByTestId("stat-frr").textContent).toBe("25.0%");
     expect(screen.getByTestId("no-face-stat").textContent).toMatch(/1 .*No Face.* sample/);
     expect(screen.getByTestId("confusion-matrix")).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Live model evaluation — prediction source
+// ---------------------------------------------------------------------------
+describe("Live model evaluation prediction source", () => {
+  test("prediction comes from predictedEvaluationLabel; a recognised user needs NO browser-local mapping and never degrades to Unknown", async () => {
+    const createObjectURL = vi.fn(() => "blob:probe");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", Object.assign(Object.create(URL), { createObjectURL, revokeObjectURL }));
+    // Recognised user with a database-backed label but NO local label map entry.
+    mockAxios.post.mockResolvedValue({
+      data: {
+        matchedUserId: 9, outcome: "MATCHED", confidence: 0.91,
+        predictedEvaluationLabel: "P07",
+        timings: { totalRequestMs: 210 }, liveness: { status: "front-facing" },
+      },
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "Live Model Evaluation" }));
+
+    const file = new File(["probe-bytes"], "probe.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText("Temporary evaluation upload"), { target: { files: [file] } });
+    await screen.findByAltText("temporary evaluation preview");
+
+    // The FileReader that produces the temporary frame fires on the task
+    // queue — flush it before running the model exactly once.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    fireEvent.click(screen.getByRole("button", { name: "Run model on upload" }));
+    expect(await screen.findByText("Predicted: P07")).toBeInTheDocument();
+
+    // Database-backed prediction: no "Assign evaluation label first" block.
+    expect(screen.queryByText("Assign evaluation label first")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save Live Evaluation Record" })).toBeEnabled();
+    // Only the side-effect-free evaluate endpoint was called.
+    expect(mockAxios.post.mock.calls.every(([url]) => url === "/api/facial-recognition/evaluate")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Clear Local Evaluation Records dialog
+// ---------------------------------------------------------------------------
+describe("Clear Local Evaluation Records dialog", () => {
+  const openDialog = () => {
+    fireEvent.click(screen.getByRole("button", { name: "Clear Local Evaluation Records" }));
+    return within(screen.getByRole("dialog", { name: "Clear Local Evaluation Records" }));
+  };
+
+  test("explicitly lists every unaffected production data type", () => {
+    renderPage();
+    const dialog = openDialog();
+    expect(dialog.getByText(/Identity evaluation records are stored locally in this browser only/)).toBeInTheDocument();
+    expect(dialog.getByText(/does not remove or modify/)).toBeInTheDocument();
+    for (const item of ["PostgreSQL Users", "Face ID enrolments", "Biometric templates", "Attendance", "SecurityLogs", "Bookings"]) {
+      expect(dialog.getByText(item)).toBeInTheDocument();
+    }
+    expect(dialog.getByText(/Access-decision records are cleared only when you separately select/)).toBeInTheDocument();
+    expect(dialog.getByText(/never contain uploaded images, base64 data or embeddings/)).toBeInTheDocument();
+  });
+
+  test("confirming clears only browser-local records and calls no operational API", () => {
+    localStorage.setItem(EVAL_STORAGE_KEY, JSON.stringify([
+      { id: "C-1", actualLabel: "P01", predictedLabel: "P01", condition: "Front", source: "Live", origin: "Manual", timestamp: "2026-07-10T02:00:00.000Z" },
+    ]));
+    renderPage();
+    const dialog = openDialog();
+    fireEvent.click(dialog.getByRole("button", { name: "Confirm Clear" }));
+
+    expect(JSON.parse(localStorage.getItem(EVAL_STORAGE_KEY))).toHaveLength(0);
+    // No User deletion, enrolment deletion, Attendance, SecurityLog or Booking calls.
+    expect(mockAxios.post).not.toHaveBeenCalled();
+    expect(mockAxios.put).not.toHaveBeenCalled();
+    expect(mockAxios.patch).not.toHaveBeenCalled();
+    expect(mockAxios.delete).not.toHaveBeenCalled();
+    expect(mockAxios.get.mock.calls.every(([url]) => url === "/api/facial-recognition/evaluation-participants")).toBe(true);
+  });
+
+  test("cancelling keeps the local records", () => {
+    localStorage.setItem(EVAL_STORAGE_KEY, JSON.stringify([
+      { id: "C-2", actualLabel: "P02", predictedLabel: "P02", condition: "Front", source: "Live", origin: "Manual", timestamp: "2026-07-10T02:00:00.000Z" },
+    ]));
+    renderPage();
+    const dialog = openDialog();
+    fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+    expect(JSON.parse(localStorage.getItem(EVAL_STORAGE_KEY))).toHaveLength(1);
   });
 });
 

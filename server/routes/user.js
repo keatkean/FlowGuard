@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const { verifyToken, requireRole } = require('../middlewares/auth');
 const { createRateLimiter } = require('../middlewares/rateLimit');
 const { sendPasswordResetEmail } = require('../services/mailer');
-const { assignStableEvaluationLabel } = require('../services/evaluationParticipants');
+const { assignStableEvaluationLabel, retireEvaluationParticipant } = require('../services/evaluationParticipants');
 require('dotenv').config();
 
 const TENANT_INVITE_TTL_MS = 48 * 60 * 60 * 1000;
@@ -429,7 +429,13 @@ router.delete("/:id", verifyToken, async (req, res) => {
                 { where: { tenantId: targetId }, transaction: t }
             );
 
-            // 5. Hard-delete the user row itself.
+            // 5. Retire (never delete) any evaluation-participant mapping so
+            //    the P-label stays reserved and historical evaluation records
+            //    keep their meaning. userId becomes NULL via ON DELETE SET
+            //    NULL when the User row is destroyed below.
+            await retireEvaluationParticipant(targetId, t);
+
+            // 6. Hard-delete the user row itself.
             await staffMember.destroy({ transaction: t });
         });
 

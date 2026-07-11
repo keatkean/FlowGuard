@@ -800,7 +800,6 @@ const VPatrol = () => {
         {/* Below the operational monitoring area so it never obstructs patrols */}
         {scanMode === 'evaluation' && <LiveConfusionMatrixPanel
           origin={MATRIX_ORIGIN}
-          defaultExpanded
           title="V-Patrol — Live Recognition Performance"
           participantLabels={participantLabels}
         />}

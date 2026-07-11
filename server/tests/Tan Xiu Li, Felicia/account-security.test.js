@@ -33,6 +33,7 @@ jest.mock("../../models", () => ({
   Invite: { findOne: jest.fn(), create: jest.fn() },
   SecurityLog: mockSecurityLog,
   Booking: mockBooking,
+  EvaluationParticipant: { findOne: jest.fn(), findAll: jest.fn(), create: jest.fn() },
   sequelize: { transaction: mockTransaction },
 }));
 

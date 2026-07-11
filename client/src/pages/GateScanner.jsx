@@ -561,7 +561,6 @@ const GateScanner = () => {
         {/* Below the operational scanning area so it never obstructs the kiosk */}
         {scanMode === 'evaluation' && <LiveConfusionMatrixPanel
           origin={MATRIX_ORIGIN}
-          defaultExpanded
           title="Gate Scanner — Live Recognition Performance"
           participantLabels={participantLabels}
         />}

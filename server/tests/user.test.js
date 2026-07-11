@@ -17,6 +17,7 @@ jest.mock("../models", () => ({
   Invite: { findOne: jest.fn(), findAll: jest.fn(), create: jest.fn() },
   SecurityLog: { update: jest.fn() },
   Booking: { update: jest.fn() },
+  EvaluationParticipant: { findOne: jest.fn(), findAll: jest.fn(), create: jest.fn() },
   // Transactional off-boarding: run the callback with a stub transaction.
   sequelize: { transaction: jest.fn((fn) => fn({})) },
 }));
@@ -118,6 +119,58 @@ describe("User routes", () => {
       expect.objectContaining({ where: { userId: 1 } })
     );
     expect(destroy).toHaveBeenCalled();
+    // The response never echoes biometric material back to the caller.
+    expect(JSON.stringify(res.body)).not.toMatch(/faceVector|embedding/i);
+  });
+
+  test("DELETE /user/:id retires the evaluation-participant mapping without deleting it", async () => {
+    const fmAccount = { id: 99, role: "FM", isActive: true };
+    const target = {
+      id: 1, name: "Worker Bee", role: "Staff", managerId: 99,
+      update: jest.fn().mockResolvedValue(true),
+      destroy: jest.fn().mockResolvedValue(true),
+    };
+    mockUser.findByPk.mockImplementation((id) =>
+      Promise.resolve(Number(id) === 99 ? fmAccount : target)
+    );
+    const participantUpdate = jest.fn().mockResolvedValue(true);
+    const participant = { userId: 1, evaluationLabel: "P02", active: true, retiredAt: null, update: participantUpdate };
+    const { EvaluationParticipant } = require("../models");
+    EvaluationParticipant.findOne.mockResolvedValue(participant);
+
+    const res = await request(app).delete("/user/1").set("Authorization", `Bearer ${fmToken}`);
+    expect(res.status).toBe(200);
+
+    // Looked up by userId inside the off-boarding transaction.
+    expect(EvaluationParticipant.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: 1 }, transaction: expect.anything() })
+    );
+    // Retired in place: active=false, retiredAt stamped, label untouched, row kept.
+    expect(participantUpdate).toHaveBeenCalledWith(
+      { active: false, retiredAt: expect.any(Date) },
+      expect.objectContaining({ transaction: expect.anything() })
+    );
+    const retiredPatch = participantUpdate.mock.calls[0][0];
+    expect(Object.keys(retiredPatch).sort()).toEqual(["active", "retiredAt"]); // evaluationLabel preserved
+    expect(participant.evaluationLabel).toBe("P02");
+    expect(target.destroy).toHaveBeenCalled();
+  });
+
+  test("DELETE /user/:id still succeeds for users with no evaluation-participant mapping", async () => {
+    const fmAccount = { id: 99, role: "FM", isActive: true };
+    const target = {
+      id: 2, name: "Unmapped User", role: "Staff", managerId: 99,
+      update: jest.fn().mockResolvedValue(true),
+      destroy: jest.fn().mockResolvedValue(true),
+    };
+    mockUser.findByPk.mockImplementation((id) =>
+      Promise.resolve(Number(id) === 99 ? fmAccount : target)
+    );
+    require("../models").EvaluationParticipant.findOne.mockResolvedValue(null);
+
+    const res = await request(app).delete("/user/2").set("Authorization", `Bearer ${fmToken}`);
+    expect(res.status).toBe(200);
+    expect(target.destroy).toHaveBeenCalled();
   });
 
 

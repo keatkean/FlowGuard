@@ -30,6 +30,18 @@ async function assignStableEvaluationLabel(user, retries = 3) {
   return null;
 }
 
+// PDPA off-boarding: mark the mapping inactive but KEEP the row so its label
+// stays reserved forever (historical evaluation records keep meaning P0x).
+// The userId is nulled by the ON DELETE SET NULL relationship when the User
+// row itself is destroyed later in the same transaction.
+async function retireEvaluationParticipant(userId, transaction) {
+  if (userId == null) return null;
+  const participant = await EvaluationParticipant.findOne({ where: { userId }, transaction });
+  if (!participant) return null;
+  await participant.update({ active: false, retiredAt: new Date() }, { transaction });
+  return participant;
+}
+
 async function syncEligibleEvaluationParticipants() {
   const users = await User.findAll({ attributes: ['id', 'name', 'role', 'isActive', 'isEnrolled', 'faceVector'], where: { isEnrolled: true, faceVector: { [Op.ne]: null } } });
   const assigned = [];
@@ -42,4 +54,4 @@ async function listEvaluationParticipants() {
   return rows.filter((row) => row.User?.isEnrolled).map((row) => ({ userId: row.User.id, evaluationLabel: row.evaluationLabel, name: row.User.name, role: row.User.role, isActive: Boolean(row.User.isActive), isEnrolled: Boolean(row.User.isEnrolled) })).sort((a, b) => evaluationLabelSequence(a.evaluationLabel) - evaluationLabelSequence(b.evaluationLabel));
 }
 
-module.exports = { formatEvaluationLabel, evaluationLabelSequence, isEligibleEvaluationUser, assignStableEvaluationLabel, syncEligibleEvaluationParticipants, listEvaluationParticipants };
+module.exports = { formatEvaluationLabel, evaluationLabelSequence, isEligibleEvaluationUser, assignStableEvaluationLabel, retireEvaluationParticipant, syncEligibleEvaluationParticipants, listEvaluationParticipants };
