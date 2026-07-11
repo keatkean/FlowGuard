@@ -4,6 +4,7 @@ export const EVAL_LABEL_MAP_KEY = 'flowguard_facial_evaluation_label_map';
 export const SIM_USERS_KEY = 'flowguard_facial_simulation_users';
 export const ACCESS_EVAL_STORAGE_KEY = 'flowguard_access_evaluation_records';
 
+// Legacy simulated CRUD fixtures only; production classes come from PostgreSQL.
 export const ENROLLED_LABELS = ['P01', 'P02', 'P03', 'P04', 'P05'];
 export const UNKNOWN_LABEL = 'Unknown';
 export const IDENTITY_LABELS = [...ENROLLED_LABELS, UNKNOWN_LABEL];
@@ -35,10 +36,11 @@ export function normalizeCondition(condition = 'Front') {
   return LEGACY_CONDITION_MAP[condition] || condition || 'Front';
 }
 
-export function normalizeLabel(label) {
-  if (label === NO_FACE) return NO_FACE;
-  return IDENTITY_LABELS.includes(label) ? label : UNKNOWN_LABEL;
-}
+export const isEvaluationLabel = (label) => /^P\d+$/.test(String(label || ''));
+export const evaluationLabelNumber = (label) => { const match = /^P(\d+)$/.exec(String(label || '')); return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER; };
+export const sortEvaluationLabels = (labels = []) => [...new Set(labels.filter(isEvaluationLabel))].sort((a, b) => evaluationLabelNumber(a) - evaluationLabelNumber(b));
+export function normalizeLabel(label) { if (label === NO_FACE) return NO_FACE; return label === UNKNOWN_LABEL || isEvaluationLabel(label) ? label : UNKNOWN_LABEL; }
+export function matrixLabelsForRecords(records = [], participantLabels = []) { const historical = records.flatMap((r) => [r.actualLabel, r.predictedLabel]); return [...sortEvaluationLabels([...participantLabels, ...historical]), UNKNOWN_LABEL]; }
 
 export function loadRecords(storage = defaultStorage()) {
   if (!storage) return [];
@@ -184,8 +186,8 @@ export function filterRecords(records, { source = 'All', condition = 'All', date
 
 const safeDiv = (num, den) => (den > 0 ? num / den : 0);
 
-export function computeConfusionMatrix(records) {
-  const labels = IDENTITY_LABELS;
+export function computeConfusionMatrix(records, participantLabels = []) {
+  const labels = matrixLabelsForRecords(records, participantLabels);
   const idx = Object.fromEntries(labels.map((l, i) => [l, i]));
   const matrix = labels.map(() => labels.map(() => 0));
   let noFaceCount = 0;
@@ -224,12 +226,13 @@ export function computeConfusionMatrix(records) {
 
   const unknownRow = matrix[idx.Unknown];
   const unknownTotal = unknownRow.reduce((a, b) => a + b, 0);
-  const falseAccepts = ENROLLED_LABELS.reduce((s, l) => s + unknownRow[idx[l]], 0);
+  const enrolledLabels = labels.filter((label) => label !== UNKNOWN_LABEL);
+  const falseAccepts = enrolledLabels.reduce((sum, label) => sum + unknownRow[idx[label]], 0);
   const far = safeDiv(falseAccepts, unknownTotal);
 
   let enrolledTotal = 0;
   let falseRejects = 0;
-  for (const l of ENROLLED_LABELS) {
+  for (const l of enrolledLabels) {
     const row = matrix[idx[l]];
     enrolledTotal += row.reduce((a, b) => a + b, 0);
     falseRejects += row[idx.Unknown];
@@ -270,11 +273,11 @@ export function buildEvaluationDraftFromRecognition({ result, labelMap = {}, sou
     };
   }
   const matchedUserId = user?.id ?? result?.matchedUserId ?? null;
-  const mapped = labelForUserId(matchedUserId, labelMap);
+  const predicted = result?.predictedEvaluationLabel ?? (matchedUserId == null && (result?.outcome === 'UNKNOWN' || Array.isArray(result?.box)) ? UNKNOWN_LABEL : labelForUserId(matchedUserId, labelMap));
   return {
     actualLabel: UNKNOWN_LABEL,
-    predictedLabel: user?.id == null ? UNKNOWN_LABEL : mapped,
-    needsMapping: Boolean(user?.id != null && !mapped),
+    predictedLabel: predicted === UNKNOWN_LABEL ? UNKNOWN_LABEL : isEvaluationLabel(predicted) ? predicted : null,
+    needsMapping: Boolean(matchedUserId != null && !isEvaluationLabel(predicted)),
     matchedUserId,
     confidence: user?.confidence ?? result?.confidence ?? null,
     latencyMs: timings.totalRequestMs ?? timings.nodeToAiMs ?? result?.latencyMs ?? null,
@@ -289,7 +292,7 @@ export function saveEvaluationRecordFromDraft(draft, { actualLabel, condition, n
   if (draft.detectionOutcome === DETECTION_OUTCOMES.NO_FACE) {
     return createRecord({ detectionOutcome: DETECTION_OUTCOMES.NO_FACE, condition, confidence: draft.confidence, latencyMs: draft.latencyMs, source: draft.source, origin: draft.origin, notes });
   }
-  if (!IDENTITY_LABELS.includes(actualLabel)) throw new Error('Choose the actual ground-truth label.');
+  if (actualLabel !== UNKNOWN_LABEL && !isEvaluationLabel(actualLabel)) throw new Error('Choose the actual ground-truth label.');
   return createRecord({ actualLabel, predictedLabel: draft.predictedLabel || UNKNOWN_LABEL, confidence: draft.confidence, condition, latencyMs: draft.latencyMs, source: draft.source, origin: draft.origin, notes });
 }
 

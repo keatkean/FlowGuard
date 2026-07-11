@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import CloseIcon from '@mui/icons-material/Close';
 import SafeMuiIcon from './SafeMuiIcon';
+import useEvaluationParticipants from '../hooks/useEvaluationParticipants';
 import '../css/EvaluationRecorderModal.css';
 import {
   CONDITIONS,
@@ -20,6 +21,7 @@ const EvaluationRecorderModal = ({ open, draft, onSaved, onClose }) => {
   const [condition, setCondition] = useState('Front');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
+  const { participants, loading: participantsLoading } = useEvaluationParticipants();
 
   useEffect(() => {
     if (open) {
@@ -82,7 +84,7 @@ const EvaluationRecorderModal = ({ open, draft, onSaved, onClose }) => {
               Actual label
               <select value={actualLabel} onChange={(e) => setActualLabel(e.target.value)}>
                 <option value="">Select ground-truth identity</option>
-                {IDENTITY_LABELS.map((label) => <option key={label} value={label}>{label}</option>)}
+                {participants.map((participant) => <option key={participant.evaluationLabel} value={participant.evaluationLabel}>{participant.evaluationLabel} — {participant.name}</option>)}<option value="Unknown">Unknown Person</option>
               </select>
             </label>
           )}
@@ -100,7 +102,7 @@ const EvaluationRecorderModal = ({ open, draft, onSaved, onClose }) => {
 
         <div className="eval-recorder-actions">
           <button type="button" className="eval-recorder-cancel" onClick={onClose}>Cancel</button>
-          <button type="button" className="eval-recorder-save" onClick={handleSave} disabled={Boolean(draft.needsMapping) || (!isNoFace && !actualLabel)}>
+          <button type="button" className="eval-recorder-save" onClick={handleSave} disabled={Boolean(draft.needsMapping) || (!isNoFace && (participantsLoading || !actualLabel))}>
             Save Evaluation
           </button>
         </div>

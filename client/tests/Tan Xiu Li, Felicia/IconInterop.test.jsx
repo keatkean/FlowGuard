@@ -154,6 +154,7 @@ describe("Runtime icon-bearing components", () => {
     expect(toggle.querySelector("svg")).toBeTruthy(); // collapsed (ExpandMore)
     fireEvent.click(toggle);
     expect(toggle.querySelector("svg")).toBeTruthy(); // expanded (ExpandLess)
+    fireEvent.click(screen.getByRole("button", { name: "Advanced Matrix Details" }));
     expect(screen.getByTestId("live-matrix-gatescanner-table")).toBeTruthy();
   });
 

@@ -13,12 +13,12 @@ import {
   loadRecords,
 } from '../../src/constants/evaluation';
 
-vi.mock('axios', () => ({ default: { post: vi.fn() } }));
+vi.mock('axios', () => ({ default: { get: vi.fn(), post: vi.fn() } }));
 
 const apiResult = (overrides = {}) => ({
   matchedUserId: 2,
   subject: { id: 2, name: 'Participant', role: 'Staff', isActive: true, isEnrolled: true },
-  outcome: 'MATCHED', confidence: 0.91, policyDecision: 'GRANTED',
+  outcome: 'MATCHED', predictedEvaluationLabel: 'P02', confidence: 0.91, policyDecision: 'GRANTED',
   timings: { totalRequestMs: 123 }, ...overrides,
 });
 
@@ -26,6 +26,7 @@ beforeEach(() => {
   localStorage.clear();
   localStorage.setItem(EVAL_LABEL_MAP_KEY, JSON.stringify({ 2: 'P02' }));
   vi.clearAllMocks();
+  axios.get.mockResolvedValue({ data: { participants: [{ userId: 2, evaluationLabel: 'P02', name: 'Participant', role: 'Staff', isActive: true, isEnrolled: true }] } });
   URL.createObjectURL = vi.fn(() => 'blob:test-preview');
   URL.revokeObjectURL = vi.fn();
 });
@@ -49,6 +50,7 @@ describe('Image-Based Recognition & Access Evaluation', () => {
     axios.post.mockResolvedValue({ data: apiResult() });
     render(<ImageBasedEvaluation />);
     const card = screen.getByRole('heading', { name: 'Authorised Person Test' }).closest('article');
+    await screen.findByRole('option', { name: /P02/ });
     fireEvent.change(within(card).getByLabelText('Authorised actual participant'), { target: { value: 'P02' } });
     await upload(card, 'Authorised image upload');
     fireEvent.click(within(card).getByRole('button', { name: 'Run Evaluation' }));
@@ -64,6 +66,7 @@ describe('Image-Based Recognition & Access Evaluation', () => {
     axios.post.mockResolvedValue({ data: apiResult({ subject: { id: 2, name: 'Participant', role: 'Staff', isActive: false, isEnrolled: true }, policyDecision: 'DENIED' }) });
     render(<ImageBasedEvaluation />);
     const card = screen.getByRole('heading', { name: 'Unauthorised Person Test' }).closest('article');
+    await screen.findByRole('option', { name: /P02/ });
     fireEvent.change(within(card).getByLabelText('Unauthorised reason'), { target: { value: 'Suspended Enrolled Participant' } });
     fireEvent.change(within(card).getByLabelText('Unauthorised actual participant'), { target: { value: 'P02' } });
     await upload(card, 'Unauthorised image upload');

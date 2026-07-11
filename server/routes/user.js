@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const { verifyToken, requireRole } = require('../middlewares/auth');
 const { createRateLimiter } = require('../middlewares/rateLimit');
 const { sendPasswordResetEmail } = require('../services/mailer');
+const { assignStableEvaluationLabel } = require('../services/evaluationParticipants');
 require('dotenv').config();
 
 const TENANT_INVITE_TTL_MS = 48 * 60 * 60 * 1000;
@@ -517,6 +518,8 @@ router.post('/enroll-face', verifyToken, async (req, res) => {
             { faceVector, isEnrolled: true },
             { where: { id: targetUser.id } }
         );
+        try { await assignStableEvaluationLabel({ ...targetUser.toJSON?.(), id: targetUser.id, isEnrolled: true, faceVector }); }
+        catch (labelError) { console.warn('Evaluation label assignment pending explicit FM sync:', labelError.message); }
 
         // 3. Ask the AI service to reload its in-memory known-face cache so the newly
         //    enrolled face is recognised immediately on V-Patrol/Gate Scanner — no AI

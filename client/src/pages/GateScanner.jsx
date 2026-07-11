@@ -4,6 +4,7 @@ import Sidebar from '../components/Sidebar';
 import RecognitionDecisionCard, { DECISION_STATES } from '../components/RecognitionDecisionCard';
 import EvaluationRecorderModal from '../components/EvaluationRecorderModal';
 import LiveConfusionMatrixPanel from '../components/LiveConfusionMatrixPanel';
+import useEvaluationParticipants from '../hooks/useEvaluationParticipants';
 import '../css/Dashboard.css';
 import '../css/VPatrol.css'; // Reusing the high-tech tracking box and HUD dashboard styles
 import {
@@ -48,6 +49,7 @@ const GateScanner = () => {
   const [evalModal, setEvalModal] = useState({ open: false, draft: null });
   const [scanMode, setScanMode] = useState('operational');
   const [evaluationConfig, setEvaluationConfig] = useState({ actualLabel: '', condition: 'Front', autoRecord: true });
+  const { participants, labels: participantLabels, loading: participantsLoading, error: participantsError } = useEvaluationParticipants();
   const scanModeRef = useRef('operational');
   const evaluationConfigRef = useRef({ actualLabel: '', condition: 'Front', autoRecord: true });
   const lastRecordedScanRef = useRef(null);
@@ -475,10 +477,10 @@ const GateScanner = () => {
 
         <section className="evaluation-mode-controls" aria-label="Scanner mode">
           <div className="scan-mode-selector">
-            <button type="button" className={scanMode === 'operational' ? 'active' : ''} onClick={() => updateScanMode('operational')}>Operational Mode</button>
-            <button type="button" className={scanMode === 'evaluation' ? 'active' : ''} onClick={() => updateScanMode('evaluation')}>Live Evaluation Mode</button>
+            <button type="button" aria-pressed={scanMode === 'operational'} className={scanMode === 'operational' ? 'active' : ''} onClick={() => updateScanMode('operational')}>Operational Mode</button>
+            <button type="button" aria-pressed={scanMode === 'evaluation'} className={scanMode === 'evaluation' ? 'active' : ''} onClick={() => updateScanMode('evaluation')}>Live Evaluation Mode</button>
           </div>
-          {scanMode === 'evaluation' && <div className="evaluation-config"><h3>Evaluation Mode</h3><p className="evaluation-mode-banner">Evaluation Mode - real AI recognition is used, but operational Attendance and SecurityLog records are disabled.</p><label>Actual participant:<select value={evaluationConfig.actualLabel} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, actualLabel: e.target.value })}><option value="">Select ground-truth identity</option>{['P01','P02','P03','P04','P05','Unknown'].map((label) => <option key={label} value={label}>{label}</option>)}</select></label><label>Condition:<select value={evaluationConfig.condition} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, condition: e.target.value })}>{['Front','Left Angle','Right Angle','Normal Lighting','Low Lighting','Glasses','Other'].map((condition) => <option key={condition}>{condition}</option>)}</select></label><label><input type="checkbox" checked={evaluationConfig.autoRecord} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, autoRecord: e.target.checked })} /> Auto-record completed scans</label></div>}
+          {scanMode === 'evaluation' && <div className="evaluation-config"><h3>Evaluation Mode</h3><p className="evaluation-mode-banner">Live Evaluation Mode uses real AI recognition and compares it with evaluator-confirmed ground truth. Attendance and SecurityLog writes are disabled.</p><label>Actual participant:<select value={evaluationConfig.actualLabel} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, actualLabel: e.target.value })}><option value="">Select ground-truth identity</option>{participants.map((participant) => <option key={participant.evaluationLabel} value={participant.evaluationLabel}>{participant.evaluationLabel} — {participant.name}</option>)}<option value="Unknown">Unknown Person</option></select>{participantsLoading && <span>Loading participants...</span>}{participantsError && <span role="alert">{participantsError}</span>}{!participantsLoading && !participantsError && participants.length === 0 && <span>No enrolled evaluation participants available.</span>}</label><label>Condition:<select value={evaluationConfig.condition} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, condition: e.target.value })}>{['Front','Left Angle','Right Angle','Normal Lighting','Low Lighting','Glasses','Other'].map((condition) => <option key={condition}>{condition}</option>)}</select></label><label><input type="checkbox" checked={evaluationConfig.autoRecord} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, autoRecord: e.target.checked })} /> Auto-record completed scans</label></div>}
         </section>
         {/* Last gate decision - safe recognition fields only */}
         <RecognitionDecisionCard
@@ -557,11 +559,12 @@ const GateScanner = () => {
         </div>
 
         {/* Below the operational scanning area so it never obstructs the kiosk */}
-        <LiveConfusionMatrixPanel
+        {scanMode === 'evaluation' && <LiveConfusionMatrixPanel
           origin={MATRIX_ORIGIN}
           defaultExpanded
           title="Gate Scanner — Live Recognition Performance"
-        />
+          participantLabels={participantLabels}
+        />}
       </main>
     </div>
   );

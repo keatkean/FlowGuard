@@ -17,6 +17,7 @@ import {
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  mockAxios.get.mockResolvedValue({ data: { participants: [{ userId: 7, evaluationLabel: "P02", name: "Participant", role: "Staff", isActive: true, isEnrolled: true }] } });
 });
 afterEach(() => cleanup());
 
@@ -33,7 +34,7 @@ const noFaceDraft = () => buildEvaluationDraftFromRecognition({
 });
 
 describe("EvaluationRecorderModal", () => {
-  test("shows predicted label, confidence, latency and origin; Save stores one record and closes", () => {
+  test("shows predicted label, confidence, latency and origin; Save stores one record and closes", async () => {
     const onSaved = vi.fn();
     render(<EvaluationRecorderModal open draft={matchedDraft()} onSaved={onSaved} onClose={() => {}} />);
 
@@ -43,6 +44,7 @@ describe("EvaluationRecorderModal", () => {
     expect(telemetry.getByText("190 ms")).toBeTruthy();
     expect(telemetry.getByText("Gate Scanner (Live)")).toBeTruthy();
 
+    await screen.findByRole("option", { name: /P02/ });
     fireEvent.change(screen.getByLabelText(/Actual label/), { target: { value: "P02" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Evaluation" }));
 
@@ -56,7 +58,7 @@ describe("EvaluationRecorderModal", () => {
     render(<EvaluationRecorderModal open draft={matchedDraft()} onSaved={() => {}} onClose={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "Save Evaluation" }));
 
-    expect(mockAxios.get).not.toHaveBeenCalled();
+    expect(mockAxios.get).toHaveBeenCalledWith("/api/facial-recognition/evaluation-participants", expect.any(Object));
     expect(mockAxios.post).not.toHaveBeenCalled();
     expect(mockAxios.put).not.toHaveBeenCalled();
     expect(mockAxios.delete).not.toHaveBeenCalled();

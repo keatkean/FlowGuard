@@ -80,6 +80,7 @@ describe("LiveConfusionMatrixPanel — origin filtering", () => {
     const samples = within(panel).getByText("Confirmed Live Samples").parentElement;
     expect(samples.querySelector("strong").textContent).toBe("1");
     // The compact matrix never includes a "No Face" row or column.
+    fireEvent.click(within(panel).getByRole("button", { name: "Advanced Matrix Details" }));
     const table = within(panel).getByTestId("live-matrix-gatescanner-table");
     expect(table.textContent).not.toMatch(/No Face/);
   });

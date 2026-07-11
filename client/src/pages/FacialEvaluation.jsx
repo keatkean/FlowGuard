@@ -4,6 +4,7 @@ import axios from 'axios';
 import Sidebar from '../components/Sidebar';
 import RecognitionDecisionCard, { DECISION_STATES } from '../components/RecognitionDecisionCard';
 import ImageBasedEvaluation from '../components/ImageBasedEvaluation';
+import useEvaluationParticipants from '../hooks/useEvaluationParticipants';
 import '../css/Dashboard.css';
 import '../css/FacialEvaluation.css';
 import { API_BASE_URL } from '../constants/api';
@@ -37,6 +38,7 @@ import {
   buildEvaluationDraftFromRecognition,
   saveEvaluationRecordFromDraft,
   notifyEvaluationRecordsUpdated,
+  saveAccessEvaluationRecords,
 } from '../constants/evaluation';
 
 const formatPct = (v) => `${(v * 100).toFixed(1)}%`;
@@ -138,6 +140,9 @@ const FacialEvaluation = () => {
   const [liveForm, setLiveForm] = useState({ actualLabel: '', predictedLabel: '', confidence: '', condition: 'Front', latencyMs: '', origin: 'Manual', notes: '' });
 
   const token = localStorage.getItem('accessToken');
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
+  const [clearAccessToo, setClearAccessToo] = useState(false);
+  const { participants: evaluationParticipants, labels: participantLabels, namesByLabel } = useEvaluationParticipants();
 
   const persist = (next) => {
     const clean = next.filter(Boolean);
@@ -460,20 +465,20 @@ const FacialEvaluation = () => {
 
   const filtered = filterRecords(records, filters);
   const matrixFiltered = filterRecords(records, matrixFilters);
-  const stats = computeConfusionMatrix(matrixFiltered);
-  const liveStats = computeConfusionMatrix(filterRecords(records, { source: 'Live' }));
-  const simStats = computeConfusionMatrix(filterRecords(records, { source: 'Simulated' }));
+  const stats = computeConfusionMatrix(matrixFiltered, participantLabels);
+  const liveStats = computeConfusionMatrix(filterRecords(records, { source: 'Live' }), participantLabels);
+  const simStats = computeConfusionMatrix(filterRecords(records, { source: 'Simulated' }), participantLabels);
   const labelOptions = [...IDENTITY_LABELS, NO_FACE];
 
   return (
     <div className="dashboard-layout">
       <Sidebar />
       <main className="dashboard-main eval-main">
-        <header className="dashboard-header"><div className="header-titles"><h1>Facial Evaluation Lab</h1><p>FM-only accuracy evaluation with local P01-P05 anonymisation</p></div></header>
-        <div className="eval-banner" role="status">SIMULATION MODE — Production users, Face IDs, attendance and security logs are not modified.</div>
+        <header className="dashboard-header"><div className="header-titles"><h1>Facial Evaluation Lab</h1><p>FM-only accuracy evaluation with stable database-backed participant labels</p></div><button className="eval-danger-btn" onClick={() => setClearDialogOpen(true)}>Clear Local Evaluation Records</button></header>
+        <div className="eval-banner" role="status">SIMULATION MODE — Production users, Face IDs, attendance and security logs are not modified.</div><p className="eval-warning">Some historical evaluation records were created before database-backed identity labels were enabled and may be inaccurate.</p>
         <div className="eval-live-links"><span>Production workflows remain on their live pages:</span><Link to="/enrollment" className="eval-link-btn">Open Face Enrollment</Link><Link to="/vpatrol" className="eval-link-btn">Open V-Patrol</Link><Link to="/gate-scanner" className="eval-link-btn">Open Gate Scanner</Link></div>
 
-        <div className="eval-tabs" role="tablist">
+        {clearDialogOpen && <div className="eval-recorder-overlay" role="dialog" aria-modal="true" aria-label="Clear Local Evaluation Records"><div className="eval-recorder-modal"><h3>Clear Local Evaluation Records</h3><p>This removes local identity evaluation metadata only. It does not remove Users, Attendance, SecurityLogs, face enrolment, or modify PostgreSQL.</p><label><input type="checkbox" checked={clearAccessToo} onChange={(event) => setClearAccessToo(event.target.checked)} /> Also clear local access evaluation records</label><div className="eval-recorder-actions"><button onClick={() => setClearDialogOpen(false)}>Cancel</button><button className="eval-danger-btn" onClick={() => { saveRecords([]); setRecords([]); if (clearAccessToo) saveAccessEvaluationRecords([]); notifyEvaluationRecordsUpdated(); setClearDialogOpen(false); }}>Confirm Clear</button></div></div></div>}        <div className="eval-tabs" role="tablist">
           <button role="tab" aria-selected={activeTab === 'live'} className={`eval-tab ${activeTab === 'live' ? 'active' : ''}`} onClick={() => setActiveTab('live')}>Live Model Evaluation</button>
           <button role="tab" aria-selected={activeTab === 'sim'} className={`eval-tab ${activeTab === 'sim' ? 'active' : ''}`} onClick={() => setActiveTab('sim')}>Simulated Facial CRUD</button>
           <button role="tab" aria-selected={activeTab === 'records'} className={`eval-tab ${activeTab === 'records' ? 'active' : ''}`} onClick={() => setActiveTab('records')}>Evaluation Records</button>
@@ -481,12 +486,9 @@ const FacialEvaluation = () => {
         </div>
 
         {activeTab === 'live' && <section className="eval-card"><h2>Live Model Evaluation</h2><p className="eval-muted">Uses the real side-effect-free model endpoint (/api/facial-recognition/evaluate). Temporary frames only — no Attendance, SecurityLogs, User updates, enrolment changes, images, templates or vectors are stored.</p>
-          <div className="eval-card nested"><h3>Private P01-P05 Mapping</h3><p className="eval-muted">Stored only in this FM browser under {EVAL_LABEL_MAP_KEY}. It is never exported and never saved in evaluation records.</p><button className="eval-secondary-btn" onClick={loadEnrolledUsers}>Load enrolled users</button>{mappingError && <p className="eval-error">{mappingError}</p>}
-            <div className="eval-form-row"><label>Enrolled user<select value={mappingDraft.userId} onChange={(e) => setMappingDraft({ ...mappingDraft, userId: e.target.value })}><option value="">Choose user</option>{enrolledUsers.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}</select></label><label>Participant label<select value={mappingDraft.label} onChange={(e) => setMappingDraft({ ...mappingDraft, label: e.target.value })}>{ENROLLED_LABELS.map((l) => <option key={l} value={l}>{l}</option>)}</select></label><button className="eval-primary-btn" onClick={saveMapping}>Save mapping</button></div>
-            <div className="eval-map-list">{Object.entries(labelMap).length === 0 ? <p className="eval-muted">No local mappings yet.</p> : Object.entries(labelMap).map(([userId, label]) => { const user = enrolledUsers.find((u) => String(u.id) === String(userId)); return <div key={userId} className="eval-map-row"><strong>{label}</strong><span>{user ? user.name : `User #${userId}`}</span><button className="eval-danger-btn" onClick={() => persistMap(removeMappedUser(labelMap, userId))}>Remove</button></div>; })}</div>
-          </div>
+          <div className="eval-card nested"><h3>Database-backed participant labels</h3><div className="eval-map-list">{evaluationParticipants.map((participant) => <div className="eval-map-row" key={participant.evaluationLabel}><strong>{participant.evaluationLabel}</strong><span>{participant.name}</span></div>)}</div></div>
           <div className="eval-live-grid"><div><h3>Temporary source</h3><button className="eval-secondary-btn" onClick={initLiveCamera}>Use Pi primary / webcam fallback</button><span className="eval-muted"> {cameraStatusMsg}</span><div className="eval-camera-box"><video ref={videoRef} autoPlay playsInline muted /><canvas ref={canvasRef} style={{ display: 'none' }} /></div><button className="eval-primary-btn" onClick={() => runLiveEvaluate('camera')}>Run model on camera frame</button></div><div><h3>Temporary upload</h3><input aria-label="Temporary evaluation upload" type="file" accept="image/*" onChange={(e) => handleUpload(e.target.files[0])} />{uploadPreviewUrl && <img src={uploadPreviewUrl} alt="temporary evaluation preview" className="eval-upload-preview" />}<button className="eval-primary-btn" onClick={() => runLiveEvaluate('upload')}>Run model on upload</button></div></div>
-          <div className="eval-form-row"><label>Actual label<select value={liveInput.actualLabel} onChange={(e) => setLiveInput({ ...liveInput, actualLabel: e.target.value })}>{IDENTITY_LABELS.map((l) => <option key={l} value={l}>{l}</option>)}</select></label><label>Condition<select value={liveInput.condition} onChange={(e) => setLiveInput({ ...liveInput, condition: e.target.value })}>{CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}</select></label><label className="eval-notes-field">Notes<input value={liveInput.notes} onChange={(e) => setLiveInput({ ...liveInput, notes: e.target.value })} /></label></div>
+          <div className="eval-form-row"><label>Actual label<select value={liveInput.actualLabel} onChange={(e) => setLiveInput({ ...liveInput, actualLabel: e.target.value })}><option value="">Select ground-truth identity</option>{evaluationParticipants.map((participant) => <option key={participant.evaluationLabel} value={participant.evaluationLabel}>{participant.evaluationLabel} — {participant.name}</option>)}<option value="Unknown">Unknown Person</option></select></label><label>Condition<select value={liveInput.condition} onChange={(e) => setLiveInput({ ...liveInput, condition: e.target.value })}>{CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}</select></label><label className="eval-notes-field">Notes<input value={liveInput.notes} onChange={(e) => setLiveInput({ ...liveInput, notes: e.target.value })} /></label></div>
           {liveResult && <div className="eval-result"><h3>Model telemetry</h3><p>Predicted: {liveDraft?.detectionOutcome === DETECTION_OUTCOMES.NO_FACE ? 'No Face' : liveDraft?.predictedLabel || 'Assign evaluation label first'}</p><p>Confidence: {liveDraft?.confidence ?? 0}</p><p>Latency: {liveDraft?.latencyMs ?? 0} ms</p><p>Liveness: {liveResult.liveness?.status || 'unavailable'}</p>{liveDraft?.needsMapping && <p className="eval-error">Assign evaluation label first</p>}<button className="eval-primary-btn" disabled={liveDraft?.needsMapping} onClick={saveLiveDraft}>Save Live Evaluation Record</button></div>}
           {liveError && <p className={liveError.includes('recorded') ? 'eval-success' : 'eval-error'}>{liveError}</p>}
         </section>}

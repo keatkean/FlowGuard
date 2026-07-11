@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { API_BASE_URL } from '../constants/api';
+import useEvaluationParticipants from '../hooks/useEvaluationParticipants';
 import {
   ACCESS_DECISIONS,
   ACTUAL_AUTHORIZATION,
@@ -51,6 +52,7 @@ const ResultCard = ({ result }) => result ? (
 
 const ImageBasedEvaluation = () => {
   const token = localStorage.getItem('accessToken');
+  const { participants, labels: participantLabels } = useEvaluationParticipants();
   const [authorisedLabel, setAuthorisedLabel] = useState('');
   const [unauthorisedReason, setUnauthorisedReason] = useState(REASONS[0]);
   const [unauthorisedLabel, setUnauthorisedLabel] = useState('');
@@ -91,8 +93,7 @@ const ImageBasedEvaluation = () => {
     try {
       const response = await axios.post(`${API_BASE_URL}/api/facial-recognition/evaluate`, { image: upload.base64 }, { headers: { Authorization: `Bearer ${token}` } });
       const data = response.data || {};
-      const mapped = labelForUserId(data.matchedUserId ?? data.subject?.id, loadLabelMap());
-      const predictedLabel = data.outcome === 'NO_FACE' ? null : mapped || UNKNOWN_LABEL;
+      const predictedLabel = data.noFace || data.outcome === 'NO_FACE' ? null : data.predictedEvaluationLabel;
       const latencyMs = data.timings?.totalRequestMs ?? null;
       const actualAuthorization = kind === 'authorised' ? ACTUAL_AUTHORIZATION.AUTHORIZED : ACTUAL_AUTHORIZATION.UNAUTHORIZED;
       const expectedDecision = kind === 'authorised' ? ACCESS_DECISIONS.GRANTED : ACCESS_DECISIONS.DENIED;
@@ -116,7 +117,7 @@ const ImageBasedEvaluation = () => {
   };
 
   const imageOnlyRecords = useMemo(() => identityRecords.filter((r) => r.source === 'Simulated' && r.origin === ORIGIN), [identityRecords]);
-  const identityStats = useMemo(() => computeConfusionMatrix(imageOnlyRecords), [imageOnlyRecords]);
+  const identityStats = useMemo(() => computeConfusionMatrix(imageOnlyRecords, participantLabels), [imageOnlyRecords, participantLabels]);
   const accessStats = useMemo(() => computeAccessDecisionMatrix(accessRecords.filter((r) => r.origin === ORIGIN)), [accessRecords]);
   const suspendedNeedsLabel = unauthorisedReason === 'Suspended Enrolled Participant';
   const unauthorisedActual = suspendedNeedsLabel ? unauthorisedLabel : UNKNOWN_LABEL;
@@ -129,7 +130,7 @@ const ImageBasedEvaluation = () => {
       <div className="image-eval-grid">
         <article className="image-eval-card">
           <h3>Authorised Person Test</h3>
-          <label>Actual participant<select aria-label="Authorised actual participant" value={authorisedLabel} onChange={(e) => setAuthorisedLabel(e.target.value)}><option value="">Select ground-truth identity</option>{ENROLLED_LABELS.map((label) => <option key={label}>{label}</option>)}</select></label>
+          <label>Actual participant<select aria-label="Authorised actual participant" value={authorisedLabel} onChange={(e) => setAuthorisedLabel(e.target.value)}><option value="">Select ground-truth identity</option>{participants.map((participant) => <option key={participant.evaluationLabel} value={participant.evaluationLabel}>{participant.evaluationLabel} — {participant.name}</option>)}</select></label>
           <p>Actual authorisation: <strong>Actually Authorised</strong></p><p>Expected decision: <strong>Access Granted</strong></p>
           <label>Temporary image upload<input aria-label="Authorised image upload" type="file" accept="image/*" onChange={(e) => replaceUpload(e.target.files?.[0], setAuthorisedUpload, authorisedUrlRef)} /></label>
           {authorisedUpload.previewUrl && <img className="image-eval-preview" src={authorisedUpload.previewUrl} alt="Authorised test preview" />}
@@ -139,7 +140,7 @@ const ImageBasedEvaluation = () => {
         <article className="image-eval-card">
           <h3>Unauthorised Person Test</h3>
           <label>Reason<select aria-label="Unauthorised reason" value={unauthorisedReason} onChange={(e) => { setUnauthorisedReason(e.target.value); setUnauthorisedLabel(''); }}>{REASONS.map((reason) => <option key={reason}>{reason}</option>)}</select></label>
-          {suspendedNeedsLabel && <label>Actual participant<select aria-label="Unauthorised actual participant" value={unauthorisedLabel} onChange={(e) => setUnauthorisedLabel(e.target.value)}><option value="">Select ground-truth identity</option>{ENROLLED_LABELS.map((label) => <option key={label}>{label}</option>)}</select></label>}
+          {suspendedNeedsLabel && <label>Actual participant<select aria-label="Unauthorised actual participant" value={unauthorisedLabel} onChange={(e) => setUnauthorisedLabel(e.target.value)}><option value="">Select ground-truth identity</option>{participants.map((participant) => <option key={participant.evaluationLabel} value={participant.evaluationLabel}>{participant.evaluationLabel} — {participant.name}</option>)}</select></label>}
           <p>Actual authorisation: <strong>Actually Unauthorised</strong></p><p>Expected decision: <strong>Access Denied</strong></p>
           <label>Temporary image upload<input aria-label="Unauthorised image upload" type="file" accept="image/*" onChange={(e) => replaceUpload(e.target.files?.[0], setUnauthorisedUpload, unauthorisedUrlRef)} /></label>
           {unauthorisedUpload.previewUrl && <img className="image-eval-preview" src={unauthorisedUpload.previewUrl} alt="Unauthorised test preview" />}
@@ -148,7 +149,7 @@ const ImageBasedEvaluation = () => {
         </article>
       </div>
       <h3>Identity Recognition Matrix</h3>
-      <div className="eval-table-wrap"><table className="eval-table eval-matrix" data-testid="image-identity-matrix"><thead><tr><th>Actual \ Predicted</th>{IDENTITY_LABELS.map((label) => <th key={label}>{label}</th>)}</tr></thead><tbody>{IDENTITY_LABELS.map((row, i) => <tr key={row}><th>{row}</th>{IDENTITY_LABELS.map((col, j) => <td key={col}>{identityStats.matrix[i][j]}</td>)}</tr>)}</tbody></table></div>
+      <div className="eval-table-wrap"><table className="eval-table eval-matrix" data-testid="image-identity-matrix"><thead><tr><th>Actual \ Predicted</th>{identityStats.labels.map((label) => <th key={label}>{label}</th>)}</tr></thead><tbody>{identityStats.labels.map((row, i) => <tr key={row}><th>{row}</th>{identityStats.labels.map((col, j) => <td key={col}>{identityStats.matrix[i][j]}</td>)}</tr>)}</tbody></table></div>
       <p>No Face: {identityStats.noFaceCount} (tracked outside identity classes)</p>
       <h3>Access Decision Matrix</h3>
       <div className="eval-stat-row">{[['Samples', accessStats.sampleCount], ['Accuracy', pct(accessStats.accuracy)], ['True Grants', accessStats.trueGrants], ['False Denials', accessStats.falseDenials], ['False Grants', accessStats.falseGrants], ['True Denials', accessStats.trueDenials], ['False Grant Rate', pct(accessStats.falseGrantRate)], ['False Denial Rate', pct(accessStats.falseDenialRate)], ['No Decision', accessStats.noDecisionCount]].map(([label, value]) => <div className="eval-stat" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>

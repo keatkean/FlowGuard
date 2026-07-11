@@ -154,7 +154,7 @@ describe("Simulation scenarios", () => {
     fireEvent.click(screen.getByRole("button", { name: /1\. Recognised Active User/ }));
     fireEvent.click(screen.getByRole("button", { name: "Log to evaluation records" }));
 
-    expect(mockAxios.get).not.toHaveBeenCalled();
+    expect(mockAxios.get.mock.calls.every(([url]) => url === "/api/facial-recognition/evaluation-participants")).toBe(true);
     expect(mockAxios.post).not.toHaveBeenCalled();
     expect(mockAxios.put).not.toHaveBeenCalled();
     expect(mockAxios.patch).not.toHaveBeenCalled();

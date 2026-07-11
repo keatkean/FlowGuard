@@ -98,6 +98,12 @@ module.exports = (sequelize, DataTypes) => {
             foreignKey: 'userId',
             as: 'Attendances'
         });
+
+        User.hasOne(models.EvaluationParticipant, {
+            foreignKey: 'userId',
+            as: 'EvaluationParticipant',
+            onDelete: 'SET NULL'
+        });
     };
 
     return User;

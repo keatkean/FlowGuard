@@ -7,7 +7,10 @@ const jwt = require("jsonwebtoken");
 
 const mockUser = { findByPk: jest.fn() };
 const mockSecurityLog = { create: jest.fn() };
-jest.mock("../../models", () => ({ User: mockUser, SecurityLog: mockSecurityLog }));
+const mockEvaluationParticipant = { findOne: jest.fn() };
+const mockParticipantService = { listEvaluationParticipants: jest.fn(), syncEligibleEvaluationParticipants: jest.fn() };
+jest.mock("../../models", () => ({ User: mockUser, SecurityLog: mockSecurityLog, EvaluationParticipant: mockEvaluationParticipant }));
+jest.mock("../../services/evaluationParticipants", () => mockParticipantService);
 
 const mockAxios = { post: jest.fn() };
 jest.mock("axios", () => mockAxios);
@@ -304,6 +307,34 @@ describe("POST /api/facial-recognition/evaluate — side-effect-free model evalu
       .send({ image: FRAME });
     expect(res.status).toBe(503);
     expect(res.body.error).toMatch(/offline/i);
+    expect(mockSecurityLog.create).not.toHaveBeenCalled();
+  });
+});
+describe("database-backed evaluation participants", () => {
+  beforeEach(() => { jest.clearAllMocks(); primeDb(); });
+  test("GET returns FM-only safe PostgreSQL participant fields", async () => {
+    mockParticipantService.listEvaluationParticipants.mockResolvedValue([{ userId: 25, evaluationLabel: "P10", name: "Person", role: "Staff", isActive: true, isEnrolled: true }]);
+    const res = await request(app).get("/api/facial-recognition/evaluation-participants").set("Authorization", `Bearer ${fmToken}`);
+    expect(res.status).toBe(200); expect(res.body.participants[0]).toMatchObject({ userId: 25, evaluationLabel: "P10" });
+    expect(JSON.stringify(res.body)).not.toMatch(/faceVector|embedding|password|tokenVersion/i);
+  });
+  test("GET is read-only and sync is explicit", async () => {
+    mockParticipantService.listEvaluationParticipants.mockResolvedValue([]); mockParticipantService.syncEligibleEvaluationParticipants.mockResolvedValue([]);
+    await request(app).get("/api/facial-recognition/evaluation-participants").set("Authorization", `Bearer ${fmToken}`);
+    expect(mockParticipantService.syncEligibleEvaluationParticipants).not.toHaveBeenCalled();
+    await request(app).post("/api/facial-recognition/evaluation-participants/sync").set("Authorization", `Bearer ${fmToken}`);
+    expect(mockParticipantService.syncEligibleEvaluationParticipants).toHaveBeenCalledTimes(1);
+  });
+  test("evaluate returns authoritative predicted label, Unknown, and null for No Face", async () => {
+    primeDb({ 25: { id: 25, name: "Person", role: "Staff", isActive: true, isEnrolled: true } });
+    mockEvaluationParticipant.findOne.mockResolvedValue({ evaluationLabel: "P10" });
+    aiReplies({ matchedUserId: 25, confidence: .9, box: [1,2,3,4], faceDetected: true });
+    let res = await request(app).post("/api/facial-recognition/evaluate").set("Authorization", `Bearer ${fmToken}`).send({ image: FRAME });
+    expect(res.body.predictedEvaluationLabel).toBe("P10"); expect(res.body.subject.evaluationLabel).toBe("P10");
+    aiReplies({ matchedUserId: null, confidence: .2, box: [1,2,3,4], faceDetected: true });
+    res = await request(app).post("/api/facial-recognition/evaluate").set("Authorization", `Bearer ${fmToken}`).send({ image: FRAME }); expect(res.body.predictedEvaluationLabel).toBe("Unknown");
+    aiReplies({ matchedUserId: null, box: null, faceDetected: false });
+    res = await request(app).post("/api/facial-recognition/evaluate").set("Authorization", `Bearer ${fmToken}`).send({ image: FRAME }); expect(res.body).toMatchObject({ predictedEvaluationLabel: null, noFace: true });
     expect(mockSecurityLog.create).not.toHaveBeenCalled();
   });
 });

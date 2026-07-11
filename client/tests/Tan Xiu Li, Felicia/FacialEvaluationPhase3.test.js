@@ -1,4 +1,4 @@
-﻿import { describe, test, expect, beforeEach } from "vitest";
+import { describe, test, expect, beforeEach } from "vitest";
 import {
   EVAL_STORAGE_KEY,
   EVAL_LABEL_MAP_KEY,

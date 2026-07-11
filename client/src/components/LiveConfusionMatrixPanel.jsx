@@ -18,10 +18,11 @@ const EMPTY_STATE_MESSAGE =
 // Reusable, origin-scoped LIVE confusion matrix. Reads only the confirmed
 // ground-truth evaluation records in localStorage — it never runs recognition
 // and never touches Attendance, SecurityLogs or Users.
-const LiveConfusionMatrixPanel = ({ origin, title, defaultExpanded = false }) => {
+const LiveConfusionMatrixPanel = ({ origin, title, participantLabels = [], defaultExpanded = false }) => {
   const [records, setRecords] = useState(() => loadRecords());
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [highlighted, setHighlighted] = useState(false);
+  const [advancedExpanded, setAdvancedExpanded] = useState(false);
   const highlightTimerRef = useRef(null);
 
   const reload = useCallback(() => setRecords(loadRecords()), []);
@@ -53,15 +54,12 @@ const LiveConfusionMatrixPanel = ({ origin, title, defaultExpanded = false }) =>
     return records.filter((r) => normalizeOriginKey(r.source) === 'live' && normalizeOriginKey(r.origin) === originKey);
   }, [records, origin]);
 
-  const stats = useMemo(() => computeConfusionMatrix(originRecords), [originRecords]);
+  const stats = useMemo(() => computeConfusionMatrix(originRecords, participantLabels), [originRecords, participantLabels]);
   const hasData = stats.sampleCount > 0 || stats.noFaceCount > 0;
 
   const metrics = [
     ['Confirmed Live Samples', stats.sampleCount],
     ['Accuracy', formatPct(stats.accuracy)],
-    ['Macro Precision', formatPct(stats.macroPrecision)],
-    ['Macro Recall', formatPct(stats.macroRecall)],
-    ['Macro F1', formatPct(stats.macroF1)],
     ['FAR', formatPct(stats.far)],
     ['FRR', formatPct(stats.frr)],
     ['Average Latency', `${Math.round(stats.avgLatencyMs)} ms`],
@@ -83,7 +81,7 @@ const LiveConfusionMatrixPanel = ({ origin, title, defaultExpanded = false }) =>
         aria-controls={`${panelId}-body`}
         onClick={() => setExpanded((prev) => !prev)}
       >
-        <span className="live-matrix-title">{title}</span>
+        <span className="live-matrix-title">{title} — Recognition Evaluation Summary</span>
         <SafeMuiIcon icon={expanded ? ExpandLessIcon : ExpandMoreIcon} aria-hidden="true" />
       </button>
 
@@ -106,7 +104,7 @@ const LiveConfusionMatrixPanel = ({ origin, title, defaultExpanded = false }) =>
                 Only confirmed Live records from {origin} are counted here.
               </p>
               {stats.sampleCount > 0 && (
-                <div className="live-matrix-table-wrap">
+                <div className="live-matrix-advanced"><button type="button" aria-expanded={advancedExpanded} onClick={() => setAdvancedExpanded((value) => !value)}>Advanced Matrix Details</button>{advancedExpanded && <><p>Rows represent the actual identity. Columns represent the AI prediction.</p><div className="live-matrix-table-wrap">
                   <table className="live-matrix-table" data-testid={`${panelId}-table`}>
                     <thead>
                       <tr>
@@ -130,7 +128,7 @@ const LiveConfusionMatrixPanel = ({ origin, title, defaultExpanded = false }) =>
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </div></>}</div>
               )}
             </>
           )}

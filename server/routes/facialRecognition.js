@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
-const { User } = require('../models');
+const { User, EvaluationParticipant } = require('../models');
+const { syncEligibleEvaluationParticipants, listEvaluationParticipants } = require('../services/evaluationParticipants');
 const { verifyToken, requireRole } = require('../middlewares/auth');
 const { shouldWriteLog, createSecurityLog } = require('../services/securityAudit');
 
@@ -49,6 +50,15 @@ const livenessStatus = (ratio) => {
   return ratio < 0.35 || ratio > 0.65 ? 'movement-detected' : 'front-facing';
 };
 
+// GET is intentionally read-only; POST performs the explicit FM-controlled backfill.
+router.get('/evaluation-participants', verifyToken, requireRole('FM'), async (_req, res) => {
+  try { return res.status(200).json({ participants: await listEvaluationParticipants() }); }
+  catch (error) { console.error('Evaluation participant list error:', error); return res.status(500).json({ error: 'Could not load evaluation participants.' }); }
+});
+router.post('/evaluation-participants/sync', verifyToken, requireRole('FM'), async (_req, res) => {
+  try { const assigned = await syncEligibleEvaluationParticipants(); return res.status(200).json({ synced: assigned.length, participants: await listEvaluationParticipants() }); }
+  catch (error) { console.error('Evaluation participant sync error:', error); return res.status(500).json({ error: 'Could not sync evaluation participants.' }); }
+});
 // POST /api/facial-recognition/evaluate
 // FM-only side-effect-free model evaluation. It forwards one temporary frame to
 // FastAPI and returns safe telemetry only. It never creates Attendance,
@@ -78,12 +88,14 @@ router.post('/evaluate', verifyToken, requireRole('FM'), async (req, res) => {
         attributes: ['id', 'name', 'role', 'isActive', 'isEnrolled']
       });
       if (user) {
+        const participant = await EvaluationParticipant.findOne({ where: { userId: user.id }, attributes: ['evaluationLabel'] });
         subject = {
           id: user.id,
           name: user.name,
           role: user.role,
           isActive: Boolean(user.isActive),
-          isEnrolled: Boolean(user.isEnrolled)
+          isEnrolled: Boolean(user.isEnrolled),
+          evaluationLabel: participant?.evaluationLabel || null
         };
       }
     }
@@ -97,6 +109,9 @@ router.post('/evaluate', verifyToken, requireRole('FM'), async (req, res) => {
       confidence,
       box,
       subject,
+      predictedEvaluationLabel: outcome === 'NO_FACE' ? null : outcome === 'UNKNOWN' ? 'Unknown' : subject?.evaluationLabel || null,
+      noFace: outcome === 'NO_FACE',
+      latencyMs: totalRequestMs,
       policyDecision,
       liveness: {
         ratio: liveness_ratio,
