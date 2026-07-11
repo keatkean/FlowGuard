@@ -167,7 +167,8 @@
     background-color: #1e293b;
     border: 1px solid #334155;
     border-radius: 12px;
-    overflow-x: hidden; 
+    /* auto (not hidden): action buttons must never be clipped at 1366-1920px */
+    overflow-x: auto;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     width: 100%;
 }
@@ -193,7 +194,7 @@
 
 .users-table th:nth-child(3),
 .users-table td:nth-child(3) {
-    width: 18%;
+    width: 16%;
 }
 
 .users-table th:nth-child(4),
@@ -208,12 +209,12 @@
 
 .users-table th:nth-child(6),
 .users-table td:nth-child(6) {
-    width: 10%;
+    width: 9%;
 }
 
 .users-table th:nth-child(7),
 .users-table td:nth-child(7) {
-    width: 15%;
+    width: 18%;
 }
 
 .users-table th {
@@ -300,12 +301,27 @@
 }
 
 /* --- Role Badges --- */
+.role-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+}
+
 .role-badge {
     padding: 4px 10px;
     border-radius: 6px;
     font-size: 0.7rem;
     font-weight: 800;
     text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.role-description {
+    color: #b6c2d6;
+    font-size: 0.76rem;
+    font-weight: 500;
 }
 
 .role-fm { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
@@ -324,19 +340,26 @@
     cursor: pointer;
     white-space: nowrap;
     border-radius: 8px;
-    padding: 9px 10px;
+    padding: 8px 10px;
     background: rgba(15, 23, 42, 0.45);
     line-height: 1.1;
-    min-width: 88px;
     transition: all 0.18s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 
+.action-btn svg {
+    font-size: 0.95rem;
+    flex-shrink: 0;
+}
+
+/* Compact horizontal group; wraps instead of clipping on narrow layouts */
 .action-button-group {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(96px, 1fr));
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 8px;
-    max-width: 240px;
-    margin: 0 auto;
 }
 
 .action-neutral { 
@@ -617,16 +640,7 @@
     }
 
     .action-btn {
-        font-size: 0.8rem;
-    }
-
-    .action-button-group {
-        max-width: 200px;
-    }
-
-    .action-btn {
-        min-width: 82px;
-        padding: 8px 9px;
-        font-size: 0.74rem;
+        padding: 7px 8px;
+        font-size: 0.72rem;
     }
 }

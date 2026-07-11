@@ -1,0 +1,102 @@
+/* Shared Gate Scanner / V-Patrol recognition decision card */
+.decision-card {
+    background: #0b0f1a;
+    border: 1px solid #2d364f;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+}
+
+.decision-idle {
+    color: #707a91;
+    font-size: 0.85rem;
+}
+
+.decision-granted {
+    border-color: rgba(16, 185, 129, 0.45);
+}
+
+.decision-denied {
+    border-color: rgba(244, 63, 94, 0.45);
+}
+
+.decision-headline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.decision-headline h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: #f8fafc;
+}
+
+.decision-granted .decision-headline svg { color: #34d399; }
+.decision-denied .decision-headline svg { color: #fb7185; }
+.decision-neutral .decision-headline svg { color: #94a3b8; }
+
+.decision-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 22px;
+    margin: 0 0 10px;
+}
+
+.decision-detail dt {
+    color: #94a3b8;
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.decision-detail dd {
+    margin: 2px 0 0;
+    color: #e2e8f0;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.decision-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.decision-record-btn {
+    background: #1d4ed8;
+    color: white;
+    border: 1px solid #3b82f6;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-weight: 700;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.decision-record-btn:hover {
+    background: #2563eb;
+}
+
+.decision-eval-message {
+    color: #34d399;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.decision-matrix-link {
+    color: #60a5fa;
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-decoration: none;
+    border: 1px solid rgba(96, 165, 250, 0.35);
+    border-radius: 8px;
+    padding: 6px 10px;
+}
+
+.decision-matrix-link:hover {
+    background: rgba(37, 99, 235, 0.18);
+}

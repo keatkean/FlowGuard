@@ -7,6 +7,7 @@ const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
 vi.mock('axios', () => ({ default: { get: mockGet } }));
 
 import Dashboard from '../../src/pages/Dashboard';
+import { resolveIconComponent } from '../../src/utils/iconInterop';
 
 const responses = {
   FM: {
@@ -92,5 +93,92 @@ describe('Dashboard - Phase 2 role-aware variants', () => {
     await renderRole('FM');
     expect(screen.queryByText('128')).toBeNull();
     expect(screen.queryByText('8,954')).toBeNull();
+  });
+});
+
+describe('Dashboard - real MUI summary-card icons', () => {
+  const PSEUDO_ICONS = ['OWN', 'STA', 'TOD', 'CUR', 'FIR', 'LAT', 'PUN', 'FAC', 'PEO'];
+
+  test.each(['FM', 'Tenant', 'Staff'])('%s dashboard has no three-letter pseudo-icons and renders real icons', async (role) => {
+    await renderRole(role);
+    const wrappers = [...document.querySelectorAll('.icon-wrapper')];
+    expect(wrappers.length).toBeGreaterThan(0);
+    for (const wrapper of wrappers) {
+      // Real MUI SVG icon, aria-hidden because the visible label carries meaning.
+      expect(wrapper.querySelector('svg')).toBeTruthy();
+      expect(PSEUDO_ICONS).not.toContain(wrapper.textContent.trim());
+      expect(wrapper.textContent.trim()).toBe('');
+    }
+    for (const pseudo of PSEUDO_ICONS) {
+      expect(screen.queryByText(pseudo)).toBeNull();
+    }
+  });
+
+  test('cards keep their complete readable labels alongside the icons', async () => {
+    await renderRole('FM');
+    ['Total Cameras', 'Cameras Online', 'Cameras Offline', 'People On Site', 'Urgent Alerts'].forEach((label) => {
+      expect(screen.getByText(label)).toBeTruthy();
+    });
+  });
+
+  test('null metric values render as Unavailable instead of crashing', async () => {
+    localStorage.setItem('accessToken', 'token');
+    localStorage.setItem('userRole', 'FM');
+    mockGet.mockResolvedValueOnce({
+      data: { role: 'FM', summary: { cameras: {}, attendance: {} }, recentHighPriorityAlerts: [] }
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect((await screen.findAllByText('Unavailable')).length).toBeGreaterThan(0);
+  });
+
+  test.each(['FM', 'Tenant', 'Staff'])('%s dashboard renders without invalid-element-type or object-as-component errors', async (role) => {
+    const errorSpy = vi.spyOn(console, 'error');
+    try {
+      await renderRole(role);
+      // Cards actually rendered (SummaryCard mounted with real icons).
+      expect(document.querySelectorAll('.summary-card').length).toBeGreaterThan(0);
+      const messages = errorSpy.mock.calls.map((call) => call.map(String).join(' '));
+      const invalid = messages.filter((m) =>
+        /Element type is invalid|got: object|Objects are not valid as a React child|object.*React component/i.test(m)
+      );
+      expect(invalid).toEqual([]);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  test('interop guard unwraps a CJS module-shaped icon reference (dev-server regression)', () => {
+    // Simulate what the Vite dev server can deliver for the no-"exports"-map
+    // @mui/icons-material deep files: { __esModule: true, default: Component }.
+    const Component = () => null;
+    const memoLike = { $$typeof: Symbol.for('react.memo'), type: Component };
+    expect(resolveIconComponent({ __esModule: true, default: Component })).toBe(Component);
+    // Real MUI icons are React.memo objects (they carry $$typeof) — untouched.
+    expect(resolveIconComponent(memoLike)).toBe(memoLike);
+    expect(resolveIconComponent(Component)).toBe(Component);
+    expect(resolveIconComponent(undefined)).toBeNull();
+  });
+
+  test('every rendered icon wrapper holds a real SVG, never a module object', async () => {
+    await renderRole('FM');
+    const wrappers = [...document.querySelectorAll('.icon-wrapper')];
+    expect(wrappers.length).toBeGreaterThan(0);
+    for (const wrapper of wrappers) {
+      expect(wrapper.querySelector('svg')).toBeTruthy();
+    }
+  });
+
+  test('network failure shows an in-page Retry state, not the global 500 boundary', async () => {
+    localStorage.setItem('accessToken', 'token');
+    localStorage.setItem('userRole', 'FM');
+    mockGet.mockRejectedValueOnce(new Error('Network Error'));
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/Unable to load dashboard summary/i);
+    const retry = screen.getByRole('button', { name: 'Retry' });
+
+    mockGet.mockResolvedValueOnce({ data: responses.FM });
+    retry.click();
+    expect(await screen.findByText('Total Cameras')).toBeTruthy();
   });
 });

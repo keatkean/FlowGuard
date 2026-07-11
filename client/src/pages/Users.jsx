@@ -1,16 +1,22 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import BlockIcon from '@mui/icons-material/Block';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import Sidebar from '../components/Sidebar';
+import SafeMuiIcon from '../components/SafeMuiIcon';
 import PasswordInput from '../components/PasswordInput';
 import '../css/Dashboard.css';
 import '../css/Users.css';
 import { API_BASE_URL } from '../constants/api';
 
-const ROLE_LABELS = {
-  FM: 'FM - Facilities Manager',
-  Tenant: 'Tenant - Unit Owner',
-  Staff: 'Staff - Worker'
+// Compact badge + separate readable description — never one long combined label.
+const ROLE_META = {
+  FM: { badge: 'FM', description: 'Facilities Manager' },
+  Tenant: { badge: 'Tenant', description: 'Unit Owner' },
+  Staff: { badge: 'Staff', description: 'Worker' }
 };
 
 const emptyFilters = {
@@ -154,11 +160,15 @@ const Users = () => {
     }
   };
 
-  const renderRoleBadge = (userRole) => (
-    <span className={`role-badge role-${String(userRole).toLowerCase()}`} aria-label={`Role: ${ROLE_LABELS[userRole] || userRole}`}>
-      {ROLE_LABELS[userRole] || userRole}
-    </span>
-  );
+  const renderRoleBadge = (userRole) => {
+    const meta = ROLE_META[userRole] || { badge: String(userRole), description: '' };
+    return (
+      <div className="role-cell">
+        <span className={`role-badge role-${String(userRole).toLowerCase()}`}>{meta.badge}</span>
+        {meta.description && <span className="role-description">{meta.description}</span>}
+      </div>
+    );
+  };
 
   const renderStatusBadge = (user) => (
     <span className={`account-status-badge ${user.isActive === false ? 'suspended' : 'active'}`} role="status">
@@ -181,7 +191,7 @@ const Users = () => {
               {modal.action === 'delete' ? (
                 <>
                   <p>
-                    Permanently remove <strong>{modal.user.name}</strong> from FlowGuard? Login access and Face ID enrolment will be permanently removed.
+                    Permanently remove login access, Face ID enrolment and operational access for this user (<strong>{modal.user.name}</strong>)?
                   </p>
                   <p className="delete-warning-copy">
                     Attendance records will be deleted, linked security logs will remain anonymised, and operational bookings will be safely unlinked where applicable.
@@ -313,18 +323,21 @@ const Users = () => {
                         </td>
                         <td className="time-cell" data-label="Joined">{new Date(u.createdAt).toLocaleDateString('en-SG')}</td>
                         <td className="actions-cell" data-label="Actions">
+                          {/* Face ID enrol/re-enrol intentionally lives in the
+                              enrolment flow (first-time) and Settings (self
+                              re-enrolment) — never as a row action here. */}
                           <div className="action-button-group" aria-label={`Actions for ${u.name}`}>
-                            <button className="action-btn action-neutral" onClick={() => navigate(`/user-logs/${u.id}`)}>View Logs</button>
-                            {role === 'FM' && (
-                              <button className="action-btn action-neutral" onClick={() => navigate(`/enrollment?userId=${u.id}&name=${encodeURIComponent(u.name)}&returnTo=/users`)}>
-                                {u.isEnrolled ? 'Re-enrol Face ID' : 'Enrol Face ID'}
-                              </button>
-                            )}
+                            <button className="action-btn action-neutral" onClick={() => navigate(`/user-logs/${u.id}`)}>
+                              <SafeMuiIcon icon={VisibilityIcon} fontSize="inherit" aria-hidden="true" />
+                              View Logs
+                            </button>
                             <button className={`action-btn ${u.isActive === false ? 'action-restore' : 'action-warning'} ${isSelf ? 'disabled-action' : ''}`} onClick={() => !isSelf && openModal(u, 'suspend')} disabled={isSelf}>
+                              <SafeMuiIcon icon={u.isActive === false ? CheckCircleIcon : BlockIcon} fontSize="inherit" aria-hidden="true" />
                               {u.isActive === false ? 'Reactivate' : 'Suspend'}
                             </button>
                             <button className={`action-btn action-danger ${isSelf ? 'disabled-action' : ''}`} onClick={() => !isSelf && openModal(u, 'delete')} disabled={isSelf}>
-                              Permanent Delete
+                              <SafeMuiIcon icon={DeleteOutlineIcon} fontSize="inherit" aria-hidden="true" />
+                              Delete
                             </button>
                           </div>
                         </td>

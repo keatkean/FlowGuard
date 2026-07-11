@@ -22,6 +22,17 @@ describe('Phase 2 attendance summary derivation', () => {
     expect(summaries).toHaveLength(1);
   });
 
+  test('duplicate late scans never create duplicate late exceptions', () => {
+    const user = staff(1);
+    const summaries = deriveDailySummaries([
+      rec(user, 'IN', '2026-07-10T01:30:00.000Z'), // 09:30 SGT — late
+      rec(user, 'IN', '2026-07-10T01:45:00.000Z'), // duplicate late scan
+      rec(user, 'IN', '2026-07-10T02:10:00.000Z')  // duplicate late scan
+    ]);
+    expect(summaries).toHaveLength(1);
+    expect(summarizeForDate(summaries, '2026-07-10').late).toBe(1);
+  });
+
   test('first IN controls punctuality even when later duplicate IN is after 09:00', () => {
     const user = staff(1);
     const [summary] = deriveDailySummaries([

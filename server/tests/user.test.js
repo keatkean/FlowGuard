@@ -113,6 +113,10 @@ describe("User routes", () => {
       expect.objectContaining({ personnelName: null, matchedUserId: null }),
       expect.objectContaining({ where: expect.anything() })
     );
+    // Attendance trail removed inside the same transaction.
+    expect(require("../models").Attendance.destroy).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: 1 } })
+    );
     expect(destroy).toHaveBeenCalled();
   });
 
@@ -189,6 +193,27 @@ describe("User routes", () => {
       const res = await request(app).get("/user/tenant-invites").set("Authorization", `Bearer ${fmToken}`);
       expect(res.status).toBe(200);
       expect(res.body[0]).toMatchObject({ status: "PENDING", isUsable: true });
+    });
+
+    test("an invite still shown as PENDING cannot be used once its server expiry time passes", async () => {
+      const expiresAt = new Date("2026-07-10T02:00:00.000Z");
+
+      // 1) At 01:00 the FM list correctly reports the invite as PENDING/usable.
+      mockUser.findByPk.mockResolvedValue({ id: 99, role: "FM", isActive: true });
+      require("../models").Invite.findAll.mockResolvedValue([
+        { id: 3, code: "INVITE-TEST", role: "Tenant", isUsed: false, expiresAt, createdAt: new Date("2026-07-08T02:00:00.000Z") }
+      ]);
+      const listRes = await request(app).get("/user/tenant-invites").set("Authorization", `Bearer ${fmToken}`);
+      expect(listRes.body[0]).toMatchObject({ status: "PENDING", isUsable: true });
+
+      // 2) The clock passes the expiry while the badge still says PENDING in a
+      //    stale browser tab — the registration attempt must still be refused.
+      jest.setSystemTime(new Date("2026-07-10T02:00:00.001Z"));
+      const { res, invite } = await registerWithExpiry(expiresAt);
+      expect(res.status).toBe(401);
+      expect(res.body.errors[0]).toMatch(/expired/i);
+      expect(invite.update).not.toHaveBeenCalled();
+      expect(mockUser.create).not.toHaveBeenCalled();
     });
   });
   test("DELETE /user/:id blocks self deletion", async () => {

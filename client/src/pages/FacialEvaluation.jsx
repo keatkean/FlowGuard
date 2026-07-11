@@ -1,7 +1,8 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import Sidebar from '../components/Sidebar';
+import RecognitionDecisionCard, { DECISION_STATES } from '../components/RecognitionDecisionCard';
 import '../css/Dashboard.css';
 import '../css/FacialEvaluation.css';
 import { API_BASE_URL } from '../constants/api';
@@ -34,15 +35,74 @@ import {
   saveSimUsers,
   buildEvaluationDraftFromRecognition,
   saveEvaluationRecordFromDraft,
+  notifyEvaluationRecordsUpdated,
 } from '../constants/evaluation';
 
 const formatPct = (v) => `${(v * 100).toFixed(1)}%`;
 const nowIso = () => new Date().toISOString();
 
+const TABS = ['live', 'sim', 'records', 'matrix'];
+const ORIENTATIONS = ['Front', 'Left Angle', 'Right Angle'];
+const SIM_ENROL_SOURCES = ['Simulated Pi Camera', 'Simulated Laptop Webcam', 'Temporary Upload'];
+const READ_SCENARIOS = [
+  { key: 'active', label: 'Active recognised' },
+  { key: 'suspended', label: 'Suspended recognised' },
+  { key: 'unknown', label: 'Unknown person' },
+  { key: 'noface', label: 'No face' },
+  { key: 'low-confidence', label: 'Low confidence' },
+  { key: 'liveness-incomplete', label: 'Liveness incomplete' },
+  { key: 'pi-offline', label: 'Pi offline -> webcam fallback' },
+  { key: 'service-offline', label: 'Recognition service offline -> retry/backoff' }
+];
+
+// Map a simulated scenario result onto the shared live-decision card states so
+// simulated reads look exactly like Gate Scanner / V-Patrol decisions.
+const simResultToDecision = (result) => {
+  if (!result) return null;
+  const base = {
+    confidence: result.confidence,
+    latencyMs: result.latencyMs,
+    actionOverride: result.action,
+    extraDetails: [['Mode', 'Simulated — no production API called']]
+  };
+  if (result.detectionOutcome === DETECTION_OUTCOMES.NO_FACE) {
+    return { ...base, state: DECISION_STATES.NO_FACE };
+  }
+  if (result.access === 'No decision') {
+    return { ...base, state: DECISION_STATES.NO_FACE, headlineOverride: result.title };
+  }
+  if (result.accountState === 'Suspended') {
+    return { ...base, state: DECISION_STATES.SUSPENDED, identityLabel: result.personLabel };
+  }
+  if (result.access === 'Access Granted') {
+    return { ...base, state: DECISION_STATES.GRANTED, identityLabel: result.personLabel, livenessVerified: true };
+  }
+  return {
+    ...base,
+    state: DECISION_STATES.UNKNOWN,
+    headlineOverride: result.personLabel && result.personLabel !== 'Unknown' && result.personLabel !== '-'
+      ? `${result.personLabel} — Access Denied`
+      : undefined
+  };
+};
+
 const FacialEvaluation = () => {
-  const [activeTab, setActiveTab] = useState('sim');
+  const [searchParams] = useSearchParams();
+  const paramTab = searchParams.get('tab');
+  const paramSource = searchParams.get('source');
+  const paramOrigin = searchParams.get('origin');
+
+  const [activeTab, setActiveTab] = useState(TABS.includes(paramTab) ? paramTab : 'sim');
   const [records, setRecords] = useState(() => loadRecords());
   const [filters, setFilters] = useState({ source: 'All', condition: 'All', date: '', origin: 'All' });
+  // The matrix defaults to LIVE records: only live records measure the actual
+  // model. Deep links like ?tab=matrix&source=Live&origin=Gate%20Scanner work.
+  const [matrixFilters, setMatrixFilters] = useState({
+    source: ['All', ...SOURCES].includes(paramSource) ? paramSource : 'Live',
+    condition: 'All',
+    date: '',
+    origin: paramOrigin && ORIGINS.includes(paramOrigin) ? paramOrigin : 'All'
+  });
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState({});
 
@@ -65,9 +125,14 @@ const FacialEvaluation = () => {
   const [lastResult, setLastResult] = useState(null);
   const [simCondition, setSimCondition] = useState('Front');
   const [simUsers, setSimUsers] = useState(() => loadSimUsers());
-  const [simForm, setSimForm] = useState({ participantLabel: 'P01', role: 'Staff', enrolmentSource: 'Pi' });
   const [simScenario, setSimScenario] = useState('active');
   const [simMessage, setSimMessage] = useState('');
+  const [selectedSimId, setSelectedSimId] = useState('');
+
+  // Guided create / re-enrol wizard.
+  // { mode: 'create'|'reenrol', targetId, step: 1-4, participantLabel, role, enrolmentSource, captured: [] }
+  const [wizard, setWizard] = useState(null);
+  const [wizardUploadUrl, setWizardUploadUrl] = useState(null);
 
   const [liveForm, setLiveForm] = useState({ actualLabel: 'P01', predictedLabel: 'P01', confidence: '', condition: 'Front', latencyMs: '', origin: 'Manual', notes: '' });
 
@@ -77,6 +142,7 @@ const FacialEvaluation = () => {
     const clean = next.filter(Boolean);
     setRecords(clean);
     saveRecords(clean);
+    notifyEvaluationRecordsUpdated();
   };
   const persistMap = (next) => { setLabelMap(next); saveLabelMap(next); };
   const persistSimUsers = (next) => { setSimUsers(next); saveSimUsers(next); };
@@ -85,6 +151,12 @@ const FacialEvaluation = () => {
     if (uploadPreviewUrl) URL.revokeObjectURL(uploadPreviewUrl);
     stopWebcam();
   }, [uploadPreviewUrl]);
+
+  // Temporary wizard upload preview: object URL only, revoked on
+  // replacement/unmount — image data is never stored or sent anywhere.
+  useEffect(() => () => {
+    if (wizardUploadUrl) URL.revokeObjectURL(wizardUploadUrl);
+  }, [wizardUploadUrl]);
 
   const loadEnrolledUsers = async () => {
     setMappingError('');
@@ -208,6 +280,9 @@ const FacialEvaluation = () => {
   };
 
   const runScenario = (scenario) => setLastResult({ title: scenario.title, ...scenario.run() });
+
+  // A simulated evaluation record is only created after this explicit
+  // confirmation — never automatically from running a scenario.
   const logLastResult = () => {
     if (!lastResult?.recordable) return;
     const rec = createRecord({
@@ -222,57 +297,144 @@ const FacialEvaluation = () => {
       notes: lastResult.title,
     });
     persist([rec, ...records]);
+    setSimMessage('Simulated evaluation record logged.');
   };
 
-  const createSimParticipant = () => {
-    if (simUsers.some((u) => u.participantLabel === simForm.participantLabel)) {
-      setSimMessage(`${simForm.participantLabel} is already simulated.`);
+  // ------------------------- Guided CREATE wizard -------------------------
+  const unusedLabels = ENROLLED_LABELS.filter((label) => !simUsers.some((u) => u.participantLabel === label));
+
+  const startCreateWizard = () => {
+    if (unusedLabels.length === 0) {
+      setSimMessage('All five participant labels (P01-P05) are in use. Delete one to create another.');
       return;
     }
-    const participant = {
-      id: `SIM-${Date.now().toString(36)}`,
-      participantLabel: simForm.participantLabel,
-      role: simForm.role,
-      status: 'Active',
-      enrolled: true,
-      enrolmentSource: simForm.enrolmentSource,
-      enrolledAngles: ['Front', 'Left Angle', 'Right Angle'],
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-      audit: [{ at: nowIso(), event: `Simulated enrolment via ${simForm.enrolmentSource}` }]
-    };
-    persistSimUsers([participant, ...simUsers]);
-    setSimMessage(`${participant.participantLabel} created in simulation only.`);
+    setWizard({ mode: 'create', step: 1, participantLabel: unusedLabels[0], role: 'Staff', enrolmentSource: SIM_ENROL_SOURCES[0], captured: [] });
   };
 
+  const startReenrolWizard = (participant) => {
+    setWizard({ mode: 'reenrol', targetId: participant.id, step: 2, participantLabel: participant.participantLabel, role: participant.role, enrolmentSource: SIM_ENROL_SOURCES[0], captured: [] });
+  };
+
+  const cancelWizard = () => {
+    if (wizardUploadUrl) URL.revokeObjectURL(wizardUploadUrl);
+    setWizardUploadUrl(null);
+    setWizard(null);
+  };
+
+  const wizardNextOrientation = wizard ? ORIENTATIONS[wizard.captured.length] : null;
+
+  const handleWizardUpload = (file) => {
+    if (!file) return;
+    if (wizardUploadUrl) URL.revokeObjectURL(wizardUploadUrl);
+    setWizardUploadUrl(URL.createObjectURL(file));
+  };
+
+  const captureWizardOrientation = () => {
+    if (!wizard || !wizardNextOrientation) return;
+    if (wizard.enrolmentSource === 'Temporary Upload') {
+      if (!wizardUploadUrl) return;
+      // Preview served its purpose — revoke immediately; only the orientation
+      // METADATA is kept. No image bytes are stored or sent to any endpoint.
+      URL.revokeObjectURL(wizardUploadUrl);
+      setWizardUploadUrl(null);
+    }
+    setWizard((prev) => {
+      const captured = [...prev.captured, wizardNextOrientation];
+      return { ...prev, captured, step: captured.length === ORIENTATIONS.length ? 4 : 3 };
+    });
+  };
+
+  const finishWizard = () => {
+    if (!wizard || wizard.captured.length !== ORIENTATIONS.length) return;
+    if (wizard.mode === 'reenrol') {
+      updateSimParticipant(
+        wizard.targetId,
+        { enrolled: true, enrolmentSource: wizard.enrolmentSource, enrolledAngles: wizard.captured },
+        `Simulated re-enrolment via ${wizard.enrolmentSource}`
+      );
+      setSimMessage(`${wizard.participantLabel} re-enrolled in simulation only.`);
+    } else {
+      const participant = {
+        id: `SIM-${Date.now().toString(36)}`,
+        participantLabel: wizard.participantLabel,
+        role: wizard.role,
+        status: 'Active',
+        enrolled: true,
+        enrolmentSource: wizard.enrolmentSource,
+        enrolledAngles: wizard.captured,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+        audit: [{ at: nowIso(), event: `Simulated enrolment via ${wizard.enrolmentSource} (Front/Left/Right captured)` }]
+      };
+      persistSimUsers([participant, ...simUsers]);
+      setSelectedSimId(participant.id);
+      setSimMessage(`${participant.participantLabel} created in simulation only.`);
+    }
+    cancelWizard();
+  };
+
+  // ------------------------- UPDATE / DELETE -------------------------
   const updateSimParticipant = (id, patch, event) => {
     persistSimUsers(simUsers.map((u) => u.id === id ? { ...u, ...patch, updatedAt: nowIso(), audit: [...(u.audit || []), { at: nowIso(), event }] } : u));
   };
 
+  // Deletion rule (documented): removing a simulated participant also removes
+  // every SIMULATED evaluation record whose notes reference that participant
+  // label. Live records and production data are never touched.
   const deleteSimParticipant = (id) => {
     const target = simUsers.find((u) => u.id === id);
-    if (!window.confirm(`Delete simulated ${target?.participantLabel}? This does not delete a production User.`)) return;
+    if (!window.confirm(`Delete simulated ${target?.participantLabel}? This removes only the simulated participant. Production users are not affected.`)) return;
     persistSimUsers(simUsers.filter((u) => u.id !== id));
     persist(records.filter((r) => !(r.source === 'Simulated' && r.notes?.includes(target?.participantLabel))));
-    setSimMessage(`Simulated ${target?.participantLabel} removed; production users were not touched.`);
+    if (selectedSimId === id) setSelectedSimId('');
+    setSimMessage(`Simulated ${target?.participantLabel} removed together with its simulated evaluation records; production users were not touched.`);
   };
 
+  // ------------------------- READ (participant-specific) -------------------------
+  const selectedParticipant = simUsers.find((u) => u.id === selectedSimId) || null;
+
   const scanSimParticipant = () => {
-    const participant = simUsers[0];
-    if (!participant || simScenario === 'unknown') {
-      setLastResult({ title: 'Simulated Unknown Person', personLabel: 'Unknown', role: '-', confidence: 0.22, accountState: 'Unknown', access: 'Access Denied', action: 'Simulated read: unknown person denied.', latencyMs: 210, predictedLabel: 'Unknown', actualLabel: 'Unknown', recordable: true });
+    const participant = selectedParticipant;
+    if (simScenario === 'unknown' || (!participant && !['noface', 'service-offline'].includes(simScenario))) {
+      setLastResult({ title: 'Simulated Unknown Person', personLabel: 'Unknown', role: '-', confidence: 0.22, accountState: 'Unknown', access: 'Access Denied', action: 'Simulated read: unknown person denied; deduplicated intrusion alert would be created.', latencyMs: 210, predictedLabel: 'Unknown', actualLabel: 'Unknown', recordable: true });
       return;
     }
     if (simScenario === 'noface') {
       setLastResult({ title: 'Simulated No Face', personLabel: '-', role: '-', confidence: 0, accountState: '-', access: 'No decision', action: 'Simulated read: no face detected, no production log.', latencyMs: 120, detectionOutcome: DETECTION_OUTCOMES.NO_FACE, predictedLabel: NO_FACE, actualLabel: NO_FACE, recordable: true });
       return;
     }
+    if (simScenario === 'service-offline') {
+      setLastResult({ title: 'Simulated Recognition Service Offline', personLabel: '-', role: '-', confidence: 0, accountState: '-', access: 'No decision', action: 'Simulated: 503 from Node -> scan-gate backoff engaged, camera preview keeps running, retry after cooldown. Camera source is not switched.', latencyMs: 60, predictedLabel: null, actualLabel: null, recordable: false });
+      return;
+    }
     const suspended = simScenario === 'suspended' || participant.status === 'Suspended';
     const lowConfidence = simScenario === 'low-confidence';
     const livenessIncomplete = simScenario === 'liveness-incomplete';
-    setLastResult({ title: `Simulated Read: ${participant.participantLabel}`, personLabel: participant.participantLabel, role: participant.role, confidence: lowConfidence ? 0.42 : 0.91, accountState: suspended ? 'Suspended' : 'Active', access: suspended || lowConfidence || livenessIncomplete ? 'Access Denied' : 'Access Granted', action: livenessIncomplete ? 'Simulated read: liveness incomplete, retry/backoff.' : 'Simulated read only; no production API called.', latencyMs: 240, predictedLabel: lowConfidence ? 'Unknown' : participant.participantLabel, actualLabel: participant.participantLabel, recordable: true });
+    const piOffline = simScenario === 'pi-offline';
+    setLastResult({
+      title: `Simulated Read: ${participant.participantLabel}`,
+      personLabel: participant.participantLabel,
+      role: participant.role,
+      confidence: lowConfidence ? 0.42 : 0.91,
+      accountState: suspended ? 'Suspended' : 'Active',
+      access: suspended || lowConfidence || livenessIncomplete ? 'Access Denied' : 'Access Granted',
+      action: livenessIncomplete
+        ? 'Simulated read: liveness incomplete, retry/backoff. No access decision recorded.'
+        : suspended
+          ? 'Simulated read: suspended attempt would be recorded (deduplicated).'
+          : lowConfidence
+            ? 'Simulated read: confidence below threshold, treated as Unknown.'
+            : piOffline
+              ? 'Simulated: Pi probe failed x3 -> automatic laptop-webcam fallback -> recognition continued.'
+              : 'Simulated read only; no production API called.',
+      latencyMs: piOffline ? 480 : 240,
+      predictedLabel: lowConfidence ? 'Unknown' : participant.participantLabel,
+      actualLabel: participant.participantLabel,
+      recordable: true
+    });
   };
 
+  // ------------------------- records CRUD -------------------------
   const addLiveRecord = (e) => {
     e.preventDefault();
     const rec = createRecord({ ...liveForm, confidence: liveForm.confidence, latencyMs: liveForm.latencyMs, source: 'Live', origin: liveForm.origin });
@@ -296,9 +458,10 @@ const FacialEvaluation = () => {
   };
 
   const filtered = filterRecords(records, filters);
-  const stats = computeConfusionMatrix(filtered);
-  const liveStats = computeConfusionMatrix(filterRecords(records, { ...filters, source: 'Live' }));
-  const simStats = computeConfusionMatrix(filterRecords(records, { ...filters, source: 'Simulated' }));
+  const matrixFiltered = filterRecords(records, matrixFilters);
+  const stats = computeConfusionMatrix(matrixFiltered);
+  const liveStats = computeConfusionMatrix(filterRecords(records, { source: 'Live' }));
+  const simStats = computeConfusionMatrix(filterRecords(records, { source: 'Simulated' }));
   const labelOptions = [...IDENTITY_LABELS, NO_FACE];
 
   return (
@@ -307,7 +470,6 @@ const FacialEvaluation = () => {
       <main className="dashboard-main eval-main">
         <header className="dashboard-header"><div className="header-titles"><h1>Facial Evaluation Lab</h1><p>FM-only accuracy evaluation with local P01-P05 anonymisation</p></div></header>
         <div className="eval-banner" role="status">SIMULATION MODE — Production users, Face IDs, attendance and security logs are not modified.</div>
-        <div className="eval-banner legacy-warning">SIMULATION MODE — Production users, attendance and security logs are not modified.</div>
         <div className="eval-live-links"><span>Production workflows remain on their live pages:</span><Link to="/enrollment" className="eval-link-btn">Open Face Enrollment</Link><Link to="/vpatrol" className="eval-link-btn">Open V-Patrol</Link><Link to="/gate-scanner" className="eval-link-btn">Open Gate Scanner</Link></div>
 
         <div className="eval-tabs" role="tablist">
@@ -317,7 +479,7 @@ const FacialEvaluation = () => {
           <button role="tab" aria-selected={activeTab === 'matrix'} className={`eval-tab ${activeTab === 'matrix' ? 'active' : ''}`} onClick={() => setActiveTab('matrix')}>Confusion Matrix</button>
         </div>
 
-        {activeTab === 'live' && <section className="eval-card"><h2>Live Model Evaluation</h2><p className="eval-muted">Temporary frames go to /api/facial-recognition/evaluate only. No Attendance, SecurityLogs, User updates, enrolment changes, images, templates or vectors are stored.</p>
+        {activeTab === 'live' && <section className="eval-card"><h2>Live Model Evaluation</h2><p className="eval-muted">Uses the real side-effect-free model endpoint (/api/facial-recognition/evaluate). Temporary frames only — no Attendance, SecurityLogs, User updates, enrolment changes, images, templates or vectors are stored.</p>
           <div className="eval-card nested"><h3>Private P01-P05 Mapping</h3><p className="eval-muted">Stored only in this FM browser under {EVAL_LABEL_MAP_KEY}. It is never exported and never saved in evaluation records.</p><button className="eval-secondary-btn" onClick={loadEnrolledUsers}>Load enrolled users</button>{mappingError && <p className="eval-error">{mappingError}</p>}
             <div className="eval-form-row"><label>Enrolled user<select value={mappingDraft.userId} onChange={(e) => setMappingDraft({ ...mappingDraft, userId: e.target.value })}><option value="">Choose user</option>{enrolledUsers.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}</select></label><label>Participant label<select value={mappingDraft.label} onChange={(e) => setMappingDraft({ ...mappingDraft, label: e.target.value })}>{ENROLLED_LABELS.map((l) => <option key={l} value={l}>{l}</option>)}</select></label><button className="eval-primary-btn" onClick={saveMapping}>Save mapping</button></div>
             <div className="eval-map-list">{Object.entries(labelMap).length === 0 ? <p className="eval-muted">No local mappings yet.</p> : Object.entries(labelMap).map(([userId, label]) => { const user = enrolledUsers.find((u) => String(u.id) === String(userId)); return <div key={userId} className="eval-map-row"><strong>{label}</strong><span>{user ? user.name : `User #${userId}`}</span><button className="eval-danger-btn" onClick={() => persistMap(removeMappedUser(labelMap, userId))}>Remove</button></div>; })}</div>
@@ -328,11 +490,78 @@ const FacialEvaluation = () => {
           {liveError && <p className={liveError.includes('recorded') ? 'eval-success' : 'eval-error'}>{liveError}</p>}
         </section>}
 
-        {activeTab === 'sim' && <section className="eval-card"><h2>Simulated Facial CRUD</h2><p className="eval-muted">SIMULATION MODE — Production users, Face IDs, attendance and security logs are not modified. Uses {SIM_USERS_KEY}; no production APIs are called.</p>
-          <div className="eval-form-row"><label>Label<select value={simForm.participantLabel} onChange={(e) => setSimForm({ ...simForm, participantLabel: e.target.value })}>{ENROLLED_LABELS.map((l) => <option key={l}>{l}</option>)}</select></label><label>Role<select value={simForm.role} onChange={(e) => setSimForm({ ...simForm, role: e.target.value })}>{['FM', 'Tenant', 'Staff'].map((r) => <option key={r}>{r}</option>)}</select></label><label>Source<select value={simForm.enrolmentSource} onChange={(e) => setSimForm({ ...simForm, enrolmentSource: e.target.value })}>{['Pi', 'Webcam', 'Upload'].map((s) => <option key={s}>{s}</option>)}</select></label><button className="eval-primary-btn" onClick={createSimParticipant}>Create participant</button></div>{simMessage && <p className="eval-success">{simMessage}</p>}
-          <div className="eval-table-wrap"><table className="eval-table"><thead><tr><th>Label</th><th>Role</th><th>Status</th><th>Enrolled</th><th>Source</th><th>Actions</th></tr></thead><tbody>{simUsers.map((u) => <tr key={u.id}><td>{u.participantLabel}</td><td>{u.role}</td><td>{u.status}</td><td>{u.enrolled ? 'Yes' : 'No'}</td><td>{u.enrolmentSource}</td><td><button className="eval-secondary-btn" onClick={() => updateSimParticipant(u.id, { status: u.status === 'Active' ? 'Suspended' : 'Active' }, 'Simulated suspend/reactivate')}>{u.status === 'Active' ? 'Suspend' : 'Reactivate'}</button><button className="eval-secondary-btn" onClick={() => updateSimParticipant(u.id, { enrolled: true, enrolmentSource: 'Webcam', enrolledAngles: ['Front', 'Left Angle', 'Right Angle'] }, 'Simulated re-enrolment')}>Re-enrol</button><button className="eval-danger-btn" onClick={() => deleteSimParticipant(u.id)}>Delete</button></td></tr>)}</tbody></table></div>
-          <div className="eval-form-row"><label>Read scenario<select value={simScenario} onChange={(e) => setSimScenario(e.target.value)}>{['active', 'suspended', 'unknown', 'noface', 'low-confidence', 'liveness-incomplete', 'pi-offline', 'service-offline'].map((s) => <option key={s}>{s}</option>)}</select></label><button className="eval-primary-btn" onClick={scanSimParticipant}>Read / scan participant</button></div>
+        {activeTab === 'sim' && <section className="eval-card"><h2>Simulated Facial CRUD</h2>
+          <p className="eval-muted">Demonstrates the Create / Read / Update / Delete workflow with safe metadata in {SIM_USERS_KEY} only — no production API is ever called, and simulated results never represent real model accuracy (Live Model Evaluation does that).</p>
+
+          <div className="eval-card nested eval-guidance"><h3>How to use this simulation</h3>
+            <ul>
+              <li><strong>Create:</strong> use the guided flow to pick an unused P01-P05 label and a role, choose a simulated enrolment source, capture Front / Left / Right one step at a time, then review and create.</li>
+              <li><strong>Read:</strong> select a participant and a scenario, then run a simulated scan. The decision card mirrors the live Gate Scanner / V-Patrol cards.</li>
+              <li><strong>Update:</strong> change the simulated role, suspend/reactivate, or redo the capture flow through Re-enrol.</li>
+              <li><strong>Delete:</strong> removes only the simulated participant and its simulated evaluation records.</li>
+              <li><strong>Live vs Simulated:</strong> only Live records (Live Model Evaluation, Gate Scanner, V-Patrol) measure the actual model. Simulated records only prove workflow logic.</li>
+              <li><strong>Ground truth:</strong> the Actual label cannot be inferred from the AI prediction — you must confirm who was really in front of the camera, otherwise the matrix would only ever agree with the model.</li>
+              <li><strong>Results:</strong> confirmed records appear under Evaluation Records and in the Confusion Matrix tab (live pages embed their own live matrices).</li>
+            </ul>
+          </div>
+
+          {simMessage && <p className="eval-success" role="status">{simMessage}</p>}
+
+          {!wizard && <div className="eval-form-row"><button className="eval-primary-btn" onClick={startCreateWizard}>Start guided create</button><span className="eval-muted">Unused labels: {unusedLabels.length > 0 ? unusedLabels.join(', ') : 'none - delete a participant first'}</span></div>}
+
+          {wizard && <div className="eval-card nested" data-testid="sim-wizard">
+            <h3>{wizard.mode === 'reenrol' ? `Guided re-enrolment - ${wizard.participantLabel}` : 'Guided simulated enrolment'} (step {wizard.step} of 4)</h3>
+
+            {wizard.step === 1 && <div className="eval-form-row">
+              <label>Participant label<select value={wizard.participantLabel} onChange={(e) => setWizard({ ...wizard, participantLabel: e.target.value })}>{unusedLabels.map((l) => <option key={l} value={l}>{l}</option>)}</select></label>
+              <label>Role<select value={wizard.role} onChange={(e) => setWizard({ ...wizard, role: e.target.value })}>{['FM', 'Tenant', 'Staff'].map((r) => <option key={r} value={r}>{r}</option>)}</select></label>
+              <button className="eval-primary-btn" onClick={() => setWizard({ ...wizard, step: 2 })}>Next: enrolment source</button>
+            </div>}
+
+            {wizard.step === 2 && <div className="eval-form-row">
+              <label>Enrolment source<select value={wizard.enrolmentSource} onChange={(e) => setWizard({ ...wizard, enrolmentSource: e.target.value })}>{SIM_ENROL_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
+              <button className="eval-primary-btn" onClick={() => setWizard({ ...wizard, step: 3 })}>Next: capture</button>
+            </div>}
+
+            {wizard.step === 3 && <div>
+              <p className="eval-muted">Capture each orientation in order — nothing completes automatically.</p>
+              <ul className="eval-capture-list">
+                {ORIENTATIONS.map((o) => <li key={o} className={wizard.captured.includes(o) ? 'captured' : ''}>{o}: {wizard.captured.includes(o) ? 'Captured' : 'Pending'}</li>)}
+              </ul>
+              {wizard.enrolmentSource === 'Temporary Upload' && <div className="eval-form-row">
+                <input aria-label={`Temporary upload for ${wizardNextOrientation}`} type="file" accept="image/*" onChange={(e) => handleWizardUpload(e.target.files[0])} />
+                {wizardUploadUrl && <img src={wizardUploadUrl} alt={`temporary ${wizardNextOrientation} preview`} className="eval-upload-preview" />}
+              </div>}
+              <button className="eval-primary-btn" onClick={captureWizardOrientation} disabled={wizard.enrolmentSource === 'Temporary Upload' && !wizardUploadUrl}>
+                {wizard.enrolmentSource === 'Temporary Upload' ? `Attach as ${wizardNextOrientation}` : `Capture ${wizardNextOrientation}`}
+              </button>
+            </div>}
+
+            {wizard.step === 4 && <div>
+              <p className="eval-muted">Review — only safe simulated metadata is stored (label, role, source, orientations, timestamps). No image, vector or template.</p>
+              <ul className="eval-capture-list">
+                <li>Participant: {wizard.participantLabel} ({wizard.role})</li>
+                <li>Source: {wizard.enrolmentSource}</li>
+                <li>Captured: {wizard.captured.join(', ')}</li>
+              </ul>
+              <button className="eval-primary-btn" onClick={finishWizard}>{wizard.mode === 'reenrol' ? 'Save re-enrolment' : 'Create simulated participant'}</button>
+            </div>}
+
+            <button className="eval-secondary-btn" onClick={cancelWizard}>Cancel</button>
+          </div>}
+
+          <div className="eval-table-wrap"><table className="eval-table"><thead><tr><th>Label</th><th>Role</th><th>Status</th><th>Enrolled</th><th>Source</th><th>Angles</th><th>Actions</th></tr></thead><tbody>{simUsers.length === 0 ? <tr><td colSpan={7} className="eval-muted">No simulated participants yet - use the guided create flow above.</td></tr> : simUsers.map((u) => <tr key={u.id} className={selectedSimId === u.id ? 'eval-row-selected' : ''}><td>{u.participantLabel}</td><td><select aria-label={`Simulated role for ${u.participantLabel}`} value={u.role} onChange={(e) => updateSimParticipant(u.id, { role: e.target.value }, `Simulated role changed to ${e.target.value}`)}>{['FM', 'Tenant', 'Staff'].map((r) => <option key={r} value={r}>{r}</option>)}</select></td><td>{u.status}</td><td>{u.enrolled ? 'Yes' : 'No'}</td><td>{u.enrolmentSource}</td><td>{(u.enrolledAngles || []).join(', ')}</td><td><button className="eval-secondary-btn" onClick={() => updateSimParticipant(u.id, { status: u.status === 'Active' ? 'Suspended' : 'Active' }, 'Simulated suspend/reactivate')}>{u.status === 'Active' ? 'Suspend' : 'Reactivate'}</button><button className="eval-secondary-btn" onClick={() => startReenrolWizard(u)}>Re-enrol</button><button className="eval-danger-btn" onClick={() => deleteSimParticipant(u.id)}>Delete</button></td></tr>)}</tbody></table></div>
+
+          <h3>Simulated Read / Scan</h3>
+          <div className="eval-form-row">
+            <label>Participant<select aria-label="Simulated participant to scan" value={selectedSimId} onChange={(e) => setSelectedSimId(e.target.value)}><option value="">Choose participant</option>{simUsers.map((u) => <option key={u.id} value={u.id}>{u.participantLabel} ({u.status})</option>)}</select></label>
+            <label>Read scenario<select value={simScenario} onChange={(e) => setSimScenario(e.target.value)}>{READ_SCENARIOS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></label>
+            <button className="eval-primary-btn" onClick={scanSimParticipant}>Read / scan participant</button>
+          </div>
+
           <div className="eval-scenario-grid">{SCENARIOS.map((s) => <button key={s.key} className="eval-scenario-btn" onClick={() => runScenario(s)}><strong>{s.title}</strong><span>{s.description}</span></button>)}</div>
+
+          {lastResult && <RecognitionDecisionCard decision={simResultToDecision(lastResult)} page="gate" />}
           {lastResult && <div className="eval-result" data-testid="sim-result"><h3>{lastResult.title}</h3><dl className="eval-result-grid"><div><dt>Person</dt><dd>{lastResult.personLabel}</dd></div><div><dt>Role</dt><dd>{lastResult.role}</dd></div><div><dt>Confidence</dt><dd>{Number(lastResult.confidence || 0).toFixed(2)}</dd></div><div><dt>Account State</dt><dd>{lastResult.accountState}</dd></div><div><dt>Decision</dt><dd className={lastResult.access === 'Access Granted' ? 'eval-granted' : 'eval-denied'}>{lastResult.access}</dd></div><div><dt>Latency</dt><dd>{lastResult.latencyMs} ms</dd></div></dl><p className="eval-action">{lastResult.action}</p>{lastResult.recordable && <div className="eval-result-actions"><label>Condition:<select value={simCondition} onChange={(e) => setSimCondition(e.target.value)}>{CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}</select></label><button className="eval-primary-btn" onClick={logLastResult}>Log to evaluation records</button></div>}</div>}
         </section>}
 
@@ -340,7 +569,7 @@ const FacialEvaluation = () => {
           <div className="eval-filter-bar"><label>Source<select aria-label="Filter by source" value={filters.source} onChange={(e) => setFilters({ ...filters, source: e.target.value })}>{['All', ...SOURCES].map((s) => <option key={s}>{s}</option>)}</select></label><label>Condition<select aria-label="Filter by condition" value={filters.condition} onChange={(e) => setFilters({ ...filters, condition: e.target.value })}>{['All', ...CONDITIONS].map((c) => <option key={c}>{c}</option>)}</select></label><label>Origin<select aria-label="Filter by origin" value={filters.origin} onChange={(e) => setFilters({ ...filters, origin: e.target.value })}>{['All', ...ORIGINS].map((o) => <option key={o}>{o}</option>)}</select></label><label>Date<input type="date" aria-label="Filter by date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} /></label><button className="eval-secondary-btn" onClick={exportCsv}>Export CSV</button><button className="eval-danger-btn" onClick={clearSimulated}>Clear Simulated Results</button></div>
           <div className="eval-table-wrap"><table className="eval-table"><thead><tr><th>Actual</th><th>Predicted</th><th>Confidence</th><th>Condition</th><th>Latency</th><th>Source</th><th>Origin</th><th>Notes</th><th>Outcome</th><th>Time</th><th>Actions</th></tr></thead><tbody>{filtered.length === 0 ? <tr><td colSpan={11} className="eval-muted">No evaluation records match the current filters.</td></tr> : filtered.map((r) => <tr key={r.id} data-testid={`eval-row-${r.id}`}>{editingId === r.id ? <><td><select aria-label="Edit actual label" value={editDraft.actualLabel} onChange={(e) => setEditDraft({ ...editDraft, actualLabel: e.target.value })}>{IDENTITY_LABELS.map((l) => <option key={l}>{l}</option>)}</select></td><td><select aria-label="Edit predicted label" value={editDraft.predictedLabel} onChange={(e) => setEditDraft({ ...editDraft, predictedLabel: e.target.value })}>{IDENTITY_LABELS.map((l) => <option key={l}>{l}</option>)}</select></td><td>{r.confidence ?? '-'}</td><td><select aria-label="Edit condition" value={editDraft.condition} onChange={(e) => setEditDraft({ ...editDraft, condition: e.target.value })}>{CONDITIONS.map((c) => <option key={c}>{c}</option>)}</select></td><td>{r.latencyMs ?? '-'}</td><td>{r.source}</td><td><select aria-label="Edit origin" value={editDraft.origin} onChange={(e) => setEditDraft({ ...editDraft, origin: e.target.value })}>{ORIGINS.map((o) => <option key={o}>{o}</option>)}</select></td><td><input aria-label="Edit notes" value={editDraft.notes} onChange={(e) => setEditDraft({ ...editDraft, notes: e.target.value })} /></td><td>{r.detectionOutcome || '-'}</td><td>{(r.timestamp || '').slice(0, 16).replace('T', ' ')}</td><td><button className="eval-primary-btn" onClick={() => saveEdit(r.id)}>Save</button><button className="eval-secondary-btn" onClick={() => setEditingId(null)}>Cancel</button></td></> : <><td>{r.actualLabel || '-'}</td><td>{r.predictedLabel || '-'}</td><td>{r.confidence == null ? '-' : Number(r.confidence).toFixed(2)}</td><td>{r.condition}</td><td>{r.latencyMs == null ? '-' : `${r.latencyMs} ms`}</td><td><span className={`eval-source-tag ${r.source.toLowerCase()}`}>{r.source}</span></td><td>{r.origin}</td><td className="eval-notes-cell">{r.notes}</td><td>{r.detectionOutcome || '-'}</td><td>{(r.timestamp || '').slice(0, 16).replace('T', ' ')}</td><td><button className="eval-secondary-btn" onClick={() => startEdit(r)}>Edit</button><button className="eval-danger-btn" onClick={() => deleteRecord(r.id)}>Delete</button></td></>}</tr>)}</tbody></table></div></section>}
 
-        {activeTab === 'matrix' && <section className="eval-card"><h2>Confusion Matrix</h2><p className="eval-muted">Simulation validates workflow behaviour. Only Live records may be used as evidence of actual model accuracy.</p><p className="eval-muted">Live Accuracy: {formatPct(liveStats.accuracy)} | Simulated Workflow Results: {formatPct(simStats.accuracy)}</p><div className="eval-filter-bar"><label>Source<select aria-label="Matrix source filter" value={filters.source} onChange={(e) => setFilters({ ...filters, source: e.target.value })}>{['All', 'Live', 'Simulated'].map((s) => <option key={s}>{s}</option>)}</select></label><label>Condition<select aria-label="Matrix condition filter" value={filters.condition} onChange={(e) => setFilters({ ...filters, condition: e.target.value })}>{['All', ...CONDITIONS].map((c) => <option key={c}>{c}</option>)}</select></label><label>Origin<select aria-label="Matrix origin filter" value={filters.origin} onChange={(e) => setFilters({ ...filters, origin: e.target.value })}>{['All', ...ORIGINS].map((o) => <option key={o}>{o}</option>)}</select></label></div><div className="eval-stat-row"><div className="eval-stat"><span>Samples</span><strong data-testid="stat-samples">{stats.sampleCount}</strong></div><div className="eval-stat"><span>Accuracy</span><strong data-testid="stat-accuracy">{formatPct(stats.accuracy)}</strong></div><div className="eval-stat"><span>Macro Precision</span><strong data-testid="stat-precision">{formatPct(stats.macroPrecision)}</strong></div><div className="eval-stat"><span>Macro Recall</span><strong data-testid="stat-recall">{formatPct(stats.macroRecall)}</strong></div><div className="eval-stat"><span>Macro F1</span><strong data-testid="stat-f1">{formatPct(stats.macroF1)}</strong></div><div className="eval-stat"><span>FAR</span><strong data-testid="stat-far">{formatPct(stats.far)}</strong></div><div className="eval-stat"><span>FRR</span><strong data-testid="stat-frr">{formatPct(stats.frr)}</strong></div><div className="eval-stat"><span>Avg Latency</span><strong data-testid="stat-latency">{Math.round(stats.avgLatencyMs)} ms</strong></div></div><p className="eval-muted" data-testid="no-face-stat">Detection quality: {stats.noFaceCount} &ldquo;No Face&rdquo; sample(s) ({formatPct(stats.noFaceRate)} of filtered records) - tracked separately, never as an identity class.</p><div className="eval-table-wrap"><table className="eval-table eval-matrix" data-testid="confusion-matrix"><thead><tr><th>Actual \ Predicted</th>{stats.labels.map((l) => <th key={l}>{l}</th>)}</tr></thead><tbody>{stats.labels.map((rowLabel, i) => <tr key={rowLabel}><th>{rowLabel}</th>{stats.labels.map((colLabel, j) => <td key={colLabel} className={i === j ? 'eval-diagonal' : stats.matrix[i][j] > 0 ? 'eval-offdiag' : ''}>{stats.matrix[i][j]}</td>)}</tr>)}</tbody></table></div><p className="eval-muted">FAR = actual Unknown predicted as P01-P05 / all actual Unknown. FRR = actual P01-P05 predicted as Unknown / all enrolled samples.</p></section>}
+        {activeTab === 'matrix' && <section className="eval-card"><h2>Confusion Matrix</h2><p className="eval-muted"><strong>Only Live records measure actual model performance.</strong> Simulated records validate workflow behaviour only. The default view below is therefore Live-only.</p><p className="eval-muted">Live Accuracy: {formatPct(liveStats.accuracy)} | Simulated Workflow Results: {formatPct(simStats.accuracy)}</p><div className="eval-filter-bar"><label>Source<select aria-label="Matrix source filter" value={matrixFilters.source} onChange={(e) => setMatrixFilters({ ...matrixFilters, source: e.target.value })}>{['Live', 'Simulated', 'All'].map((s) => <option key={s}>{s}</option>)}</select></label><label>Condition<select aria-label="Matrix condition filter" value={matrixFilters.condition} onChange={(e) => setMatrixFilters({ ...matrixFilters, condition: e.target.value })}>{['All', ...CONDITIONS].map((c) => <option key={c}>{c}</option>)}</select></label><label>Origin<select aria-label="Matrix origin filter" value={matrixFilters.origin} onChange={(e) => setMatrixFilters({ ...matrixFilters, origin: e.target.value })}><option value="All">{matrixFilters.source === 'Live' ? 'All Live Sources' : 'All Origins'}</option>{ORIGINS.map((o) => <option key={o} value={o}>{o}</option>)}</select></label></div><div className="eval-stat-row"><div className="eval-stat"><span>Samples</span><strong data-testid="stat-samples">{stats.sampleCount}</strong></div><div className="eval-stat"><span>Accuracy</span><strong data-testid="stat-accuracy">{formatPct(stats.accuracy)}</strong></div><div className="eval-stat"><span>Macro Precision</span><strong data-testid="stat-precision">{formatPct(stats.macroPrecision)}</strong></div><div className="eval-stat"><span>Macro Recall</span><strong data-testid="stat-recall">{formatPct(stats.macroRecall)}</strong></div><div className="eval-stat"><span>Macro F1</span><strong data-testid="stat-f1">{formatPct(stats.macroF1)}</strong></div><div className="eval-stat"><span>FAR</span><strong data-testid="stat-far">{formatPct(stats.far)}</strong></div><div className="eval-stat"><span>FRR</span><strong data-testid="stat-frr">{formatPct(stats.frr)}</strong></div><div className="eval-stat"><span>Avg Latency</span><strong data-testid="stat-latency">{Math.round(stats.avgLatencyMs)} ms</strong></div></div><p className="eval-muted" data-testid="no-face-stat">Detection quality: {stats.noFaceCount} &ldquo;No Face&rdquo; sample(s) ({formatPct(stats.noFaceRate)} of filtered records) - tracked separately, never as an identity class.</p><div className="eval-table-wrap"><table className="eval-table eval-matrix" data-testid="confusion-matrix"><thead><tr><th>Actual \ Predicted</th>{stats.labels.map((l) => <th key={l}>{l}</th>)}</tr></thead><tbody>{stats.labels.map((rowLabel, i) => <tr key={rowLabel}><th>{rowLabel}</th>{stats.labels.map((colLabel, j) => <td key={colLabel} className={i === j ? 'eval-diagonal' : stats.matrix[i][j] > 0 ? 'eval-offdiag' : ''}>{stats.matrix[i][j]}</td>)}</tr>)}</tbody></table></div><p className="eval-muted">FAR = actual Unknown predicted as P01-P05 / all actual Unknown. FRR = actual P01-P05 predicted as Unknown / all enrolled samples.</p></section>}
       </main>
     </div>
   );

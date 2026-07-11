@@ -224,6 +224,22 @@ describe("Booking routes", () => {
     expect(res.status).toBe(200);
     expect(update).toHaveBeenCalledWith({ status: "Cancelled" });
   });
+
+  test("PATCH /:id/cancel still succeeds when the WhatsApp notify throws (non-fatal)", async () => {
+    const update = jest.fn().mockResolvedValue(true);
+    mockBooking.findByPk.mockResolvedValue({ id: 1, ...validBody, booking_ref: "FG-AAA", tenantId: 7, update });
+    const waSpy = jest.spyOn(whatsapp, "sendBookingCancelled").mockRejectedValueOnce(new Error("WhatsApp API down"));
+    try {
+      const res = await request(app)
+        .patch("/api/bookings/1/cancel")
+        .set("Authorization", `Bearer ${tokenFor("FM")}`);
+      expect(res.status).toBe(200);
+      expect(update).toHaveBeenCalledWith({ status: "Cancelled" });
+      expect(res.body.whatsapp).toBeNull();
+    } finally {
+      waSpy.mockRestore();
+    }
+  });
 });
 
 describe("Gate scan (entry/exit)", () => {

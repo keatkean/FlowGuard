@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import Sidebar from '../components/Sidebar';
+import SecurityLogIcon from '../components/SecurityLogIcon';
 import '../css/Dashboard.css';
 import '../css/Management.css';
 import { API_BASE_URL } from '../constants/api';
@@ -131,7 +132,7 @@ const SecurityReview = () => {
                       {log.time || new Date(log.createdAt).toLocaleString('en-SG')}
                     </td>
                     <td data-label="Event">
-                      <strong>{log.icon} {log.type}</strong>
+                      <strong><SecurityLogIcon log={log} /> {log.type}</strong>
                       <div style={{ color: '#94a3b8', fontSize: '0.85em' }}>{log.desc}</div>
                     </td>
                     <td data-label="Personnel">{log.personnelName || <em style={{ color: '#64748b' }}>Unknown</em>}</td>

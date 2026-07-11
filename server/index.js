@@ -7,7 +7,7 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Environment-based CORS allowlist (CLIENT_URL + ALLOWED_ORIGINS). When no
-// origins are configured it falls back to allow-all for local/LAN development â€”
+// origins are configured it falls back to allow-all for local/LAN development -
 // configure CLIENT_URL (and optionally ALLOWED_ORIGINS) for any deployment.
 const { buildCorsOptions } = require('./middlewares/corsOptions');
 app.use(cors(buildCorsOptions()));
@@ -43,15 +43,15 @@ app.use('/api/facial-recognition', facialRecognitionRoutes);
 const supportRoutes = require('./routes/support');
 app.use('/api/support', supportRoutes);
 
-// Fallback handlers â€” MUST stay last, after every route is mounted.
+// Fallback handlers - MUST stay last, after every route is mounted.
 const { notFound, errorHandler } = require('./middlewares/errorHandlers');
-app.use(notFound);       // unknown route â†’ 404 JSON
-app.use(errorHandler);   // anything thrown/forwarded â†’ 500 JSON (no stack leak)
+app.use(notFound);       // unknown route -> 404 JSON
+app.use(errorHandler);   // anything thrown/forwarded -> 500 JSON (no stack leak)
 
 // Sync DB and Start Server
 const db = require('./models');
 const startCleanupCron = require('./cron/cleanupTranscripts');
-// Cloud-compatible binding: PORT (cloud) â†’ APP_PORT (local .env) â†’ 5001,
+// Cloud-compatible binding: PORT (cloud) -> APP_PORT (local .env) -> 5001,
 // listening on 0.0.0.0 so deployed containers accept external traffic.
 const { resolvePort, resolveHost } = require('./config/serverConfig');
 
@@ -68,25 +68,30 @@ async function startServer() {
         );
         const failedModels = [];
 
+        // Schema alteration is opt-in: set DB_SYNC_ALTER=true only when a model
+        // schema intentionally changed. Normal startup creates missing tables
+        // but never re-alters every existing table (and never uses force).
+        const alterSchema = process.env.DB_SYNC_ALTER === 'true';
+
         // Visible startup progress: the HTTP listener only binds AFTER this
         // loop, so a slow remote database must never look like a silent hang
         // (the classic symptom is the Vite proxy timing out on 127.0.0.1:5001).
-        console.log(`Syncing ${modelNames.length} models (alter:true) â€” port ${resolvePort()} opens when this finishes...`);
+        console.log(`Syncing ${modelNames.length} models (alter:${alterSchema}) - port ${resolvePort()} opens when this finishes...`);
         const syncStart = Date.now();
 
         for (const [i, name] of modelNames.entries()) {
             // Heartbeat: if one model sync stalls (slow/unreachable DB), keep
             // saying so instead of going quiet.
             const heartbeat = setInterval(() => {
-                console.log(`  â€¦ still syncing ${name} (${Math.round((Date.now() - syncStart) / 1000)}s elapsed) â€” check DB_HOST/network if this persists`);
+                console.log(`  ... still syncing ${name} (${Math.round((Date.now() - syncStart) / 1000)}s elapsed) - check DB_HOST/network if this persists`);
             }, 10000);
             const modelStart = Date.now();
             try {
-                await db[name].sync({ alter: true });
-                console.log(`  âœ” [${i + 1}/${modelNames.length}] Synced: ${name} (${Date.now() - modelStart}ms)`);
+                await db[name].sync({ alter: alterSchema });
+                console.log(`  OK [${i + 1}/${modelNames.length}] Synced: ${name} (${Date.now() - modelStart}ms)`);
             } catch (syncErr) {
                 failedModels.push(name);
-                console.error(`  âœ– [${i + 1}/${modelNames.length}] Failed to sync ${name}:`, syncErr.message);
+                console.error(`  FAIL [${i + 1}/${modelNames.length}] Failed to sync ${name}:`, syncErr.message);
             } finally {
                 clearInterval(heartbeat);
             }

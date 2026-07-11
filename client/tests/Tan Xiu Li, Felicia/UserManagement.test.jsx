@@ -47,7 +47,7 @@ describe("User Management — Add Tenant (FM)", () => {
     expect(screen.getByRole("button", { name: /Add Tenant/i })).toBeTruthy();
   });
 
-  test("a user row keeps Logs, Face ID, Suspend and Delete actions", async () => {
+  test("a user row offers ONLY View Logs, Suspend/Reactivate and Delete (no Face ID row action)", async () => {
     localStorage.setItem("userRole", "FM");
     mockGet.mockResolvedValueOnce({
       data: [{ id: 5, name: "Jane Tan", email: "jane@x.com", role: "Tenant", isActive: true, isEnrolled: false, createdAt: new Date().toISOString(), locationStatus: "Off-Site" }],
@@ -55,9 +55,12 @@ describe("User Management — Add Tenant (FM)", () => {
     renderUsers();
     await screen.findByText("Jane Tan");
     expect(screen.getByRole("button", { name: /View Logs/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Enrol Face ID/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Suspend/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Permanent Delete/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Delete/i })).toBeTruthy();
+    // Face ID enrolment stays in the enrolment flow / Settings, not here.
+    expect(screen.queryByRole("button", { name: /Face ID/i })).toBeNull();
+    const rowActions = screen.getByLabelText("Actions for Jane Tan");
+    expect(rowActions.querySelectorAll("button").length).toBe(3);
   });
 
   test("non-FM does not see the + Add Tenant button", () => {

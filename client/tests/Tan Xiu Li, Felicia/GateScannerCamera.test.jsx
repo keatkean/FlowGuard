@@ -62,13 +62,12 @@ describe("GateScanner camera source", () => {
     await waitFor(() => expect(screen.getByText("Pi Gate Camera connected")).toBeTruthy());
   });
 
-  test("decision panel starts at 'No face detected' and shows no biometric data", async () => {
+  test("decision card starts in the idle awaiting-scan state", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
     render(<GateScanner />);
     await waitFor(() => expect(screen.getByText("Pi Gate Camera connected")).toBeTruthy());
-    // Focused current-decision panel: idle state reports no face yet.
-    expect(screen.getByText("Last Decision:")).toBeTruthy();
-    expect(screen.getByText(/No face detected — awaiting scan/)).toBeTruthy();
+    // Shared decision card: idle state reports no recognition decision yet.
+    expect(screen.getByText(/Awaiting scan — no recognition decision yet/)).toBeTruthy();
   });
 
   test("page never renders raw biometric vector data", async () => {

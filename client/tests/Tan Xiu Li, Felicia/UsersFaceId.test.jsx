@@ -55,25 +55,70 @@ describe("User Management — Face ID badge", () => {
   });
 });
 
-describe("User Management — re-enrol action (FM)", () => {
-  test("FM sees a Re-enrol button for enrolled users and Enrol for others", async () => {
+describe("User Management — Face ID enrolment removed from row actions", () => {
+  test("no role sees an Enrol/Re-enrol Face ID row action (it lives in Settings / the enrolment flow)", async () => {
     await renderUsers();
-    expect(screen.getByRole("button", { name: "Re-enrol Face ID" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Enrol Face ID" })).toBeTruthy();
-  });
+    expect(screen.queryByRole("button", { name: /Re-enrol Face ID|Enrol Face ID|Face ID/ })).toBeNull();
 
-  test("clicking re-enrol navigates to /enrollment?userId=<id>", async () => {
-    await renderUsers();
-    fireEvent.click(screen.getByRole("button", { name: "Re-enrol Face ID" }));
-    expect(mockNavigate).toHaveBeenCalledWith(
-      expect.stringContaining("/enrollment?userId=25")
-    );
-  });
-
-  test("non-FM roles do not get the re-enrol action", async () => {
+    cleanup();
     localStorage.setItem("userRole", "Tenant");
     await renderUsers();
-    expect(screen.queryByRole("button", { name: /Re-enrol Face ID|Enrol Face ID/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Re-enrol Face ID|Enrol Face ID|Face ID/ })).toBeNull();
+  });
+});
+
+describe("User Management — compact role badges", () => {
+  test("role column shows a compact badge with a separate readable description", async () => {
+    await renderUsers();
+    // Compact badge text only — never a long combined label.
+    expect(document.body.textContent).not.toMatch(/FM - FACILITIES MANAGER|Tenant - Unit Owner|Staff - Worker/i);
+    const staffBadge = document.querySelector(".role-badge.role-staff");
+    const tenantBadge = document.querySelector(".role-badge.role-tenant");
+    expect(staffBadge.textContent).toBe("Staff");
+    expect(tenantBadge.textContent).toBe("Tenant");
+    // Accessible visible description, not colour-only.
+    expect(screen.getByText("Worker")).toBeTruthy();
+    expect(screen.getByText("Unit Owner")).toBeTruthy();
+  });
+});
+
+describe("User Management — secure deletion flow", () => {
+  test("self row has disabled Suspend and Delete controls", async () => {
+    localStorage.setItem("userId", "25");
+    await renderUsers();
+    const row = screen.getByLabelText("Actions for Enrolled Emma");
+    const buttons = [...row.querySelectorAll("button")];
+    const suspendBtn = buttons.find((b) => /Suspend/.test(b.textContent));
+    const deleteBtn = buttons.find((b) => /Delete/.test(b.textContent));
+    expect(suspendBtn.disabled).toBe(true);
+    expect(deleteBtn.disabled).toBe(true);
+  });
+
+  test("a 409 linked-Staff conflict from the server stays visible in the modal", async () => {
+    await renderUsers();
+    const row = screen.getByLabelText("Actions for Newbie Ng");
+    fireEvent.click([...row.querySelectorAll("button")].find((b) => /Delete/.test(b.textContent)));
+    fireEvent.change(screen.getByPlaceholderText("Newbie Ng"), { target: { value: "Newbie Ng" } });
+    mockAxios.delete.mockRejectedValueOnce({ response: { status: 409, data: { message: "This tenant still has 2 linked Staff account(s)." } } });
+    fireEvent.click(screen.getByRole("button", { name: /Permanently Delete/i }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/linked Staff/i);
+  });
+
+  test("successful deletion refreshes the user list and shows the delete wording", async () => {
+    await renderUsers();
+    const row = screen.getByLabelText("Actions for Newbie Ng");
+    fireEvent.click([...row.querySelectorAll("button")].find((b) => /Delete/.test(b.textContent)));
+    expect(screen.getByText(/Permanently remove login access, Face ID enrolment and operational access/i)).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText("Newbie Ng"), { target: { value: "Newbie Ng" } });
+    mockAxios.delete.mockResolvedValueOnce({ data: { message: "Removed" } });
+    mockAxios.get.mockResolvedValueOnce({ data: [USERS[0]] });
+    fireEvent.click(screen.getByRole("button", { name: /Permanently Delete/i }));
+
+    await screen.findByText(/permanently removed from FlowGuard/i);
+    expect(mockAxios.delete).toHaveBeenCalledWith(expect.stringContaining("/user/26"), expect.any(Object));
+    // list re-fetched after the delete (initial load + refresh)
+    expect(mockAxios.get.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 });
 

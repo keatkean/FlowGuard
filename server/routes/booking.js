@@ -262,7 +262,15 @@ router.patch('/:id/cancel', verifyToken, async (req, res) => {
         }
 
         await booking.update({ status: 'Cancelled' });
-        const whatsappResult = await whatsapp.sendBookingCancelled(booking);
+
+        // WhatsApp is non-fatal — a notify failure must never fail the cancel.
+        let whatsappResult = null;
+        try {
+            whatsappResult = await whatsapp.sendBookingCancelled(booking);
+        } catch (waErr) {
+            console.error('WhatsApp notify failed (non-fatal):', waErr.message);
+        }
+
         res.status(200).json({ message: 'Booking cancelled.', booking, whatsapp: whatsappResult });
     } catch (err) {
         console.error('Booking cancel error:', err);

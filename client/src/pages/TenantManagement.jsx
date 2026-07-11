@@ -1,16 +1,45 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import Sidebar from '../components/Sidebar';
-import '../css/Management.css'; 
+import SafeMuiIcon from '../components/SafeMuiIcon';
+import '../css/Management.css';
 import { API_BASE_URL } from '../constants/api';
 
+const SG_TIME_ZONE = 'Asia/Singapore';
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
 const formatSingaporeDateTime = (value) => new Intl.DateTimeFormat('en-SG', {
-  timeZone: 'Asia/Singapore',
+  timeZone: SG_TIME_ZONE,
   dateStyle: 'medium',
   timeStyle: 'short'
 }).format(new Date(value));
 
-const getInviteStatus = (invite) => invite.status || (invite.isUsed ? 'USED' : 'PENDING');
+// "1 day 16 hours" / "3 hours 12 minutes" / "45 minutes" / "under 1 minute"
+export const formatRemainingDuration = (ms) => {
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const days = Math.floor(ms / DAY_MS);
+  const hours = Math.floor((ms % DAY_MS) / HOUR_MS);
+  const minutes = Math.floor((ms % HOUR_MS) / MINUTE_MS);
+  const plural = (n, unit) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+  if (days > 0) return hours > 0 ? `${plural(days, 'day')} ${plural(hours, 'hour')}` : plural(days, 'day');
+  if (hours > 0) return minutes > 0 ? `${plural(hours, 'hour')} ${plural(minutes, 'minute')}` : plural(hours, 'hour');
+  if (minutes > 0) return plural(minutes, 'minute');
+  return 'under 1 minute';
+};
+
+// The SERVER status stays authoritative; the local clock only downgrades a
+// PENDING invite to EXPIRED the moment its server expiry time passes so an
+// expired code never looks usable while waiting for the next refresh.
+export const deriveInviteStatus = (invite, now = Date.now()) => {
+  const serverStatus = invite.status || (invite.isUsed ? 'USED' : 'PENDING');
+  if (serverStatus === 'PENDING' && invite.expiresAt && now >= new Date(invite.expiresAt).getTime()) {
+    return 'EXPIRED';
+  }
+  return serverStatus;
+};
 
 const statusClass = (status) => status.toLowerCase();
 
@@ -18,16 +47,13 @@ const TenantManagement = () => {
   const [invites, setInvites] = useState([]);
   const [newCode, setNewCode] = useState(null);
   const [loading, setLoading] = useState(false);
-  
+  const [now, setNow] = useState(() => Date.now());
+
   // Pull credentials from storage
   const token = localStorage.getItem("accessToken");
   const userName = localStorage.getItem("userName");
 
-  useEffect(() => {
-    fetchInvites();
-  }, []);
-
-  const fetchInvites = async () => {
+  const fetchInvites = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/user/tenant-invites`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -36,7 +62,27 @@ const TenantManagement = () => {
     } catch (err) {
       console.error("Failed to fetch invites");
     }
-  };
+  }, [token]);
+
+  useEffect(() => {
+    fetchInvites();
+  }, [fetchInvites]);
+
+  // Tick every minute so the remaining-duration text stays current.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), MINUTE_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  // When a PENDING invite crosses its expiry, re-sync with the authoritative
+  // server list (the badge already flipped to EXPIRED locally).
+  useEffect(() => {
+    const crossedExpiry = invites.some((invite) => {
+      const serverStatus = invite.status || (invite.isUsed ? 'USED' : 'PENDING');
+      return serverStatus === 'PENDING' && deriveInviteStatus(invite, now) === 'EXPIRED';
+    });
+    if (crossedExpiry) fetchInvites();
+  }, [now, invites, fetchInvites]);
 
   const handleGenerateInvite = async () => {
     setLoading(true);
@@ -45,7 +91,7 @@ const TenantManagement = () => {
         headers: { Authorization: `Bearer ${token}` }
       });
       setNewCode(res.data.inviteCode);
-      fetchInvites(); 
+      fetchInvites();
     } catch (err) {
       alert("Error generating invitation");
     } finally {
@@ -67,49 +113,32 @@ const TenantManagement = () => {
 
         <div className="management-container">
           <div className="code-generator-card">
-            {/* --- TOP ROW: Title and Instructions aligned horizontally --- */}
-            <div style={{ 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center', 
-                marginBottom: '10px' 
-            }}>
-                <h3 style={{ margin: 0 }}>Issue New Invitation</h3>
-                
-                <p style={{ 
-                    margin: 0, 
-                    color: '#64748b', 
-                    fontSize: '0.8rem', 
-                    fontWeight: '500' 
-                }}>
-                    Generate secure invitation codes for new Unit Owners.
-                </p>
+            <div className="code-header-row">
+              <h3>Issue New Invitation</h3>
+              <p className="code-header-hint">Generate secure invitation codes for new Unit Owners.</p>
             </div>
 
-            {/* --- SUB ROW: Secondary info text --- */}
-            <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: '25px' }}>
-                Each code is one-time use and expires in 48 hours. New unit owners can self-register
-                securely with this invite code — an alternative to adding them from User Management.
+            <p className="code-subtext">
+              Each code is one-time use and expires in 48 hours. New unit owners can self-register
+              securely with this invite code — an alternative to adding them from User Management.
             </p>
 
-            {/* --- ACTION ROW: Code Display and Button --- */}
             <div className="code-flex-row">
-              <div className="code-display-box" style={{ minWidth: '250px' }}>
+              <div className="code-display-box">
                 {newCode || "---- ---- ----"}
               </div>
-              <button 
-                onClick={handleGenerateInvite} 
-                className="edit-btn" 
+              <button
+                onClick={handleGenerateInvite}
+                className="edit-btn generate-invite-btn"
                 disabled={loading}
-                style={{ background: '#3b82f6', color: 'white', padding: '14px 24px' }}
               >
                 {loading ? "Generating..." : "Generate Invite Code"}
               </button>
             </div>
-            
+
             {newCode && (
-              <p style={{ marginTop: '15px', color: '#10b981', fontSize: '0.85rem', fontWeight: '600' }}>
-                ✅ Copy this code and send it to the new Tenant.
+              <p className="code-copy-note">
+                Copy this code and send it to the new Tenant.
               </p>
             )}
           </div>
@@ -126,25 +155,41 @@ const TenantManagement = () => {
               </thead>
               <tbody>
                 {invites.length > 0 ? invites.map(invite => {
-                  const status = getInviteStatus(invite);
+                  const status = deriveInviteStatus(invite, now);
+                  const remaining = status === 'PENDING'
+                    ? formatRemainingDuration(new Date(invite.expiresAt).getTime() - now)
+                    : null;
                   return (
                   <tr key={invite.id}>
-                    <td style={{ fontFamily: 'monospace', fontWeight: 'bold', letterSpacing: '1px' }}>
+                    <td className="invite-code-cell">
                         {invite.code}
                     </td>
-                    <td data-label="Expiration">{formatSingaporeDateTime(invite.expiresAt)}</td>
+                    <td data-label="Expiration">
+                      {status === 'PENDING' && remaining ? (
+                        <div className="invite-expiry-block">
+                          <span className="invite-expiry-remaining">
+                            <SafeMuiIcon icon={AccessTimeIcon} fontSize="inherit" aria-hidden="true" />
+                            Valid for {remaining}
+                          </span>
+                          <span className="invite-expiry-absolute">
+                            Expires {formatSingaporeDateTime(invite.expiresAt)}
+                          </span>
+                        </div>
+                      ) : (
+                        formatSingaporeDateTime(invite.expiresAt)
+                      )}
+                    </td>
                     <td data-label="Status">
                       <span className={`status-badge ${statusClass(status)}`} role="status" aria-label={`Invitation status: ${status}`}>
                         {status}
                       </span>
-                      {invite.isUsable && <span className="invite-usable-note">Usable until expiry</span>}
                     </td>
                     <td data-label="Created">{formatSingaporeDateTime(invite.createdAt)}</td>
                   </tr>
                   );
                 }) : (
                     <tr>
-                        <td colSpan="4" style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                        <td colSpan="4" className="table-empty-cell">
                             No active invitations found.
                         </td>
                     </tr>

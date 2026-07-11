@@ -1,4 +1,4 @@
-﻿/* Facial Evaluation Lab â€” FM-only simulation & metrics page */
+﻿/* Facial Evaluation Lab - FM-only simulation & metrics page */
 
 .eval-main { color: #e2e8f0; }
 
@@ -166,3 +166,39 @@
 .eval-error { color: #fecdd3; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 8px 10px; }
 .eval-success { color: #bbf7d0; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 8px 10px; }
 .eval-table td .eval-secondary-btn, .eval-table td .eval-danger-btn { margin: 2px; }
+/* --- Guided simulation CRUD additions --- */
+.eval-guidance ul {
+    margin: 8px 0 0;
+    padding-left: 20px;
+    color: #b6c2d6;
+    font-size: 0.85rem;
+    line-height: 1.6;
+}
+
+.eval-capture-list {
+    list-style: none;
+    margin: 8px 0 12px;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.eval-capture-list li {
+    background: #111a2e;
+    border: 1px solid #27314f;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #94a3b8;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.eval-capture-list li.captured {
+    border-color: rgba(16, 185, 129, 0.45);
+    color: #34d399;
+}
+
+.eval-row-selected {
+    outline: 1px solid rgba(96, 165, 250, 0.5);
+}

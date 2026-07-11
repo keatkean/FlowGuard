@@ -1,4 +1,5 @@
 ﻿export const EVAL_STORAGE_KEY = 'flowguard_facial_evaluation_records';
+export const EVAL_RECORDS_UPDATED_EVENT = 'flowguard:evaluation-records-updated';
 export const EVAL_LABEL_MAP_KEY = 'flowguard_facial_evaluation_label_map';
 export const SIM_USERS_KEY = 'flowguard_facial_simulation_users';
 
@@ -156,11 +157,25 @@ export function saveSimUsers(users, storage = defaultStorage()) {
   storage.setItem(SIM_USERS_KEY, JSON.stringify(clean));
 }
 
+// Tolerant key for matching origins/sources: ignores case, spacing and
+// punctuation so "gate scanner" / "Gate-Scanner" both match "Gate Scanner".
+export function normalizeOriginKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// Notify any embedded live-matrix panels that the stored records changed —
+// pure UI refresh signal; never triggers recognition or production writes.
+export function notifyEvaluationRecordsUpdated(detail = {}) {
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent(EVAL_RECORDS_UPDATED_EVENT, { detail }));
+  }
+}
+
 export function filterRecords(records, { source = 'All', condition = 'All', date = '', origin = 'All' } = {}) {
   return records.filter((r) => {
-    if (source !== 'All' && r.source !== source) return false;
+    if (source !== 'All' && normalizeOriginKey(r.source) !== normalizeOriginKey(source)) return false;
     if (condition !== 'All' && normalizeCondition(r.condition) !== normalizeCondition(condition)) return false;
-    if (origin !== 'All' && r.origin !== origin) return false;
+    if (origin !== 'All' && normalizeOriginKey(r.origin) !== normalizeOriginKey(origin)) return false;
     if (date && !(r.timestamp || '').startsWith(date)) return false;
     return true;
   });

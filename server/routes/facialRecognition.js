@@ -103,7 +103,7 @@ router.post('/evaluate', verifyToken, requireRole('FM'), async (req, res) => {
 // POST /api/facial-recognition/access-event
 // V-Patrol monitoring: records a server-owned SAFE access audit event for a
 // verified (recognised + liveness-passed) active user WITHOUT touching
-// attendance â€” V-Patrol must never toggle clock-in/out; that is the Gate
+// attendance - V-Patrol must never toggle clock-in/out; that is the Gate
 // Scanner's job via /api/attendance/scan. Deduplicated server-side.
 router.post('/access-event', allowFMOrEdgeService, async (req, res) => {
   try {
@@ -133,14 +133,15 @@ router.post('/access-event', allowFMOrEdgeService, async (req, res) => {
         type: 'Gantry Access',
         desc: `Identity & liveness verified: ${user.name} (${user.role}) at ${location}.`,
         severity: 'safe',
-        icon: 'ðŸ”“',
+        // Stable token — the client renders the matching MUI icon.
+        icon: 'UNLOCK',
         personnelName: user.name,
         matchedUserId: user.id,
         cameraLocation: location
       });
     }
 
-    // Safe fields only â€” never the biometric template.
+    // Safe fields only - never the biometric template.
     return res.status(200).json({
       status: 'SUCCESS',
       logged,
@@ -154,8 +155,8 @@ router.post('/access-event', allowFMOrEdgeService, async (req, res) => {
 });
 
 // POST /api/facial-recognition/recognize
-// Frontend (Gate Scanner / V-Patrol) â†’ Node â†’ FastAPI â†’ Node resolves the User
-// record from PostgreSQL â†’ safe recognition result. The DB â€” not the AI cache â€”
+// Frontend (Gate Scanner / V-Patrol) -> Node -> FastAPI -> Node resolves the User
+// record from PostgreSQL -> safe recognition result. The DB - not the AI cache -
 // decides name, role, account status, and the access outcome.
 router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
   const { image, cameraLocation } = req.body;
@@ -190,26 +191,26 @@ router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
 
   const { matchedUserId, confidence = 0, box = null, liveness_ratio = 0.5, faceDetected, inference_ms = null } = aiResult || {};
 
-  // Development timing telemetry â€” durations only, never images or templates.
+  // Development timing telemetry - durations only, never images or templates.
   const nodeToAiMs = Date.now() - aiStartedAt;
   const timings = { nodeToAiMs, inferenceMs: inference_ms, totalRequestMs: nodeToAiMs };
   if (process.env.NODE_ENV !== 'production') {
-    console.log(`[recognize] Nodeâ†’FastAPI ${timings.nodeToAiMs}ms, InsightFace inference ${inference_ms ?? '?'}ms`);
+    console.log(`[recognize] Node->FastAPI ${timings.nodeToAiMs}ms, InsightFace inference ${inference_ms ?? '?'}ms`);
   }
 
-  // No face in frame â†’ no recognition attempt, and no suspicious-person log.
+  // No face in frame -> no recognition attempt, and no suspicious-person log.
   if (faceDetected === false || (!box && matchedUserId == null)) {
     return res.status(200).json({ user: null, box: null, liveness_ratio, timings });
   }
 
-  // Face detected but no template match â†’ unknown person.
+  // Face detected but no template match -> unknown person.
   if (matchedUserId == null) {
     if (shouldWriteLog(`unknown:${location}`)) {
       await createSecurityLog({
         type: 'Intrusion Alert',
         desc: `Unregistered person detected at ${location} (confidence ${Number(confidence).toFixed(2)}).`,
         severity: 'critical',
-        icon: 'ðŸš¨',
+        icon: 'ALERT',
         personnelName: null,
         confidence,
         cameraLocation: location
@@ -235,7 +236,7 @@ router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
         type: 'Intrusion Alert',
         desc: `Recognition matched a non-enrolled or removed account (ref #${matchedUserId}) at ${location}. AI cache may need a refresh.`,
         severity: 'critical',
-        icon: 'ðŸš¨',
+        icon: 'ALERT',
         personnelName: null,
         matchedUserId,
         confidence,
@@ -250,14 +251,14 @@ router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
     });
   }
 
-  // Suspended account â†’ deny access and audit it.
+  // Suspended account -> deny access and audit it.
   if (!user.isActive) {
     if (shouldWriteLog(`suspended:${user.id}:${location}`)) {
       await createSecurityLog({
         type: 'Suspended Access Attempt',
         desc: `Suspended account attempted gate access at ${location}: ${user.name} (${user.role}, confidence ${Number(confidence).toFixed(2)}).`,
         severity: 'critical',
-        icon: 'â›”',
+        icon: 'DENIED',
         personnelName: user.name,
         matchedUserId: user.id,
         role: user.role,
@@ -273,7 +274,7 @@ router.post('/recognize', allowFMOrEdgeService, async (req, res) => {
     });
   }
 
-  // Active, enrolled, recognised â†’ safe fields only.
+  // Active, enrolled, recognised -> safe fields only.
   return res.status(200).json({
     user: { id: user.id, name: user.name, role: user.role, status: 'AUTHORIZED', confidence },
     box,

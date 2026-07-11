@@ -1,11 +1,31 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
+import VideocamIcon from '@mui/icons-material/Videocam';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import VideocamOffIcon from '@mui/icons-material/VideocamOff';
+import GroupsIcon from '@mui/icons-material/Groups';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import EventIcon from '@mui/icons-material/Event';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import ReportProblemIcon from '@mui/icons-material/ReportProblem';
+import SupportAgentIcon from '@mui/icons-material/SupportAgent';
+import BadgeIcon from '@mui/icons-material/Badge';
+import ScheduleIcon from '@mui/icons-material/Schedule';
+import EventAvailableIcon from '@mui/icons-material/EventAvailable';
+import HistoryIcon from '@mui/icons-material/History';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
+import LoginIcon from '@mui/icons-material/Login';
+import LogoutIcon from '@mui/icons-material/Logout';
+import FaceIcon from '@mui/icons-material/Face';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
+import SettingsIcon from '@mui/icons-material/Settings';
 import Sidebar from '../components/Sidebar';
+import SafeMuiIcon from '../components/SafeMuiIcon';
 import '../css/Dashboard.css';
 import { API_BASE_URL } from '../constants/api';
 
-const displayMetric = (value) => (value === null || value === undefined ? 'Unavailable' : value);
+const displayMetric = (value) => (value === null || value === undefined || value === '' ? 'Unavailable' : value);
 const formatDateTime = (value) => value
   ? new Intl.DateTimeFormat('en-SG', { timeZone: 'Asia/Singapore', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
   : 'Not scheduled';
@@ -15,17 +35,39 @@ const formatPunctuality = (value) => {
   return 'No Check-In';
 };
 
-const SummaryCard = ({ to, tone = 'blue-icon', label, value }) => {
-  const body = (
+// Real icon component reference (icon={VideocamIcon}), never a derived
+// three-letter pseudo-icon and never JSX (icon={<VideocamIcon />}). The
+// visible label carries the meaning, so the icon itself stays aria-hidden.
+const SummaryCard = ({ icon, label, value, helper, to, tone = 'blue-icon' }) => {
+  const displayValue = displayMetric(value);
+
+  const content = (
     <>
-      <div className={`icon-wrapper ${tone}`}>{label.slice(0, 3).toUpperCase()}</div>
+      <div className={`icon-wrapper ${tone}`} aria-hidden="true">
+        <SafeMuiIcon icon={icon} fontSize="small" />
+      </div>
       <div className="summary-info">
-        <h2>{displayMetric(value)}</h2>
+        <h2>{displayValue}</h2>
         <p>{label}</p>
+        {helper ? <small className="summary-helper">{helper}</small> : null}
       </div>
     </>
   );
-  return to ? <Link className="summary-card dashboard-link-card" to={to}>{body}</Link> : <div className="summary-card">{body}</div>;
+
+  return to ? (
+    <Link className="summary-card dashboard-link-card" to={to}>
+      {content}
+    </Link>
+  ) : (
+    <div className="summary-card">{content}</div>
+  );
+};
+
+// Staff quick links come from the API as {label, to}; icons render by route.
+const QUICK_LINK_ICONS = {
+  '/attendance': FactCheckIcon,
+  '/logistics': LocalShippingIcon,
+  '/settings': SettingsIcon
 };
 
 const Dashboard = () => {
@@ -73,15 +115,15 @@ const Dashboard = () => {
       return (
         <>
           <section className="top-summary-row dashboard-summary-grid">
-            <SummaryCard to="/cameras" label="Total Cameras" value={summary.cameras?.total} />
-            <SummaryCard to="/cameras" tone="green-icon" label="Cameras Online" value={summary.cameras?.online} />
-            <SummaryCard to="/cameras" tone="red-icon" label="Cameras Offline" value={summary.cameras?.offline} />
-            <SummaryCard to="/attendance" label="People On Site" value={summary.attendance?.peopleCurrentlyOnSite} />
-            <SummaryCard to="/object-detection" tone="red-icon" label="Urgent Alerts" value={summary.urgentDetectionAlerts} />
-            <SummaryCard to="/logistics" tone="purple-icon" label="Today's Bookings" value={summary.todaysLoadingBayBookings} />
-            <SummaryCard to="/logistics" label="Active Vehicles" value={summary.activeOrArrivedVehicles} />
-            <SummaryCard to="/incidents" tone="red-icon" label="Open Incidents" value={summary.openIncidents} />
-            <SummaryCard to="/support-dashboard" tone="purple-icon" label="Open Tickets" value={summary.openSupportTickets} />
+            <SummaryCard to="/cameras" icon={VideocamIcon} label="Total Cameras" value={summary.cameras?.total} />
+            <SummaryCard to="/cameras" tone="green-icon" icon={CheckCircleIcon} label="Cameras Online" value={summary.cameras?.online} />
+            <SummaryCard to="/cameras" tone="red-icon" icon={VideocamOffIcon} label="Cameras Offline" value={summary.cameras?.offline} />
+            <SummaryCard to="/attendance" icon={GroupsIcon} label="People On Site" value={summary.attendance?.peopleCurrentlyOnSite} />
+            <SummaryCard to="/object-detection" tone="red-icon" icon={WarningAmberIcon} label="Urgent Alerts" value={summary.urgentDetectionAlerts} />
+            <SummaryCard to="/logistics" tone="purple-icon" icon={EventIcon} label="Today's Bookings" value={summary.todaysLoadingBayBookings} />
+            <SummaryCard to="/logistics" icon={LocalShippingIcon} label="Active Vehicles" value={summary.activeOrArrivedVehicles} />
+            <SummaryCard to="/incidents" tone="red-icon" icon={ReportProblemIcon} label="Open Incidents" value={summary.openIncidents} />
+            <SummaryCard to="/support-dashboard" tone="purple-icon" icon={SupportAgentIcon} label="Open Tickets" value={summary.openSupportTickets} />
           </section>
 
           <section className="dashboard-alert-section">
@@ -114,22 +156,22 @@ const Dashboard = () => {
       return (
         <>
           <section className="top-summary-row dashboard-summary-grid">
-            <SummaryCard to="/staff" label="Own Staff Total" value={summary.staffTotal} />
-            <SummaryCard to="/attendance" tone="green-icon" label="Staff On Site" value={summary.staffCurrentlyOnSite} />
-            <SummaryCard to="/attendance" tone="red-icon" label="Own Staff Late Today" value={summary.staffLateToday} />
-            <SummaryCard to="/logistics" tone="purple-icon" label="Today's Own Bookings" value={summary.todaysOwnBookings} />
-            <SummaryCard to="/support-dashboard" label="Own Open Support Cases" value={summary.ownOpenSupportCases} />
+            <SummaryCard to="/staff" icon={GroupsIcon} label="Own Staff Total" value={summary.staffTotal} />
+            <SummaryCard to="/attendance" tone="green-icon" icon={BadgeIcon} label="Staff On Site" value={summary.staffCurrentlyOnSite} />
+            <SummaryCard to="/attendance" tone="red-icon" icon={ScheduleIcon} label="Own Staff Late Today" value={summary.staffLateToday} />
+            <SummaryCard to="/logistics" tone="purple-icon" icon={EventIcon} label="Today's Own Bookings" value={summary.todaysOwnBookings} />
+            <SummaryCard to="/support-dashboard" icon={SupportAgentIcon} label="Own Open Support Cases" value={summary.ownOpenSupportCases} />
           </section>
 
           <section className="dashboard-detail-grid">
             <div className="chart-card">
-              <h3>Next Booking</h3>
+              <h3><SafeMuiIcon icon={EventAvailableIcon} fontSize="small" aria-hidden="true" /> Next Booking</h3>
               {dashboard.nextBooking ? (
                 <p>{dashboard.nextBooking.booking_ref} at {dashboard.nextBooking.loading_bay} - {formatDateTime(dashboard.nextBooking.slot_start)}</p>
               ) : <p className="dashboard-muted">No upcoming own booking.</p>}
             </div>
             <div className="chart-card">
-              <h3>Recent Own-Unit Activity</h3>
+              <h3><SafeMuiIcon icon={HistoryIcon} fontSize="small" aria-hidden="true" /> Recent Own-Unit Activity</h3>
               {(dashboard.recentActivity || []).length > 0 ? dashboard.recentActivity.map((item) => (
                 <p key={item.id || item.booking_ref}>{item.booking_ref} - {item.status}</p>
               )) : <p className="dashboard-muted">No recent own-unit activity.</p>}
@@ -142,22 +184,26 @@ const Dashboard = () => {
     return (
       <>
         <section className="top-summary-row dashboard-summary-grid">
-          <SummaryCard to="/attendance" label="Current Status" value={summary.currentClockStatus === 'IN' ? 'On Site' : 'Off Site'} />
-          <SummaryCard to="/attendance" tone="green-icon" label="First Clock-In" value={summary.todayFirstClockIn ? formatDateTime(summary.todayFirstClockIn) : 'Not recorded'} />
-          <SummaryCard to="/attendance" tone="purple-icon" label="Latest Clock-Out" value={summary.todayLatestClockOut ? formatDateTime(summary.todayLatestClockOut) : 'Not recorded'} />
-          <SummaryCard to="/attendance" tone="red-icon" label="Punctuality" value={formatPunctuality(summary.punctuality)} />
-          <SummaryCard to="/settings" label="Face ID" value={summary.faceIdEnrolled ? 'Enrolled' : 'Not Enrolled'} />
+          <SummaryCard to="/attendance" icon={LocationOnIcon} label="Current Status" value={summary.currentClockStatus === 'IN' ? 'On Site' : 'Off Site'} />
+          <SummaryCard to="/attendance" tone="green-icon" icon={LoginIcon} label="First Clock-In" value={summary.todayFirstClockIn ? formatDateTime(summary.todayFirstClockIn) : 'Not recorded'} />
+          <SummaryCard to="/attendance" tone="purple-icon" icon={LogoutIcon} label="Latest Clock-Out" value={summary.todayLatestClockOut ? formatDateTime(summary.todayLatestClockOut) : 'Not recorded'} />
+          <SummaryCard to="/attendance" tone="red-icon" icon={ScheduleIcon} label="Punctuality" value={formatPunctuality(summary.punctuality)} />
+          <SummaryCard to="/settings" icon={FaceIcon} label="Face ID" value={summary.faceIdEnrolled ? 'Enrolled' : 'Not Enrolled'} />
         </section>
 
         <section className="dashboard-detail-grid">
           <div className="chart-card">
-            <h3>Next Relevant Booking</h3>
+            <h3><SafeMuiIcon icon={EventAvailableIcon} fontSize="small" aria-hidden="true" /> Next Relevant Booking</h3>
             {dashboard.nextRelevantBooking ? <p>{dashboard.nextRelevantBooking.booking_ref}</p> : <p className="dashboard-muted">{dashboard.unavailable?.nextRelevantBooking || 'No relevant booking.'}</p>}
           </div>
           <div className="chart-card">
             <h3>Quick Links</h3>
             <div className="dashboard-quick-links">
-              {(dashboard.quickLinks || []).map((link) => <Link key={link.to} to={link.to}>{link.label}</Link>)}
+              {(dashboard.quickLinks || []).map((link) => (
+                <Link key={link.to} to={link.to}>
+                  <SafeMuiIcon icon={QUICK_LINK_ICONS[link.to]} fontSize="small" aria-hidden="true" /> {link.label}
+                </Link>
+              ))}
             </div>
           </div>
         </section>
@@ -181,7 +227,12 @@ const Dashboard = () => {
         </header>
 
         {loading && <div className="dashboard-loading">Loading dashboard summary...</div>}
-        {error && <div className="dashboard-error" role="alert">{error}</div>}
+        {error && (
+          <div className="dashboard-error" role="alert">
+            <span>{error}</span>
+            <button type="button" className="dashboard-retry-btn" onClick={fetchSummary}>Retry</button>
+          </div>
+        )}
         {!loading && !error && content}
       </main>
     </div>

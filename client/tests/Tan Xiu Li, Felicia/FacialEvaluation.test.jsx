@@ -340,6 +340,10 @@ describe("computeConfusionMatrix", () => {
     localStorage.setItem(EVAL_STORAGE_KEY, JSON.stringify(SAMPLE.map((r, i) => ({ ...r, id: `T-${i}` }))));
     renderPage();
     fireEvent.click(screen.getByRole("tab", { name: "Confusion Matrix" }));
+    // Default matrix view is Live-only (actual model evidence); these sample
+    // records are Simulated, so switch the source filter to see them.
+    expect(screen.getByText(/Only Live records measure actual model performance/i)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Matrix source filter"), { target: { value: "Simulated" } });
     expect(screen.getByTestId("stat-samples").textContent).toBe("7");
     expect(screen.getByTestId("stat-accuracy").textContent).toBe("71.4%");
     expect(screen.getByTestId("stat-far").textContent).toBe("33.3%");
