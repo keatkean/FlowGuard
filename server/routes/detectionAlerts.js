@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { DetectionAlert, IncidentLog, MonitoringZone, Camera, sequelize } = require('../models');
+const { resolveIncidentType } = require('../utils/detectionAlertBridge');
 function severityFromDuration(seconds) {
   if (!seconds || seconds < 120) return 'Low';
   if (seconds < 300) return 'Medium';
@@ -11,6 +12,18 @@ const { Op } = require('sequelize');
 const { verifyToken, requireRole, verifyServiceOrRole } = require('../middlewares/auth');
 const SEVERITIES = ['Low', 'Medium', 'High', 'Critical'];
 const VALID_STATUSES = ['Active', 'Acknowledged', 'Investigating', 'Dispatched', 'Escalated', 'Cleared'];
+
+// This route is reachable by the AI engine's service key AND by an FM/Staff JWT — never
+// by the SecurePi edge device (that's the dedicated EDGE_INGEST_TOKEN route in
+// edgeDetectionAlerts.js). Whitelisting here stops either caller from setting
+// source: 'SecurePi Edge Node' and having an alert masquerade as edge-ingested.
+const ALLOWED_ALERT_SOURCES = ['Browser Webcam', 'Uploaded Video', 'Object Detection'];
+const DEFAULT_ALERT_SOURCE = 'Object Detection';
+
+function resolveAlertSource(rawSource, maxLength) {
+    const cleaned = cleanText(rawSource, maxLength);
+    return (cleaned && ALLOWED_ALERT_SOURCES.includes(cleaned)) ? cleaned : DEFAULT_ALERT_SOURCE;
+}
 
 // Maps a DetectionAlert workflow status onto the IncidentLog resolutionStatus values the
 // Incident Dashboard already understands (Active / Investigating / Escalated to Security / Cleared).
@@ -87,12 +100,19 @@ router.get('/:id', verifyToken, requireRole('FM', 'Staff'), async (req, res) => 
 
 // Resolves best-effort zone_id/camera_id from the free-text zone_name/camera_location the
 // AI engine (or a manual caller) sends — additive enrichment, never blocks alert creation.
+// Also surfaces the zone's Detection Setup detection_type (a separate `detectionType`
+// key, NOT spread into DetectionAlert.create — that model has no such column) so the
+// incident-type bridge below can use it without a second DB round trip.
 async function resolveLinks(zone_name, camera_location) {
     const links = {};
+    let detectionType = null;
     try {
         if (zone_name) {
             const zone = await MonitoringZone.findOne({ where: { zone_name } });
-            if (zone) links.zone_id = zone.id;
+            if (zone) {
+                links.zone_id = zone.id;
+                detectionType = zone.detection_type || null;
+            }
         }
         if (camera_location) {
             const camera = await Camera.findOne({
@@ -105,7 +125,7 @@ async function resolveLinks(zone_name, camera_location) {
     } catch {
         // Enrichment is best-effort only — never fail alert creation because of it.
     }
-    return links;
+    return { links, detectionType };
 }
 
 // AI engine posts here server-to-server via a shared service key; FM/Staff may also
@@ -138,8 +158,16 @@ router.post('/', verifyServiceOrRole('FM', 'Staff'), async (req, res) => {
         if (severity && !SEVERITIES.includes(severity)) {
             return res.status(400).json({ error: `severity must be one of: ${SEVERITIES.join(', ')}.` });
         }
-        const links = await resolveLinks(zone_name, camera_location);
+        const { links, detectionType } = await resolveLinks(zone_name, camera_location);
         const resolvedSeverity = severity || severityFromDuration(duration_seconds);
+        const cleanedAlertType = cleanText(alert_type, 100);
+        const cleanedObjectClass = cleanText(object_class, 100);
+        const resolvedSource = resolveAlertSource(source, 100);
+        const incidentType = resolveIncidentType({
+            alert_type: cleanedAlertType,
+            object_class: cleanedObjectClass,
+            detection_type: detectionType
+        });
 
         // Alert + linked incident are created atomically: if either fails, neither persists.
         const alert = await withTransaction(async (t) => {
@@ -147,12 +175,12 @@ router.post('/', verifyServiceOrRole('FM', 'Staff'), async (req, res) => {
                 zone_name: cleanText(zone_name, 255),
                 camera_location: cleanText(camera_location, 255),
                 status: status || 'Active',
-                object_class: cleanText(object_class, 100),
+                object_class: cleanedObjectClass,
                 duration_seconds: parsePositiveInt(duration_seconds),
                 person_name: cleanText(person_name, 255),
-                alert_type: cleanText(alert_type, 100),
+                alert_type: cleanedAlertType,
                 severity: resolvedSeverity,
-                source: cleanText(source, 100) || 'Object Detection',
+                source: resolvedSource,
                 confidence: parseConfidence(confidence),
                 snapshot_url: cleanText(snapshot_url || snapshot_path, 500),
                 device_id: cleanText(device_id, 100),
@@ -162,8 +190,8 @@ router.post('/', verifyServiceOrRole('FM', 'Staff'), async (req, res) => {
 
             const incident = await IncidentLog.create({
                 camera_location: cleanText(camera_location, 255),
-                status: 'UNATTENDED_OBJECT',
-                source: 'Object Detection',
+                status: incidentType,
+                source: resolvedSource,
                 severity: resolvedSeverity,
                 person_name: (person_name && person_name !== 'UNKNOWN') ? cleanText(person_name, 255) : null,
                 confidence_score: null,

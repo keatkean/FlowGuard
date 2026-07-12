@@ -7,6 +7,8 @@ import base64
 import threading
 import time
 from collections import defaultdict
+from typing import Optional
+import zone_rules
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -274,6 +276,19 @@ _PERSON_ALERT_COOLDOWN = int(os.getenv("PERSON_ALERT_COOLDOWN", "30"))
 _PROXIMITY_PX = 160      # centroid distance threshold (pixels at 640-wide frame)
 _NODE_URL = os.getenv("NODE_SERVER_URL", "http://localhost:5001")
 
+# A browser-submitted analyse-frame request may only claim to be one of these two
+# sources — never "SecurePi Edge Node", which is reserved for the authenticated
+# EDGE_INGEST_TOKEN route in server/routes/edgeDetectionAlerts.js. Keep in sync with
+# client/src/pages/ObjectDetection.jsx's ALERT_SOURCE_BY_MODE.
+_ALLOWED_BROWSER_SOURCES = {"Browser Webcam", "Uploaded Video"}
+
+
+def _normalize_browser_source(source):
+    """Whitelists a browser-supplied analyse-frame source; anything else (missing,
+    unrecognized, or an impersonation attempt) resolves to None so the Node alert
+    route falls back to its own default instead of trusting arbitrary client text."""
+    return source if source in _ALLOWED_BROWSER_SOURCES else None
+
 # Shared state written by detection thread, read by endpoints
 _frame_lock = threading.Lock()
 _latest_frame = None
@@ -374,6 +389,70 @@ def _refresh_zone_info():
     return _zone_threshold_sec, _zone_name_cache
 
 
+def _fetch_camera_zone_id(camera_id):
+    """(found, zone_id) — found=False means no such (non-deleted) camera row."""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT zone_id FROM cameras WHERE id = %s AND "deletedAt" IS NULL',
+            (camera_id,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        if row is None:
+            return False, None
+        return True, row[0]
+    finally:
+        conn.close()
+
+
+def _fetch_zone_row(zone_id):
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, zone_name, time_threshold, unattended_threshold_seconds, detection_enabled
+            FROM monitoring_zones
+            WHERE id = %s AND "deletedAt" IS NULL
+            """,
+            (zone_id,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        return row
+    finally:
+        conn.close()
+
+
+def resolve_zone_for_request(camera_id=None, zone_id=None):
+    """Resolves the exact Detection Setup rule for a selected camera/zone.
+
+    Thin DB-backed wrapper around zone_rules.resolve_zone_config (the actual branching
+    logic, unit tested in isolation — see ai-service/tests/test_zone_resolution.py).
+    When neither id is given, falls back to the legacy global-smallest-threshold cache
+    (_refresh_zone_info) so callers that never send an id (e.g. the background
+    webcam-loop thread) keep their old behaviour.
+    """
+    if camera_id is None and zone_id is None:
+        threshold_sec, zone_name = _refresh_zone_info()
+        return {
+            "applied_camera_id": None,
+            "applied_zone_id": None,
+            "applied_zone_name": zone_name,
+            "applied_threshold_seconds": threshold_sec,
+            "detection_enabled": True,
+            "zone_error": None,
+        }
+
+    try:
+        return zone_rules.resolve_zone_config(camera_id, zone_id, _fetch_camera_zone_id, _fetch_zone_row)
+    except Exception as e:
+        print(f"Zone resolution error: {e}")
+        return zone_rules.error_config(camera_id, zone_id, "lookup_failed")
+
+
 def _get_nearby_person(person_entries, ox, oy):
     """Returns (is_nearby, person_name) for the first person within _PROXIMITY_PX."""
     for box, pname in person_entries:
@@ -384,21 +463,24 @@ def _get_nearby_person(person_entries, ox, oy):
     return False, None
 
 
-def _fire_alert(class_name, zone_name, duration_sec, person_name=None, severity=None):
+def _fire_alert(class_name, zone_name, duration_sec, person_name=None, severity=None, source=None):
     if not _REQUESTS_OK:
         return
     try:
+        payload = {
+            "zone_name": zone_name,
+            "camera_location": os.getenv("AI_CAMERA_LOCATION", "Webcam Feed"),
+            "status": "Active",
+            "object_class": class_name,
+            "duration_seconds": duration_sec,
+            "person_name": person_name,
+            "severity": severity
+        }
+        if source:
+            payload["source"] = source
         http_requests.post(
             f"{_NODE_URL}/api/detection-alerts",
-            json={
-                "zone_name": zone_name,
-                "camera_location": os.getenv("AI_CAMERA_LOCATION", "Webcam Feed"),
-                "status": "Active",
-                "object_class": class_name,
-                "duration_seconds": duration_sec,
-                "person_name": person_name,
-                "severity": severity
-            },
+            json=payload,
             headers={"x-service-key": os.getenv("AI_SERVICE_KEY", "")},
             timeout=5
         )
@@ -407,7 +489,7 @@ def _fire_alert(class_name, zone_name, duration_sec, person_name=None, severity=
         print(f"Alert POST failed: {e}")
 
 
-def _maybe_fire_person_alert(person_count, zone_name):
+def _maybe_fire_person_alert(person_count, zone_name, source=None):
     """Create one warning/critical alert per cooldown window based on detected people."""
     if person_count <= 0:
         _person_alert_state["level"] = None
@@ -429,7 +511,7 @@ def _maybe_fire_person_alert(person_count, zone_name):
     severity = "Critical" if level == "Critical" else "Medium"
     threading.Thread(
         target=_fire_alert,
-        args=(label, zone_name, None, None, severity),
+        args=(label, zone_name, None, None, severity, source),
         daemon=True
     ).start()
 
@@ -459,7 +541,7 @@ def _recognize_person_crop(frame, x1, y1, x2, y2):
         return "UNKNOWN", 0.0
 
 
-def _annotate_detection_frame(frame, recognize_faces=True):
+def _annotate_detection_frame(frame, recognize_faces=True, zone_config=None, source=None):
     global _people_count, _tracked_objects
 
     if not YOLO_AVAILABLE:
@@ -473,7 +555,15 @@ def _annotate_detection_frame(frame, recognize_faces=True):
         classes=_YOLO_CLASS_IDS,
         verbose=False
     )[0]
-    threshold_sec, zone_name = _refresh_zone_info()
+    if zone_config is None:
+        # No camera/zone id supplied (e.g. the background webcam-loop thread) — keep the
+        # legacy global-smallest-threshold behaviour, always enabled.
+        threshold_sec, zone_name = _refresh_zone_info()
+        detection_enabled = True
+    else:
+        threshold_sec = zone_config["applied_threshold_seconds"]
+        zone_name = zone_config["applied_zone_name"] or _zone_name_cache
+        detection_enabled = zone_config["detection_enabled"]
 
     person_boxes = []
     object_detections = []
@@ -591,14 +681,15 @@ def _annotate_detection_frame(frame, recognize_faces=True):
             else:
                 if obj['unattended_since'] is None and obj['person_last_seen'] is not None:
                     obj['unattended_since'] = now
-                if (obj['unattended_since'] is not None
+                if (detection_enabled
+                        and obj['unattended_since'] is not None
                         and not obj['alerted']
                         and now - obj['unattended_since'] >= threshold_sec):
                     obj['alerted'] = True
                     duration = int(now - obj['unattended_since'])
                     threading.Thread(
                         target=_fire_alert,
-                        args=(class_name, zone_name, duration, obj.get('last_person_name')),
+                        args=(class_name, zone_name, duration, obj.get('last_person_name'), None, source),
                         daemon=True
                     ).start()
                     cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 0, 220), 3)
@@ -607,7 +698,10 @@ def _annotate_detection_frame(frame, recognize_faces=True):
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 220), 2)
 
     _tracked_objects = {k: v for k, v in _tracked_objects.items() if k in seen_keys}
-    _maybe_fire_person_alert(people_count, zone_name)
+    # Detection Setup's "detection enabled" toggle only gates ALERT CREATION — YOLO still
+    # annotates/counts so the live console stays informative while a rule is paused.
+    if detection_enabled:
+        _maybe_fire_person_alert(people_count, zone_name, source)
     cv2.putText(frame, f"People: {people_count}", (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
     _people_count = people_count
@@ -850,8 +944,21 @@ async def yolo_stream():
     )
 
 
+class AnalyzeFrameRequest(BaseModel):
+    image: str
+    # Selected Detection Setup camera/zone from the Object Detection page — optional and
+    # additive so older callers that only send `image` keep the previous global-fallback
+    # behaviour (see resolve_zone_for_request).
+    camera_id: Optional[int] = None
+    zone_id: Optional[int] = None
+    # Browser-reported alert source ("Browser Webcam" / "Uploaded Video") — whitelisted
+    # by _normalize_browser_source before it ever reaches the alert bridge, so a caller
+    # cannot claim the SecurePi edge source through this endpoint.
+    source: Optional[str] = None
+
+
 @app.post("/api/yolo/analyze-frame")
-async def yolo_analyze_frame(request: RecognitionRequest):
+async def yolo_analyze_frame(request: AnalyzeFrameRequest):
     """Analyze a browser-captured frame and return an annotated JPEG."""
     global _latest_frame, _detection_active, _camera_status
 
@@ -862,7 +969,11 @@ async def yolo_analyze_frame(request: RecognitionRequest):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid image data")
 
-    annotated, people_count, detections = _annotate_detection_frame(img, recognize_faces=True)
+    zone_config = resolve_zone_for_request(request.camera_id, request.zone_id)
+    resolved_source = _normalize_browser_source(request.source)
+    annotated, people_count, detections = _annotate_detection_frame(
+        img, recognize_faces=True, zone_config=zone_config, source=resolved_source
+    )
     _detection_active = YOLO_AVAILABLE
     _camera_status = "browser_camera"
 
@@ -875,7 +986,15 @@ async def yolo_analyze_frame(request: RecognitionRequest):
         "frame_width": int(img.shape[1]),
         "frame_height": int(img.shape[0]),
         "detection_active": _detection_active,
-        "camera_status": _camera_status
+        "camera_status": _camera_status,
+        # Additive debug fields — see resolve_zone_for_request for zone_error meanings
+        # (camera_not_found / camera_has_no_zone / zone_not_found / lookup_failed / None).
+        "applied_camera_id": zone_config["applied_camera_id"],
+        "applied_zone_id": zone_config["applied_zone_id"],
+        "applied_zone_name": zone_config["applied_zone_name"],
+        "applied_threshold_seconds": zone_config["applied_threshold_seconds"],
+        "zone_detection_enabled": zone_config["detection_enabled"],
+        "zone_error": zone_config["zone_error"]
     }
 
 

@@ -137,6 +137,16 @@ describe("POST /api/edge/detection-alerts", () => {
     expect(created.update).toHaveBeenCalledWith({ incident_log_id: 77 }, { transaction: mockTx });
   });
 
+  test("a person/crowd-count edge alert bridges to OVERCROWDING in the linked incident", async () => {
+    primeCreateMocks();
+    const res = await request(app)
+      .post("/api/edge/detection-alerts")
+      .set("Authorization", "Bearer test-edge-token")
+      .send({ ...securePiPayload, alert_type: undefined, object_class: "Warning: 2 People Detected" });
+    expect(res.status).toBe(201);
+    expect(mockIncidentLog.create.mock.calls[0][0].status).toBe("OVERCROWDING");
+  });
+
   test("incident creation failure rolls back the detection alert (500, shared transaction)", async () => {
     primeCreateMocks();
     mockIncidentLog.create.mockRejectedValue(new Error("db down"));
@@ -167,9 +177,20 @@ describe("POST /api/edge/detection-alerts", () => {
     expect(res.body[0]).toEqual(expect.objectContaining({
       camera_location: "Loading Bay Camera 01",
       severity: "High",
-      source: "Object Detection",
+      source: "SecurePi Edge Node",
       resolutionStatus: "Active",
     }));
+  });
+
+  test("ignores a client-supplied source and always stamps SecurePi Edge Node on both records", async () => {
+    primeCreateMocks();
+    const res = await request(app)
+      .post("/api/edge/detection-alerts")
+      .set("Authorization", "Bearer test-edge-token")
+      .send({ ...securePiPayload, source: "Browser Webcam" });
+    expect(res.status).toBe(201);
+    expect(mockDetectionAlert.create.mock.calls[0][0].source).toBe("SecurePi Edge Node");
+    expect(mockIncidentLog.create.mock.calls[0][0].source).toBe("SecurePi Edge Node");
   });
 
   test("rejects invalid severity (400)", async () => {

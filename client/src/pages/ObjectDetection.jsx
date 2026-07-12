@@ -33,6 +33,28 @@ const alertTimestamp = (alert) => {
   return date.toLocaleString('en-SG', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true });
 };
 
+// Sends the selected camera's stable id (and its zone, if assigned) so the AI service
+// loads THAT camera's Detection Setup rule instead of the legacy global-smallest-
+// threshold fallback. Exported (pure, no component state) so it's unit-testable without
+// needing a decoded <video> frame — see tests/.../ObjectDetectionSourceModes.test.jsx.
+export const buildAnalyzeFramePayload = (image, camera, source) => {
+  const payload = camera
+    ? { image, camera_id: camera.id, ...(camera.zone_id ? { zone_id: camera.zone_id } : {}) }
+    : { image };
+  return source ? { ...payload, source } : payload;
+};
+
+// Canonical alert-source label per sourceMode — the AI service whitelists these before
+// forwarding them into POST /api/detection-alerts, so keep values in sync with
+// ai-service/main.py's _ALLOWED_BROWSER_SOURCES.
+export const ALERT_SOURCE_BY_MODE = {
+  camera: 'Browser Webcam',
+  file: 'Uploaded Video',
+  hardware: 'SecurePi Edge Node',
+};
+
+export const resolveAlertSource = (sourceMode) => ALERT_SOURCE_BY_MODE[sourceMode] || 'Browser Webcam';
+
 const ObjectDetection = () => {
   const [zones, setZones] = useState([]);
   const [cameras, setCameras] = useState([]);
@@ -110,6 +132,13 @@ const ObjectDetection = () => {
     () => cameras.find((cam) => String(cam.id) === String(selectedCameraId)) || null,
     [cameras, selectedCameraId]
   );
+  // Read by analyzeCurrentFrame (inside a useEffect keyed on [sourceMode, uploadedVideoUrl])
+  // so the analyse request always uses the currently-selected camera, even when the
+  // camera selection changes without that effect re-running.
+  const monitoredCameraRef = useRef(null);
+  useEffect(() => {
+    monitoredCameraRef.current = monitoredCamera;
+  }, [monitoredCamera]);
   const hardwareStreamUrl = useMemo(
     () => getHardwareStreamUrl(monitoredCamera, SECUREPI_STREAM_URL),
     [monitoredCamera]
@@ -162,9 +191,10 @@ const ObjectDetection = () => {
       canvas.height = Math.round(video.videoHeight * scale);
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       const image = canvas.toDataURL('image/jpeg', 0.35);
+      const payload = buildAnalyzeFramePayload(image, monitoredCameraRef.current, resolveAlertSource(sourceMode));
 
       try {
-        const res = await axios.post(ANALYZE_FRAME_URL, { image }, { timeout: 10000 });
+        const res = await axios.post(ANALYZE_FRAME_URL, payload, { timeout: 10000 });
         setDetections(res.data.detections ?? []);
         setPeopleCount(res.data.count ?? 0);
         setDetectionActive(res.data.detection_active ?? false);

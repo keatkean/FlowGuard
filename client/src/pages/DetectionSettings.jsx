@@ -28,12 +28,10 @@ const emptyForm = {
 
 const getDetectionTypeLabel = (key) => DETECTION_TYPES[key]?.label || DETECTION_TYPES.unattended_object.label;
 
-const inferDetectionType = (zone) => {
-  const classes = (zone.monitored_classes || []).map((item) => String(item).toLowerCase());
-  if (zone.density_threshold) return 'crowd_density';
-  if (classes.includes('person') && zone.severity === 'Critical') return 'unauthorized_access';
-  return 'unattended_object';
-};
+// The backend always serializes an explicit detection_type (falling back to
+// 'unattended_object' for rows saved before the field existed) — read it directly
+// instead of re-guessing from severity/density/monitored_classes on every reload.
+const zoneDetectionType = (zone) => zone.detection_type || 'unattended_object';
 
 const applyDetectionDefaults = (form, detectionType) => ({
   ...form,
@@ -85,7 +83,7 @@ export default function DetectionSettings() {
   ), [cameras]);
 
   const toEditForm = (zone) => {
-    const detectionType = inferDetectionType(zone);
+    const detectionType = zoneDetectionType(zone);
     const mappedCamera = cameras.find((cam) => cam.zone_id === zone.id);
     return {
       zone_name: zone.zone_name,
@@ -103,21 +101,6 @@ export default function DetectionSettings() {
     };
   };
 
-  const assignCameraToZone = async (zoneId, cameraId) => {
-    if (!cameraId) return;
-    await axios.put(`${CAMERAS_URL}/${cameraId}`, { zone_id: zoneId }, { headers });
-  };
-
-  const handleCameraMapping = async (zoneId, nextCameraId) => {
-    const currentZoneCameras = cameras.filter((cam) => cam.zone_id === zoneId);
-    await Promise.all(currentZoneCameras
-      .filter((cam) => String(cam.id) !== String(nextCameraId))
-      .map((cam) => axios.put(`${CAMERAS_URL}/${cam.id}`, { zone_id: null }, { headers })));
-    if (nextCameraId) {
-      await assignCameraToZone(zoneId, nextCameraId);
-    }
-  };
-
   const handleCreateZone = async (event) => {
     event.preventDefault();
     setFormError('');
@@ -132,8 +115,10 @@ export default function DetectionSettings() {
     }
     setSubmitting(true);
     try {
-      const res = await axios.post(ZONES_URL, buildZonePayload(form), { headers });
-      if (form.camera_id) await assignCameraToZone(res.data.id, form.camera_id);
+      // camera_id travels inside the same zone-create request now — the backend
+      // creates the zone and assigns the camera in one transaction, so a rejected
+      // camera (already active elsewhere) never leaves an orphaned zone behind.
+      await axios.post(ZONES_URL, buildZonePayload(form), { headers });
       setForm(emptyForm);
       fetchZones();
       fetchCameras();
@@ -167,8 +152,10 @@ export default function DetectionSettings() {
     }
     setFormError('');
     try {
+      // camera_id travels inside the same zone-update request — the backend releases
+      // the old camera and assigns the new one atomically, so a rejected replacement
+      // (camera already active on another rule) leaves the previous assignment intact.
       const res = await axios.put(`${ZONES_URL}/${id}`, buildZonePayload(editForm), { headers });
-      await handleCameraMapping(id, editForm.camera_id);
       setZones((prev) => prev.map((zone) => (zone.id === id ? res.data : zone)));
       setEditId(null);
       fetchCameras();
@@ -181,7 +168,9 @@ export default function DetectionSettings() {
     const cameraId = cameraPickerByZone[zoneId];
     if (!cameraId) return;
     try {
-      await handleCameraMapping(zoneId, cameraId);
+      // Partial update: only camera_id travels, so the zone's other fields are untouched.
+      const res = await axios.put(`${ZONES_URL}/${zoneId}`, { camera_id: cameraId }, { headers });
+      setZones((prev) => prev.map((zone) => (zone.id === zoneId ? res.data : zone)));
       setCameraPickerByZone((prev) => ({ ...prev, [zoneId]: '' }));
       fetchCameras();
     } catch (err) {
@@ -274,7 +263,7 @@ export default function DetectionSettings() {
               {zones.map((zone) => {
                 const zoneCameras = camerasByZone[zone.id] || [];
                 const availableCameras = cameras.filter((cam) => !cam.zone_id || cam.zone_id === zone.id);
-                const detectionType = inferDetectionType(zone);
+                const detectionType = zoneDetectionType(zone);
                 return (
                   <div key={zone.id}>
                     {editId === zone.id ? (

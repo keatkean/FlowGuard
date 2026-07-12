@@ -1,5 +1,7 @@
-// Authorization tests for /api/incident — FM/Staff may read and manage incident
-// logs, Tenants are rejected, and unauthenticated requests never see incident data.
+// Authorization tests for /api/incident — the Incident Dashboard is FM-only in the
+// frontend (ProtectedRoute allowedRoles={ACCESS.FM_ONLY}, no Staff nav entry), so every
+// administrative route here (read + write) is FM-only too. Tenants and Staff are
+// rejected, and unauthenticated requests never see incident data.
 const request = require("supertest");
 const express = require("express");
 const jwt = require("jsonwebtoken");
@@ -49,10 +51,10 @@ describe("GET /api/incident authorization", () => {
     expect(res.status).toBe(200);
   });
 
-  test("Staff returns 200", async () => {
-    mockIncidentLog.findAll.mockResolvedValue([]);
+  test("Staff returns 403 — Incident Dashboard is FM-only, matching the frontend route guard", async () => {
     const res = await request(app).get("/api/incident").set("Authorization", `Bearer ${staffToken}`);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+    expect(mockIncidentLog.findAll).not.toHaveBeenCalled();
   });
 });
 
@@ -69,10 +71,10 @@ describe("GET /api/incident/:id authorization", () => {
     expect(res.status).toBe(403);
   });
 
-  test("Staff can fetch a single incident (200)", async () => {
-    mockIncidentLog.findByPk.mockResolvedValue({ id: 1, camera_location: "Dock" });
+  test("Staff cannot fetch a single incident (403)", async () => {
     const res = await request(app).get("/api/incident/1").set("Authorization", `Bearer ${staffToken}`);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+    expect(mockIncidentLog.findByPk).not.toHaveBeenCalled();
   });
 
   test("missing incident returns 404", async () => {
@@ -103,6 +105,15 @@ describe("incident write-route authorization", () => {
     expect(res.status).toBe(201);
   });
 
+  test("Staff cannot create an incident (403) — administration is FM-only", async () => {
+    const res = await request(app)
+      .post("/api/incident")
+      .set("Authorization", `Bearer ${staffToken}`)
+      .send({ camera_location: "Dock", status: "Active", source: "Manual", severity: "Low" });
+    expect(res.status).toBe(403);
+    expect(mockIncidentLog.create).not.toHaveBeenCalled();
+  });
+
   test("Tenant cannot update an incident (403)", async () => {
     const res = await request(app)
       .patch("/api/incident/1")
@@ -111,18 +122,13 @@ describe("incident write-route authorization", () => {
     expect(res.status).toBe(403);
   });
 
-  test("Staff can update an incident (200)", async () => {
-    mockIncidentLog.findByPk.mockResolvedValue({
-      id: 1,
-      resolutionStatus: "Active",
-      notes: "",
-      update: jest.fn().mockResolvedValue(),
-    });
+  test("Staff cannot update an incident (403)", async () => {
     const res = await request(app)
       .patch("/api/incident/1")
       .set("Authorization", `Bearer ${staffToken}`)
       .send({ resolutionStatus: "Cleared" });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+    expect(mockIncidentLog.findByPk).not.toHaveBeenCalled();
   });
 
   test("Staff cannot delete an incident (403) — deletion is FM-only", async () => {

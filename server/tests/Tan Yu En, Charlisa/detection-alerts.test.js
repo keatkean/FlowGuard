@@ -221,6 +221,70 @@ describe("POST /api/detection-alerts (AI engine service key)", () => {
     expect(created.update).toHaveBeenCalledWith({ incident_log_id: 55 }, { transaction: mockTx });
   });
 
+  test("a person/crowd-count alert bridges to OVERCROWDING, not UNATTENDED_OBJECT, in the linked incident", async () => {
+    primeCreateMocks();
+    const res = await request(app)
+      .post("/api/detection-alerts")
+      .set("x-service-key", "test-service-key")
+      .send({ ...alertPayload, object_class: "Critical: Person Detected" });
+    expect(res.status).toBe(201);
+    expect(mockIncidentLog.create.mock.calls[0][0].status).toBe("OVERCROWDING");
+  });
+
+  test("an unattended-object alert still bridges to UNATTENDED_OBJECT in the linked incident", async () => {
+    primeCreateMocks();
+    const res = await request(app)
+      .post("/api/detection-alerts")
+      .set("x-service-key", "test-service-key")
+      .send({ ...alertPayload, object_class: "backpack" });
+    expect(res.status).toBe(201);
+    expect(mockIncidentLog.create.mock.calls[0][0].status).toBe("UNATTENDED_OBJECT");
+  });
+
+  test("a whitelisted browser source (Browser Webcam) is stored identically on both records", async () => {
+    primeCreateMocks();
+    const res = await request(app)
+      .post("/api/detection-alerts")
+      .set("x-service-key", "test-service-key")
+      .send({ ...alertPayload, source: "Browser Webcam" });
+    expect(res.status).toBe(201);
+    expect(mockDetectionAlert.create.mock.calls[0][0].source).toBe("Browser Webcam");
+    expect(mockIncidentLog.create.mock.calls[0][0].source).toBe("Browser Webcam");
+  });
+
+  test("a whitelisted browser source (Uploaded Video) is stored identically on both records", async () => {
+    primeCreateMocks();
+    const res = await request(app)
+      .post("/api/detection-alerts")
+      .set("x-service-key", "test-service-key")
+      .send({ ...alertPayload, source: "Uploaded Video" });
+    expect(res.status).toBe(201);
+    expect(mockDetectionAlert.create.mock.calls[0][0].source).toBe("Uploaded Video");
+    expect(mockIncidentLog.create.mock.calls[0][0].source).toBe("Uploaded Video");
+  });
+
+  test("a request cannot impersonate the SecurePi edge source through this route", async () => {
+    primeCreateMocks();
+    const res = await request(app)
+      .post("/api/detection-alerts")
+      .set("x-service-key", "test-service-key")
+      .send({ ...alertPayload, source: "SecurePi Edge Node" });
+    expect(res.status).toBe(201);
+    expect(mockDetectionAlert.create.mock.calls[0][0].source).toBe("Object Detection");
+    expect(mockIncidentLog.create.mock.calls[0][0].source).toBe("Object Detection");
+  });
+
+  test("an unrecognized source falls back to the default on both records", async () => {
+    primeCreateMocks();
+    const res = await request(app)
+      .post("/api/detection-alerts")
+      .set("x-service-key", "test-service-key")
+      .send({ ...alertPayload, source: "Something Made Up" });
+    expect(res.status).toBe(201);
+    expect(mockDetectionAlert.create.mock.calls[0][0].source).toBe("Object Detection");
+    expect(mockIncidentLog.create.mock.calls[0][0].source).toBe("Object Detection");
+  });
+
   test("incident creation failure rolls back: 500 and both creates share the transaction", async () => {
     primeCreateMocks();
     mockIncidentLog.create.mockRejectedValue(new Error("db down"));
