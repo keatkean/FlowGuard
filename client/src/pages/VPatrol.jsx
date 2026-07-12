@@ -54,6 +54,11 @@ import {
 // single hiccup).
 const PI_FAIL_FALLBACK_MS = 2500;
 
+// A single multi-face tracking sample is a transient warning only. The denied
+// SecurityLog is written ONLY when more than one face persists this long AND
+// an authorisation attempt was aborted because of it (~6 tracking samples).
+const MULTI_FACE_LOG_PERSIST_MS = 1500;
+
 const VPatrol = () => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);       // full-recognition capture canvas
@@ -93,6 +98,11 @@ const VPatrol = () => {
   const finalizingRef = useRef(false);
   const lastLogRef = useRef({ name: null, timestamp: 0 });
 
+  // Denied-outcome audit guards: one /denied-event submission per reason per
+  // scanner cycle, and one per persistent multi-face episode.
+  const deniedReportedRef = useRef(new Set());
+  const multiFaceRef = useRef({ since: 0, abortedAuth: false, logged: false });
+
   // Live tracking state: smoothed frame-space box, last-seen time, and the
   // recent valid head-turn ratios that seed the liveness baseline.
   const smoothedBoxRef = useRef(null);
@@ -118,6 +128,10 @@ const VPatrol = () => {
   // V-Patrol is a monitoring post: it records access AUDIT events only and must
   // never toggle clock-in/out (that belongs to the Gate Scanner's scan endpoint).
   const ACCESS_EVENT_URL = `${API_BASE_URL}/api/facial-recognition/access-event`;
+  // Server-owned audit for FINAL denied outcomes (identity mismatch, liveness
+  // timeout, persistent multiple faces). The server decides type/severity/
+  // review status; the client only names the allowed reason.
+  const DENIED_EVENT_URL = `${API_BASE_URL}/api/facial-recognition/denied-event`;
   const CAMERA_LOCATION = "Biometric Gantry";
 
   const changeScanState = (nextState) => {
@@ -182,6 +196,7 @@ const VPatrol = () => {
     recentRatiosRef.current = [];
     setFaceBox(null);
     setMultipleFacesNotice(false);
+    multiFaceRef.current = { since: 0, abortedAuth: false, logged: false };
   };
 
   // Primary source: Raspberry Pi Gate Camera. Probe the snapshot endpoint on
@@ -408,11 +423,36 @@ const VPatrol = () => {
       }
 
       if (faceCount > 1) {
+        const episode = multiFaceRef.current;
+        if (!episode.since) {
+          multiFaceRef.current = { since: now, abortedAuth: false, logged: false };
+        }
+        // Was an authorisation attempt in progress when this crowd appeared?
+        // Only an aborted attempt is a security event, not idle passers-by.
+        if (scanStatusRef.current === "TARGET_LOCKING" ||
+            scanStatusRef.current === "LIVENESS_CHECK" ||
+            lockPendingRef.current ||
+            candidateUserRef.current) {
+          multiFaceRef.current.abortedAuth = true;
+        }
         // Never continue authorisation with more than one person in frame.
         abortAuthorizationForMultipleFaces();
+        // Persisted long enough + aborted an attempt -> ONE denied audit event
+        // per episode (never one per 250 ms tracking sample).
+        if (multiFaceRef.current.abortedAuth &&
+            !multiFaceRef.current.logged &&
+            now - multiFaceRef.current.since >= MULTI_FACE_LOG_PERSIST_MS) {
+          multiFaceRef.current.logged = true;
+          recordDeniedSecurityEvent("MULTIPLE_FACES", null, null);
+        }
         return;
       }
       setMultipleFacesNotice(false);
+      if (multiFaceRef.current.since) {
+        // Crowd cleared - close the episode so a later one can log again.
+        multiFaceRef.current = { since: 0, abortedAuth: false, logged: false };
+        deniedReportedRef.current.delete("MULTIPLE_FACES");
+      }
 
       const status = scanStatusRef.current;
 
@@ -599,9 +639,45 @@ const VPatrol = () => {
     }
   };
 
+  // ------------------------------------------------------------------
+  // DENIED-OUTCOME AUDIT — posts the FINAL denied outcome (identity mismatch,
+  // liveness timeout, persistent multi-face abort) to the server-owned
+  // /denied-event endpoint, then prepends the REAL database record into the
+  // timeline. Strictly non-fatal: the red fail-closed UI never waits on it,
+  // and it can never grant access. Unknown/suspended recognition outcomes are
+  // NOT sent here — /recognize already writes those logs itself.
+  // ------------------------------------------------------------------
+  const recordDeniedSecurityEvent = async (reason, candidate = null, confidence = null) => {
+    if (deniedReportedRef.current.has(reason)) return; // once per scanner cycle
+    deniedReportedRef.current.add(reason);
+    const scanSession = scanSessionRef.current;
+    try {
+      const res = await axios.post(DENIED_EVENT_URL, {
+        reason,
+        candidateUserId: candidate?.id ?? null,
+        cameraLocation: CAMERA_LOCATION,
+        confidence: typeof confidence === 'number' ? confidence : null
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      // Stale response: camera source switched (or unmounted) mid-request.
+      if (scanSession !== scanSessionRef.current) return;
+      const log = res.data?.logged ? res.data.log : null; // deduplicated -> nothing to add
+      if (log?.id) {
+        // Prepend the server-created record exactly once per database ID.
+        setIncidentLogs(prev => prev.some(existing => existing.id === log.id)
+          ? prev
+          : [log, ...prev.slice(0, 14)]);
+      }
+    } catch (err) {
+      // Audit sync is best-effort; the denied UI outcome already stands.
+      console.log("Denied-event sync failed", err);
+    }
+  };
+
   // Liveness timeout: fail closed — no access event is ever recorded from an
   // unconfirmed challenge.
   const failLivenessTimeout = () => {
+    const candidate = candidateUserRef.current;
+    recordDeniedSecurityEvent("LIVENESS_TIMEOUT", candidate, candidate?.confidence ?? null);
     candidateUserRef.current = null;
     challengeRef.current = null;
     setScanProgress(0);
@@ -655,6 +731,10 @@ const VPatrol = () => {
   };
 
   const failFinalConfirmation = () => {
+    // Retain the original candidate's id/confidence for the audit BEFORE the
+    // fail-closed reset clears them.
+    const candidate = candidateUserRef.current;
+    recordDeniedSecurityEvent("FINAL_IDENTITY_MISMATCH", candidate, candidate?.confidence ?? null);
     candidateUserRef.current = null;
     challengeRef.current = null;
     setScanProgress(0);
@@ -679,6 +759,7 @@ const VPatrol = () => {
     setMultipleFacesNotice(false);
     candidateUserRef.current = null;
     challengeRef.current = null;
+    deniedReportedRef.current.clear(); // new scanner cycle -> denied audit re-armed
     changeScanState("SYSTEM_ACTIVE");
   };
 

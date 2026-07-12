@@ -4,7 +4,7 @@ const axios = require('axios');
 const { User, EvaluationParticipant } = require('../models');
 const { syncEligibleEvaluationParticipants, listEvaluationParticipants } = require('../services/evaluationParticipants');
 const { verifyToken, requireRole } = require('../middlewares/auth');
-const { shouldWriteLog, createSecurityLog } = require('../services/securityAudit');
+const { shouldWriteLog, createSecurityLog, createSecurityLogRecord } = require('../services/securityAudit');
 
 // FACE_AI_URL is the BASE url of the InsightFace service; paths are appended.
 const FACE_AI_URL = () => process.env.FACE_AI_URL || 'http://127.0.0.1:8501';
@@ -187,6 +187,118 @@ router.post('/access-event', allowFMOrEdgeService, async (req, res) => {
   } catch (err) {
     console.error('Access-event error:', err);
     return res.status(500).json({ error: 'Could not record access event.' });
+  }
+});
+
+// POST /api/facial-recognition/denied-event
+// V-Patrol's final DENIED outcomes (identity mismatch, liveness timeout,
+// persistent multiple faces). The client may only name WHICH allowed reason
+// occurred — the server owns type/description/severity/icon/review status and
+// resolves the candidate's name/role from PostgreSQL. Never creates
+// Attendance, never modifies a User, never stores an image or embedding.
+const DENIED_EVENT_ALLOWED_FIELDS = ['reason', 'candidateUserId', 'cameraLocation', 'confidence'];
+const DENIED_EVENT_RULES = {
+  FINAL_IDENTITY_MISMATCH: {
+    type: 'Identity Confirmation Failure',
+    severity: 'critical',
+    icon: 'DENIED',
+    dedupKey: (identity, location) => `denied:final-confirmation:${identity}:${location}`,
+    describe: (location) => `Initial identity could not be confirmed during the final same-person check at ${location}.`
+  },
+  LIVENESS_TIMEOUT: {
+    type: 'Liveness Verification Failed',
+    severity: 'critical',
+    icon: 'DENIED',
+    dedupKey: (identity, location) => `denied:liveness:${identity}:${location}`,
+    describe: (location) => `Motion-liveness head-turn verification timed out at ${location}.`
+  },
+  MULTIPLE_FACES: {
+    type: 'Multiple Faces Detected',
+    severity: 'critical',
+    icon: 'ALERT',
+    dedupKey: (_identity, location) => `denied:multiple-faces:${location}`,
+    describe: (location) => `Multiple faces were detected during an access-verification attempt at ${location}.`
+  }
+};
+
+router.post('/denied-event', allowFMOrEdgeService, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const unknownFields = Object.keys(body).filter((k) => !DENIED_EVENT_ALLOWED_FIELDS.includes(k));
+    if (unknownFields.length) {
+      return res.status(400).json({ error: `Unexpected field(s): ${unknownFields.join(', ')}.` });
+    }
+
+    const rule = DENIED_EVENT_RULES[body.reason];
+    if (typeof body.reason !== 'string' || !rule) {
+      return res.status(400).json({ error: 'reason must be one of: FINAL_IDENTITY_MISMATCH, LIVENESS_TIMEOUT, MULTIPLE_FACES.' });
+    }
+
+    if (body.candidateUserId != null && !Number.isInteger(Number(body.candidateUserId))) {
+      return res.status(400).json({ error: 'candidateUserId must be a numeric user id or null.' });
+    }
+    const candidateUserId = body.candidateUserId == null ? null : Number(body.candidateUserId);
+
+    if (body.confidence != null &&
+        (typeof body.confidence !== 'number' || !Number.isFinite(body.confidence) || body.confidence < 0 || body.confidence > 1)) {
+      return res.status(400).json({ error: 'confidence must be a finite number between 0 and 1, or null.' });
+    }
+    const confidence = body.confidence == null ? null : body.confidence;
+
+    const location = typeof body.cameraLocation === 'string' && body.cameraLocation.trim()
+      ? body.cameraLocation.trim().slice(0, 100)
+      : 'Biometric Gantry';
+
+    // Authoritative safe candidate fields from PostgreSQL — the client's claim
+    // about who was in frame is never trusted for name/role.
+    let candidate = null;
+    if (candidateUserId != null) {
+      candidate = await User.findByPk(candidateUserId, { attributes: ['id', 'name', 'role'] });
+    }
+
+    // One log per (reason, identity, location) per cooldown window — final
+    // denied outcomes for the same person/gate must not flood the table.
+    const identityKey = candidate ? candidate.id : 'unknown';
+    if (!shouldWriteLog(rule.dedupKey(identityKey, location))) {
+      return res.status(200).json({ logged: false, deduplicated: true });
+    }
+
+    const record = await createSecurityLogRecord({
+      type: rule.type,
+      desc: rule.describe(location),
+      severity: rule.severity,
+      icon: rule.icon,
+      personnelName: candidate ? candidate.name : null,
+      matchedUserId: candidate ? candidate.id : null,
+      confidence,
+      cameraLocation: location
+    });
+    if (!record) {
+      return res.status(500).json({ error: 'Could not record denied event.' });
+    }
+
+    // Safe audit fields only — never faceVector/password/tokenVersion/biometrics.
+    return res.status(201).json({
+      logged: true,
+      log: {
+        id: record.id,
+        time: record.time,
+        type: record.type,
+        desc: record.desc,
+        severity: record.severity,
+        icon: record.icon,
+        personnelName: record.personnelName,
+        role: candidate ? candidate.role : null,
+        matchedUserId: record.matchedUserId,
+        confidence: record.confidence,
+        cameraLocation: record.cameraLocation,
+        reviewStatus: record.reviewStatus,
+        createdAt: record.createdAt
+      }
+    });
+  } catch (err) {
+    console.error('Denied-event error:', err);
+    return res.status(500).json({ error: 'Could not record denied event.' });
   }
 });
 

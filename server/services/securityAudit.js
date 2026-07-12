@@ -25,9 +25,11 @@ const shouldWriteLog = (key, now = Date.now()) => {
 const resetLogCooldowns = () => recentLogKeys.clear();
 
 // Audit information only — never the snapshot or protected biometric template.
-const createSecurityLog = async ({ type, desc, severity, icon, personnelName, matchedUserId, confidence, cameraLocation }) => {
+// Returns the created row (for callers that must echo the real database record)
+// or null on failure.
+const createSecurityLogRecord = async ({ type, desc, severity, icon, personnelName, matchedUserId, confidence, cameraLocation }) => {
   try {
-    await SecurityLog.create({
+    return await SecurityLog.create({
       id: randomUUID(),
       time: new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }),
       type,
@@ -40,12 +42,15 @@ const createSecurityLog = async ({ type, desc, severity, icon, personnelName, ma
       cameraLocation: cameraLocation || 'Main Gate',
       reviewStatus: severity === 'safe' ? 'Resolved' : 'Pending Review'
     });
-    return true;
   } catch (err) {
     // Logging must never break the recognition/attendance response.
     console.error('Security log write failed:', err.message);
-    return false;
+    return null;
   }
 };
 
-module.exports = { shouldWriteLog, createSecurityLog, resetLogCooldowns, LOG_COOLDOWN_MS };
+// Boolean wrapper kept for existing callers (/recognize, /access-event,
+// attendance) — their `logged` contract stays true/false.
+const createSecurityLog = async (fields) => Boolean(await createSecurityLogRecord(fields));
+
+module.exports = { shouldWriteLog, createSecurityLog, createSecurityLogRecord, resetLogCooldowns, LOG_COOLDOWN_MS };
