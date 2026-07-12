@@ -1,58 +1,17 @@
-# FlowGuard — Test Results Summary (Felicia)
+# Felicia Test Results Summary
 
-Latest verified run on branch `feature/smart-logistics-whatsapp` (2026-07-10).
-These are the ONLY current totals — earlier snapshots (79/79, 70/70, 170/170, 150/150) are superseded.
+This file records the current verification run only. Stale historical totals have been removed.
 
-## Backend — Jest
-```bash
-cd server
-npm test
-```
-**Result:** ✅ **19 test suites passed, 214 tests passed.**
+## Latest Run
 
-Covers: DB-backed `verifyToken` (deleted → 401, suspended → 403, tokenVersion revocation, DB role
-authoritative), JWT/RBAC middleware, manual user creation role rules, face enrol permissions
-(self / FM-any / Tenant-own-Staff / Staff-blocked, success / missing images / AI-offline 503 /
-refresh), transactional PDPA off-boarding (vector wipe + attendance delete + log anonymisation +
-booking unlink + row genuinely gone + tenant-with-staff 409), suspension permissions + session
-revocation, change-password, forgot/reset password (generic response, SHA-256 token hash, 15-min
-expiry, rate limit 429), security logs + FM review + own-staff ownership, attendance role scoping
-and gate-scan toggling, recognition orchestration (DB-authoritative identity, dedup logs, no-face
-→ no log), access-event audit-only route, booking CRUD + validation + slot conflict + edit + pass,
-WhatsApp mock vs real, gate scan entry/exit + next-in-line + FM-only, CORS, and 404/500 fallbacks.
+| Area | Command | Result |
+|---|---|---|
+| Client tests | `cd client && npm test -- --run` | Passed: 41 test files, 376 tests. |
+| Production build | `cd client && npm run build` | Passed. Vite emitted the existing large chunk warning for the bundled app assets. |
+| Server tests | `cd server && npx jest --runInBand --forceExit` | Passed: 23 suites, 270 tests. Jest force-exit notice shown after completion. |
+| AI/Pi focused tests | `cd ai-service && python -m pytest test/test_track_endpoint.py ../raspberry-pi/test_pi_camera_stream.py -q` | Not run: local Python environment reported `No module named pytest`. |
 
-## Frontend — Vitest
-```bash
-cd client
-npm test -- --run
-```
-**Result:** ✅ **25 test files passed, 206 tests passed.**
+## Notes
 
-Covers: ProtectedRoute + RBAC, FaceEnrollment (Pi-primary probe, webcam fallback, manual source
-switch, upload validation, submit, error), Facial Evaluation Lab (FM-only route, simulation banner,
-all six scenarios, no real API calls from simulations, evaluation-record CRUD + localStorage
-persistence, confusion-matrix counts/accuracy/macro-P/R/F1/FAR/FRR, zero-sample safety, CSV export,
-no raw image/vector/template rendered or stored), face-box coordinate contract (clamping +
-contain/cover projection), Pi camera helpers, GateScanner camera source, scan control, recognition
-subject mapping, security timeline, Settings (role gating + change-password card), Users/Face ID
-badges + API-base static checks, Attendance, Logistics (filters, create, edit, gate-scan),
-DriverPass (+ fallback), PasswordInput, and error pages / ErrorBoundary.
-
-## Build — Vite
-```bash
-cd client
-npm run build
-```
-**Result:** ✅ **Build succeeded** (pre-existing >500 kB chunk-size warning only).
-
-## Syntax / compile checks
-```bash
-node --check server/index.js        # ✅ passes
-python -m py_compile ai-service/main.py   # ✅ passes
-```
-
-## Note on console output
-Some tests log expected console warnings/errors (e.g. simulated WhatsApp "disabled" messages,
-deliberate error-path logs, or React act warnings). These are **non-blocking** — every suite still
-reports **passed**. The warnings are diagnostic output from code paths the tests intentionally
-exercise, not test failures.
+- Client jsdom printed existing warnings for unimplemented canvas/navigation APIs during the successful run.
+- No stale totals such as 79/79, 70/70, 214/214 or 206/206 are retained here.

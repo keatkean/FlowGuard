@@ -1,16 +1,15 @@
-# FlowGuard — Entity Relationship Diagram (merged system)
+# FlowGuard - Entity Relationship Diagram (merged system)
 
 ```mermaid
 erDiagram
   USER ||--o{ ATTENDANCE : "has (userId)"
   USER ||--o{ USER : "manages (managerId)"
-  USER ||--o{ BOOKING : "owns unit (tenantId, soft)"
-  USER ||--o{ SECURITYLOG : "named in (personnelName, soft)"
-  USER ||--o{ INVITE : "issues (FM, soft)"
+  USER o|--o| EVALUATIONPARTICIPANT : "has stable evaluation label"
+  USER ||--o{ BOOKING : "owns unit (tenantId, soft reference)"
+  USER ||--o{ SECURITYLOG : "matched/named in (soft reference)"
   MONITORINGZONE ||--o{ CAMERA : "has (zone_id)"
   MONITORINGZONE ||--o{ DETECTIONALERT : "in zone (zone_id)"
   CAMERA ||--o{ DETECTIONALERT : "from camera (camera_id)"
-  DETECTIONALERT ||--o{ INCIDENTLOG : "seeds (soft)"
   CHATTRANSCRIPT ||--o| SUPPORTTICKET : "has one (transcriptId)"
 
   USER {
@@ -19,19 +18,35 @@ erDiagram
     string email UK
     string password
     string role "FM Tenant Staff"
-    int managerId FK "self ref"
     string companyCode UK
+    datetime codeCreatedAt
     int codeMaxUsage
     int codeCurrentUsage
+    int managerId FK "self ref"
     boolean isEnrolled
     float faceVector "FLOAT array"
     boolean isActive
+    int tokenVersion
+    string passwordResetTokenHash
+    datetime passwordResetExpiresAt
+    datetime createdAt
+    datetime updatedAt
+  }
+  EVALUATIONPARTICIPANT {
+    int id PK
+    int userId FK "nullable, unique, ON DELETE SET NULL"
+    string evaluationLabel UK
+    boolean active
+    datetime assignedAt
+    datetime retiredAt
+    datetime createdAt
+    datetime updatedAt
   }
   BOOKING {
     int id PK
     string booking_ref UK
-    int tenantId "soft link to user"
     string tenant_name
+    int tenantId "soft link to user"
     string driver_name
     string transport_company
     string license_plate
@@ -40,25 +55,38 @@ erDiagram
     datetime slot_start
     datetime slot_end
     string status
+    text notes
     datetime arrived_at
     datetime completed_at
-    datetime deletedAt "soft delete"
+    datetime deletedAt "model supports paranoid soft delete"
+    datetime createdAt
+    datetime updatedAt
   }
   ATTENDANCE {
     int id PK
     int userId FK "cascade delete"
     string type "IN OUT"
     datetime timestamp
+    datetime createdAt
+    datetime updatedAt
   }
   SECURITYLOG {
     string id PK
+    string time
     string type
-    string severity
     text desc
-    string personnelName "soft link"
+    string severity
+    string icon
+    string personnelName "soft reference"
+    int matchedUserId "soft reference"
+    float confidence
+    string cameraLocation
     string reviewStatus
     text reviewNotes
     string reviewedBy
+    datetime reviewedAt
+    datetime createdAt
+    datetime updatedAt
   }
   INVITE {
     int id PK
@@ -66,79 +94,102 @@ erDiagram
     string role "Tenant"
     boolean isUsed
     datetime expiresAt
+    datetime createdAt
+    datetime updatedAt
   }
   MONITORINGZONE {
     int id PK
     string zone_name
     string location
-    int time_threshold "legacy minutes"
+    int time_threshold
     text monitored_classes
     int density_threshold
     int unattended_threshold_seconds
     int alert_cooldown_seconds
     string severity "Low Medium High Critical"
-    string assigned_team "soft link"
+    string assigned_team
     boolean detection_enabled
-    datetime deletedAt "soft delete"
+    datetime deletedAt
+    datetime createdAt
+    datetime updatedAt
   }
   CAMERA {
     int id PK
     string camera_code
     string camera_name
     string location
-    int zone_id FK "to monitoring_zones"
+    int zone_id FK
     string stream_url
     string status "Online Offline Maintenance Disabled"
     string camera_type
     datetime last_active_at
-    datetime deletedAt "soft delete"
+    text notes
+    datetime deletedAt
+    datetime createdAt
+    datetime updatedAt
   }
   DETECTIONALERT {
     int id PK
     string zone_name
     string camera_location
+    string status
     string object_class
     int duration_seconds
     string person_name
-    int camera_id FK "to cameras, nullable"
-    int zone_id FK "to monitoring_zones, nullable"
-    string status
-    datetime deletedAt "soft delete"
+    string alert_type
+    string severity "Low Medium High Critical"
+    string source
+    float confidence
+    string snapshot_url
+    string device_id
+    datetime occurred_at
+    int camera_id FK "nullable"
+    int zone_id FK "nullable"
+    datetime deletedAt
+    datetime createdAt
+    datetime updatedAt
   }
   INCIDENTLOG {
     int id PK
     string camera_location
+    string status
     string person_name
     decimal confidence_score
     string severity
     string source
     string resolutionStatus
     text notes
-    datetime deletedAt "soft delete"
+    datetime deletedAt
+    datetime createdAt
+    datetime updatedAt
   }
   CHATTRANSCRIPT {
     uuid id PK
-    uuid sessionId UK
+    string sessionId UK
     int userId
     string tenantName
     string unitNumber
     json messages
     boolean isEscalated
     text escalationReason
+    datetime createdAt
+    datetime updatedAt
   }
   SUPPORTTICKET {
     uuid id PK
-    uuid transcriptId FK "to chat_transcripts"
+    uuid transcriptId FK
     int userId
     string tenantName
     string unitNumber
     string issueTitle
     text issueDescription
     string priority "Low Medium High"
-    string status "Pending InProgress Resolved"
+    string status "Pending In Progress Resolved"
     string resolvedBy
     datetime resolvedAt
     text resolutionNotes
+    datetime createdAt
+    datetime updatedAt
   }
   KNOWLEDGEBASE {
     uuid id PK
@@ -148,24 +199,16 @@ erDiagram
     string keywords "string array"
     string createdBy
     string updatedBy
+    datetime createdAt
+    datetime updatedAt
   }
 ```
 
 ## Notes
 
-- **Enforced FK relationships:** `ATTENDANCE.userId → USER.id` (ON DELETE CASCADE); `USER.managerId →
-  USER.id` self-reference (Tenant ⟶ Staff); `CAMERA.zone_id → MONITORINGZONE.id`;
-  `DETECTIONALERT.camera_id → CAMERA.id` and `DETECTIONALERT.zone_id → MONITORINGZONE.id` (both
-  nullable — the AI engine's string payload still works); `SUPPORTTICKET.transcriptId →
-  CHATTRANSCRIPT.id` (ChatTranscript `hasOne` SupportTicket).
-- **Soft links (no DB-level FK, matched at query time):**
-  - `BOOKING.tenantId → USER.id` — Staff bookings use the Staff member's `managerId`.
-  - `SECURITYLOG.personnelName → USER.name` — nulled on PDPA off-boarding.
-  - `MONITORINGZONE.assigned_team` — free-text response-team name, not an FK.
-  - `DETECTIONALERT → INCIDENTLOG` — object-detection alerts can seed incident records (soft workflow).
-- **KNOWLEDGEBASE** is standalone FAQ data used by the AI Helpdesk to match incoming chat messages.
-- `faceVector` is a PostgreSQL `FLOAT[]` array (Sequelize `ARRAY(FLOAT)`) — **not pgvector**
-  (pgvector not required).
-- Soft-deletable (`paranoid`) tables keep a `deletedAt` timestamp: bookings, cameras, monitoring
-  zones, detection alerts, incident logs.
-- **After editing this diagram, regenerate `design/png/er-diagram.png`** from this Mermaid source.
+- `evaluation_participants` stores stable labels such as P01/P02/P03. Labels remain reserved after user off-boarding; the record is retired and its `userId` is set to null.
+- Invite has no issuer/user foreign key in the actual model. Invite creation is role-controlled at application level only.
+- DetectionAlert and IncidentLog are not database-linked. A detection-alert route may attempt to seed an IncidentLog, but the records are not linked by a database foreign key.
+- `BOOKING.deletedAt` exists because the Sequelize model supports paranoid soft deletion. The current manual Cancel workflow does not call destroy/delete; it performs status-based logical cancellation with `status = Cancelled`.
+- `faceVector` is a PostgreSQL `FLOAT[]` array. InsightFace generates 512-dimensional facial embeddings and the Python AI service performs similarity matching.
+- Soft-deletable model tables: bookings, cameras, monitoring_zones, detection_alerts, incident_logs.

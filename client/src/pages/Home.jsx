@@ -8,7 +8,7 @@ import ContactForm from "../components/ContactForm";
 import LiveStatus from "../components/LiveStatus";
 import Roadmap from "../components/Roadmap";
 import TechStack from "../components/TechStack";
-
+import HowItWorks from "../components/HowItWorks";
 
 const Home = () => {
   return (
@@ -18,6 +18,7 @@ const Home = () => {
       <LiveStatus />
       <ImpactStats /> 
       <FeatureCards />
+      <HowItWorks />
       <Roadmap />
       <TechStack />
       <ContactForm />

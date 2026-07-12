@@ -1,63 +1,51 @@
-# FlowGuard — System Design
+# FlowGuard - System Design
 
-FlowGuard is a three-tier app: a React/Vite frontend, a Node.js/Express backend, and a Python
-FastAPI AI microservice, all backed by a shared PostgreSQL database, with WhatsApp Cloud API as an
-external notification service. See `design/md/architecture-diagram.md` for the visual,
-`design/md/er-diagram.md` for the data model, and the `design/md/*-flow.md` files for feature flows.
-PNG exports live in `design/png/`.
+FlowGuard is an academic proof of concept with a React/Vite public and authenticated frontend, a Node.js/Express API, a PostgreSQL database managed through Sequelize, and a Python FastAPI AI service for facial recognition and object monitoring.
 
-## 1. Frontend — React + Vite
-- `client/src/pages/` — route screens: public site, Login/Register, role Dashboard, V-Patrol,
-  Cameras, Object Detection, Gate Scanner, Face Enrollment, Attendance, Logistics, Users,
-  Security Review, Tenant Onboarding, Settings, and the public **Driver Pass** QR page.
-- `client/src/components/` — reusable UI incl. `ProtectedRoute` (role allow-lists), `Sidebar`
-  (role-aware links), and `PasswordInput`.
-- `client/src/constants/roles.js` — canonical role constants + access groups shared by routes/UI.
-- Vite dev proxy forwards `/user`, `/api` to the backend and `/ai` to the AI service.
+## Frontend
 
-## 2. Backend — Node.js + Express
-- `server/routes/` — domain routers (all mounted in `index.js`):
-  - `user` (auth, face enrol, manual create, logs) — mounted at `/user`
-  - `security`, `attendance`, `booking` (logistics + gate scan) — under `/api/...`
-  - `incident`, `cameras`, `zones`, `detectionAlerts` (object detection) — under `/api/...`
-  - `support` (AI helpdesk: transcripts, tickets, knowledge base) — under `/api/support`
-- `server/middlewares/auth.js` — `verifyToken` (JWT) + `requireRole(...)` RBAC; plus
-  `errorHandlers.js` (404 + safe global 500).
-- `server/services/whatsappService.js` — env-gated, mock-safe WhatsApp Cloud API client.
-- `server/models/` — Sequelize models + associations; `index.js` wires them; `seed.js` seeds FM.
+- Public pages: overview, capabilities, platform overview, contact, login/register and public Driver Pass.
+- Authenticated pages: role dashboard, Gate Scanner, V-Patrol, Face Enrollment, Attendance, User Management, Security Review, Object Detection, Camera Inventory, Logistics, Incident Dashboard and Support Dashboard.
+- Role protection is implemented through React `ProtectedRoute` and backend RBAC.
 
-## 3. Database — PostgreSQL + Sequelize
-- Single shared instance. Tables: `users`, `bookings`, `attendance`, `security_logs`, `invites`,
-  `cameras`, `monitoring_zones`, `detection_alerts`, `incident_logs`, `chat_transcripts`,
-  `support_tickets`, `knowledge_base`.
-- Face embeddings stored as a native `FLOAT[]` array column (`faceVector`); **pgvector is not
-  required** for local development.
+## Backend
 
-## 4. AI service — Python + FastAPI (port 8501)
-- `ai-service/main.py` — one service exposing face endpoints (`/api/encode-faces`,
-  `/user/recognize`, `/refresh`) and YOLO endpoints (`/api/yolo/*`).
-- **InsightFace** encodes 512-d embeddings and matches by cosine similarity (NumPy).
-- **Ultralytics YOLO** performs object/person detection.
-- Loads/refreshes enrolled embeddings from the same PostgreSQL database.
+- `/user`: authentication, manual user creation, face enrolment/re-enrolment, suspension/reactivation and user off-boarding.
+- `/api/facial-recognition`: `/track`, `/recognize`, `/access-event`, `/evaluate`, and evaluation participant routes.
+- `/api/attendance`: attendance summaries and `/scan` IN/OUT writes after Gate Scanner confirmation.
+- `/api/bookings`: booking creation, reads, updates, status changes, gate scan and status-based cancellation.
+- `/api/security`: security log reads and FM review updates.
+- `/api/cameras`, `/api/zones`, `/api/detection-alerts`: camera inventory, monitoring zones and object alert workflows.
+- `/api/support`: chat transcripts, support tickets and knowledge base.
+- `/api/incidents`: incident dashboard CRUD and resolution notes.
 
-## 5. External services
-- **WhatsApp Cloud API** — driver notifications (booking created/confirmed/arrived/completed,
-  next-in-line, cancelled). Disabled by default; simulated in local/demo mode; credentials come
-  from environment variables only.
-- **Google reCAPTCHA** — bot protection on register/login.
+## Database
 
-## 6. Role-based access & public surface
-- RBAC enforced on both tiers (React `ProtectedRoute` + Express `requireRole`). Roles: FM, Tenant,
-  Staff, Public. See `design/md/rbac-flow.md` for the full matrix.
-- The **Driver Pass** page is intentionally public (drivers have no login) and is read-only via the
-  public `GET /api/bookings/:ref` lookup.
+Tables include `users`, `evaluation_participants`, `attendance`, `security_logs`, `bookings`, `invites`, `cameras`, `monitoring_zones`, `detection_alerts`, `incident_logs`, `chat_transcripts`, `support_tickets` and `knowledge_base`.
 
-## 7. Deployment posture
-- **Local demo (current):** frontend `:5173`, backend `:5001`, AI service `:8501`, local/managed
-  PostgreSQL. WhatsApp can run in simulated mode locally, or real mode when valid WhatsApp Cloud API
-  environment variables are enabled.
-- **Planned cloud:** Vercel (frontend), Render (backend), Neon/Supabase (PostgreSQL). The AI service
-  (InsightFace/YOLO) is heavy and stays local for the demo, with cloud hosting as future work. After
-  deployment, set `FRONTEND_URL` so WhatsApp driver-pass links point to the live site.
-- All secrets are supplied via environment variables; see each tier's `.env.example`. No real
-  secrets are committed.
+InsightFace generates 512-dimensional facial embeddings. PostgreSQL stores the enrolled template using the current `FLOAT[]` model field, while the Python AI service performs similarity matching. The project does not use pgvector.
+
+## AI Architecture
+
+- `/api/encode-faces`: enrolment encoding from captured/uploaded face images.
+- `/user/track`: lightweight detector/keypoint endpoint for face presence, face box, face count and head-turn ratio.
+- `/user/recognize`: full detection, embedding and identity match.
+- `/refresh`: known-face cache refresh after enrolment or off-boarding.
+- YOLO endpoints: object/person detection and alert emission for configured monitoring zones.
+
+## Scanner Architecture
+
+Camera preview -> lightweight tracking loop -> full identity recognition -> baseline motion-liveness challenge -> final same-identity confirmation -> Attendance or access-event write.
+
+Gate Scanner writes Attendance IN/OUT through `/api/attendance/scan`. V-Patrol writes access-event SecurityLog records through `/api/facial-recognition/access-event` and does not change Attendance.
+
+## Camera Source Parity
+
+- Laptop webcam frames are captured in the browser.
+- Raspberry Pi serves a latest-frame memory cache through snapshot/stream.
+- Heavy InsightFace recognition remains on the laptop AI service.
+- The Pi does not perform full facial recognition in the current PoC.
+
+## External Integration
+
+WhatsApp Cloud API is used for booking, Driver Pass, arrival/completion, cancellation and next-driver notifications. Local demonstration is mock-safe when credentials are not enabled.

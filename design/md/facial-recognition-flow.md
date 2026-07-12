@@ -1,58 +1,64 @@
-# FlowGuard — Facial Recognition & Access Management Flow
+# FlowGuard - Facial Recognition & Access Management Flow
 
-## Enrolment + recognition + review
+## Recognition flow
 
 ```mermaid
 flowchart TB
-  subgraph Enrol[Enrolment]
-    A[User opens Face Enrollment] --> B{Camera or Upload}
-    B -->|Camera| C[Capture front / left / right]
-    B -->|Manual upload| D[Select image files]
-    C --> E[POST /user/enroll-face]
-    D --> E
-    E --> F[AI: InsightFace encodes faces]
-    F --> G{Face detected}
-    G -->|No| H[400 error<br/>retry or upload]
-    G -->|Yes| I[Save faceVector<br/>isEnrolled = true]
-    I --> J[AI refresh known-face cache]
-  end
-
-  subgraph Recognise[Live recognition]
-    K[Gate Scanner or V-Patrol<br/>sends frame] --> L[AI matches embedding]
-    L --> M{Match above threshold}
-    M -->|Yes| N[Access Granted<br/>attendance IN or OUT + security log]
-    M -->|No| O[Unauthorized<br/>security log / incident]
-  end
-
-  subgraph Review[FM oversight]
-    N --> P[V-Patrol timeline]
-    O --> P
-    P --> Q[FM Security Review<br/>Pending / Escalated / Resolved]
-  end
+  A[Camera source selected] --> B[Browser or Pi provides current frame]
+  B --> C[POST /api/facial-recognition/track]
+  C --> D[Face presence, face box, face count, head-turn ratio]
+  D --> E{One face present}
+  E -->|No| X[Fail closed: unknown, multiple-face or timeout]
+  E -->|Yes| F[POST /api/facial-recognition/recognize]
+  F --> G{Authoritative candidate found}
+  G -->|Unknown or suspended| X
+  G -->|Active enrolled user| H[Collect baseline tracking ratios]
+  H --> I[User turns head and holds]
+  I --> J[Require movement delta for consecutive samples]
+  J --> K[Final /recognize]
+  K --> L{Final user ID equals original candidate ID}
+  L -->|No| X
+  L -->|Yes| M{Scanner mode}
+  M -->|Gate Scanner| N[POST /api/attendance/scan]
+  N --> O[Attendance IN/OUT and turnstile outcome]
+  M -->|V-Patrol| P[POST /api/facial-recognition/access-event]
+  P --> Q[SecurityLog access event; Attendance unchanged]
+  X --> R[No false Attendance]
 ```
 
-## Re-enrolment + off-boarding
+Motion liveness uses head-turn verification. This is not documented as a complete anti-spoofing model.
+
+## Enrolment flow
 
 ```mermaid
 flowchart TB
-  R1[Recognition unreliable] --> R2[FM or user re-enrol]
-  R2 --> R3[POST /user/enroll-face<br/>overwrites faceVector]
-  R3 --> R4[AI refresh cache]
+  A[User or FM opens Face Enrollment] --> B[Capture/upload three face orientations]
+  B --> C[POST /user/enroll-face]
+  C --> D[FastAPI /api/encode-faces]
+  D --> E[InsightFace 512-dimensional vector]
+  E --> F[Save users.faceVector and users.isEnrolled = true]
+  F --> G[Assign stable EvaluationParticipant label]
+  G --> H[Refresh AI known-face cache]
+```
 
-  D1[Lease ends / off-board] --> D2[DELETE /user/:id]
-  D2 --> D3[Wipe faceVector<br/>isEnrolled = false]
-  D3 --> D4[Delete attendance trail]
-  D4 --> D5[Anonymise security logs<br/>personnelName = null]
-  D5 --> D6[Remove user record]
+## Off-boarding flow
+
+```mermaid
+flowchart TB
+  A[FM deletes user] --> B[Transactional PDPA workflow]
+  B --> C[Wipe faceVector and set isEnrolled false]
+  C --> D[Delete Attendance]
+  D --> E[Anonymise SecurityLogs and clear matched user references]
+  E --> F[Unlink Booking user references]
+  F --> G[Retire EvaluationParticipant]
+  G --> H[Delete User]
+  H --> I[Refresh AI cache]
 ```
 
 ## Notes
 
-- Enrolment sends captured/uploaded images to the Python AI service, which encodes them with
-  InsightFace and returns a 512-d vector stored as `faceVector` (`FLOAT[]`).
-- After a successful enrolment the backend calls the AI `/refresh` endpoint so a new face is
-  recognised immediately without restarting the service (non-fatal if it fails).
-- Recognised users generate an IN/OUT attendance record plus an access security log; unknown faces
-  generate an intrusion security log (and can seed the incident dashboard).
-- Off-boarding is PDPA-aware: biometric vector wiped, attendance removed, security logs anonymised.
-- All camera pages degrade gracefully if the webcam is denied or the AI service is offline.
+- Tracking (`/api/facial-recognition/track`) is detector-only and has no identity, DB, Attendance or SecurityLog side effects.
+- Recognition (`/api/facial-recognition/recognize`) identifies a candidate using the authoritative user ID/status from PostgreSQL.
+- Gate Scanner performs tracking, initial recognition, baseline head-turn verification, final same-ID recognition and then `/api/attendance/scan`.
+- V-Patrol performs the same scanner policy but writes `/api/facial-recognition/access-event`; Attendance is unchanged.
+- Unknown, suspended, multiple-face and timeout cases fail closed. Unknown/suspended recognition creates SecurityLog access/intrusion events according to the current routes, not IncidentLog records.

@@ -1,50 +1,43 @@
-# FlowGuard — Smart Logistics & Loading Bay Flow
+# FlowGuard - Smart Logistics & Loading Bay Flow
 
 ## Booking to gate to next-in-line
 
 ```mermaid
 flowchart TB
-  A[FM / Tenant / Staff<br/>opens Logistics] --> B[+ New Booking]
+  A[FM / Tenant / Staff opens Logistics] --> B[Create booking]
   B --> C[POST /api/bookings/create]
-  C --> D{Valid fields + slot}
-  D -->|Missing / bad| E[400 error]
-  D -->|Slot clash| F[409 conflict]
-  D -->|OK| G[Generate booking_ref<br/>status = Pending]
-  G --> H[WhatsApp driver pass link<br/>simulated if disabled]
-  H --> I[Driver opens<br/>/driver-pass/:ref QR]
-
-  I --> J[FM Gate Scan at bay]
-  J --> K{Action}
-  K -->|entry| L[Optional plate check<br/>status = Arrived]
-  K -->|exit| M[status = Completed]
-  M --> N[Find next non-cancelled<br/>booking same bay]
-  N --> O[WhatsApp next-in-line]
-
-  P[FM / owner Tenant] --> Q[Cancel booking]
-  Q --> R[status = Cancelled<br/>soft delete]
+  C --> D{Valid required fields and bay slot}
+  D -->|Missing or invalid| E[400 validation error]
+  D -->|Same-bay slot clash| F[409 conflict]
+  D -->|OK| G[Generate booking_ref]
+  G --> H[Create Driver Pass link]
+  H --> I[Send WhatsApp notification; simulated or real mode]
+  I --> J[Driver opens /driver-pass/:ref]
+  J --> K[FM gate scan]
+  K --> L{Entry or exit}
+  L -->|entry| M[Optional plate comparison]
+  M --> N[status = Arrived; arrived_at set]
+  N --> O[Arrival notification]
+  L -->|exit| P[status = Completed; completed_at set]
+  P --> Q[Find next eligible booking in same bay]
+  Q --> R[Notify next driver]
+  S[FM or owning Tenant cancels] --> T[PATCH /api/bookings/:id/cancel]
+  T --> U[status = Cancelled]
+  U --> V[Cancellation notification]
 ```
 
 ## Role gate on Gate Scan
 
 ```mermaid
 flowchart LR
-  FM2[FM] -->|allowed| GS[PATCH /:ref/gate-scan]
-  TEN2[Tenant] -->|403| GS
-  STF2[Staff] -->|403| GS
+  FM[FM] -->|allowed| GS[PATCH /api/bookings/:ref/gate-scan]
+  TEN[Tenant] -->|403| GS
+  STF[Staff] -->|403| GS
 ```
 
 ## Notes
 
-- **Create:** FM, Tenant, and Staff can create bookings. Staff book on behalf of their unit — the
-  booking's `tenantId` is set from the Staff member's `managerId`. Validation returns 400 for
-  missing/invalid fields and 409 for an overlapping slot in the same bay.
-- **WhatsApp:** a driver-pass link is sent on create (and on status changes). In local/demo mode
-  it is simulated; the API response reports the send status.
-- **Driver Pass:** the public `/driver-pass/:ref` page shows booking details + a QR encoding the
-  booking reference; it needs no login.
-- **Gate Scan (FM only):** entry moves Pending/Confirmed → Arrived; exit moves → Completed. An
-  optional observed plate is compared to the booking plate and flagged on mismatch (warn, not block).
-- **Next-in-line:** completing a booking notifies the next waiting booking for the same bay,
-  supporting the "previous driver left early, notify the next driver" requirement.
-- **Cancel:** FM or the owning Tenant soft-cancels (status = Cancelled, `paranoid` soft delete).
-- **Restrictions:** Tenant and Staff cannot Gate Scan or Mark Arrived/Completed (facility-level, FM only).
+- Booking creation validates required fields, enforces role/ownership rules, detects same-bay slot conflicts, generates `booking_ref`, creates a public Driver Pass link and sends a mock-safe WhatsApp notification.
+- Gate entry sets `status = Arrived` and `arrived_at` after optional plate comparison.
+- Gate exit sets `status = Completed` and `completed_at`, then locates the next eligible booking in the same bay for notification.
+- Cancellation is logical cancellation through status: `PATCH /api/bookings/:id/cancel` sets `status = Cancelled` and sends a cancellation notification. It is not the manual UI path for Sequelize paranoid soft delete.

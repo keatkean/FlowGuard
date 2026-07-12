@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 
 const ContactForm = () => {
   const [formData, setFormData] = useState({ name: '', email: '', message: '', type: 'General' });
+  const [notice, setNotice] = useState("Demo enquiry form - no message will be transmitted.");
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    console.log("Inquiry Received:", formData);
-    alert("Inquiry sent to FlowGuard Systems.");
+    setNotice("Demo enquiry form - no message will be transmitted.");
   };
 
   return (
@@ -14,35 +14,23 @@ const ContactForm = () => {
       <div className="contact-container">
         <div className="contact-info">
           <h2>Get in Touch</h2>
-          <p>Inquire about AI implementation for the 2027 factory launch.</p>
-          <div className="contact-detail"><strong>Location:</strong> 7 Harrison Rd, Singapore 369650</div>
-          <div className="contact-detail"><strong>Status:</strong> Opening Soon In 2027</div>
+          <p>Academic Proof of Concept developed for an industrial asset and manpower monitoring problem statement.</p>
+          <div className="contact-detail"><strong>Status:</strong> Academic demo only</div>
+          <div className="contact-detail"><strong>Scope:</strong> Public information and authenticated PoC portal</div>
         </div>
 
         <form className="contact-form" onSubmit={handleSubmit}>
-          <input 
-            type="text" 
-            placeholder="Your Name" 
-            onChange={(e) => setFormData({...formData, name: e.target.value})}
-            required 
-          />
-          <input 
-            type="email" 
-            placeholder="Work Email" 
-            onChange={(e) => setFormData({...formData, email: e.target.value})}
-            required 
-          />
-          <select onChange={(e) => setFormData({...formData, type: e.target.value})}>
+          <p className="demo-form-notice">{notice}</p>
+          <input type="text" placeholder="Your Name" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} required />
+          <input type="email" placeholder="Work Email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} required />
+          <select value={formData.type} onChange={(e) => setFormData({...formData, type: e.target.value})}>
             <option value="General">General Inquiry</option>
-            <option value="IoT">IoT & Sensors</option>
-            <option value="Compliance">Compliance & Security</option>
+            <option value="Access">Access Management</option>
+            <option value="Logistics">Smart Logistics</option>
+            <option value="Support">Operational Support</option>
           </select>
-          <textarea 
-            placeholder="How can FlowGuard assist your operations?" 
-            onChange={(e) => setFormData({...formData, message: e.target.value})}
-            required
-          ></textarea>
-          <button type="submit" className="hero-button">Send Inquiry</button>
+          <textarea placeholder="Demo enquiry details" value={formData.message} onChange={(e) => setFormData({...formData, message: e.target.value})} required></textarea>
+          <button type="submit" className="hero-button">Review Demo Notice</button>
         </form>
       </div>
     </section>

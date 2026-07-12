@@ -2,35 +2,20 @@ import React from 'react';
 
 const Roadmap = () => {
   const milestones = [
-    {
-      date: "Q2 2026",
-      title: "Systems Architecture",
-      desc: "Finalizing the AI model training and FlowGuard core integration for proactive facility management."
-    },
-    {
-      date: "Q4 2026",
-      title: "IoT Node Deployment",
-      desc: "Installation of environmental sensors and smart loading bay hardware across the factory floor."
-    },
-    {
-      date: "2027",
-      title: "Operational Launch",
-      desc: "Full-scale deployment of FlowGuard at Harrison Food Factory for live monitoring."
-    }
+    { date: "Phase 1", title: "Core Platform", desc: "Authentication and RBAC, facial enrolment and access workflows, camera and monitoring-zone setup." },
+    { date: "Phase 2", title: "Operational Integration", desc: "Attendance, object alerts, Smart Logistics, security review, helpdesk and incident support." },
+    { date: "Phase 3", title: "PoC Validation", desc: "Raspberry Pi camera integration, real-time tracking and motion liveness, automated tests, usability and security review, deployment-readiness assessment." }
   ];
 
   return (
     <section id="roadmap" className="roadmap-section">
       <div className="roadmap-header">
-        <h2 className="section-title">Deployment Roadmap</h2>
-        <p className="section-subtitle">
-          Phased implementation at Harrison Food Factory.
-        </p>
+        <h2 className="section-title">PoC Development Journey</h2>
+        <p className="section-subtitle">Current project progress is documented as a proof-of-concept journey.</p>
       </div>
-
       <div className="timeline-container">
-        {milestones.map((item, i) => (
-          <div key={i} className="timeline-item">
+        {milestones.map((item) => (
+          <div key={item.title} className="timeline-item">
             <div className="timeline-dot"></div>
             <div className="timeline-content">
               <span className="timeline-date">{item.date}</span>
