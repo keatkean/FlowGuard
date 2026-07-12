@@ -44,6 +44,27 @@ export function mapBoxToContainer(box, frame, container, fit = 'contain') {
   };
 }
 
+// Box smoothing: blend the previous frame-space box with the newest tracking
+// box so the overlay follows the face without jitter. 0.55/0.45 keeps latency
+// low (over-smoothing would make the box visibly lag the person).
+export const BOX_SMOOTHING_PREV_WEIGHT = 0.55;
+
+/**
+ * Blend two frame-space boxes ({x, y, width, height}). Returns the current box
+ * unchanged when there is no previous box to smooth against.
+ */
+export function smoothBox(previous, current, prevWeight = BOX_SMOOTHING_PREV_WEIGHT) {
+  if (!current) return null;
+  if (!previous) return current;
+  const currentWeight = 1 - prevWeight;
+  return {
+    x: previous.x * prevWeight + current.x * currentWeight,
+    y: previous.y * prevWeight + current.y * currentWeight,
+    width: previous.width * prevWeight + current.width * currentWeight,
+    height: previous.height * prevWeight + current.height * currentWeight,
+  };
+}
+
 /** Same projection, as a ready-to-spread CSS style ({left/top/width/height} px). */
 export function faceBoxStyle(box, frame, container, fit = 'contain') {
   const rect = mapBoxToContainer(box, frame, container, fit);

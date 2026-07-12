@@ -240,6 +240,63 @@ async def recognize(request: RecognitionRequest):
 
     return {"matchedUserId": None, "confidence": 0.0, "box": None, "liveness_ratio": 0.5, "faceDetected": False, "inference_ms": inference_ms}
 
+# --- Lightweight face tracking (detection + keypoints ONLY, no identity) ----
+# Powers the scanners' real-time face box + head-turn movement sampling. It
+# reuses InsightFace's already-loaded detector at a smaller input size and
+# NEVER runs the embedding model, matches identities, touches the database,
+# or persists the frame. Safe transient telemetry only.
+_TRACK_DET_SIZE = int(os.getenv("TRACK_DET_SIZE", "256"))
+_TRACK_MAX_FACES = 2
+
+_NO_FACE_TRACK = {"faceDetected": False, "faceCount": 0, "box": None, "headTurnRatio": None}
+
+
+@app.post("/user/track", dependencies=[Depends(require_service_key)])
+async def track(request: RecognitionRequest):
+    try:
+        header, encoded = request.image.split(",", 1)
+        data = base64.b64decode(encoded)
+        nparr = np.frombuffer(data, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError("decode failed")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid image data")
+
+    det_model = face_app.models.get("detection")
+    if det_model is None:
+        raise HTTPException(status_code=503, detail="Face detector unavailable.")
+
+    _detect_started = time.time()
+    bboxes, kpss = det_model.detect(
+        img,
+        input_size=(_TRACK_DET_SIZE, _TRACK_DET_SIZE),
+        max_num=_TRACK_MAX_FACES,
+        metric="default",
+    )
+    inference_ms = int((time.time() - _detect_started) * 1000)
+
+    if bboxes is None or len(bboxes) == 0:
+        return {**_NO_FACE_TRACK, "inferenceMs": inference_ms}
+
+    # Largest face is the primary tracking subject.
+    areas = [(b[2] - b[0]) * (b[3] - b[1]) for b in bboxes]
+    primary = int(np.argmax(areas))
+    x1, y1, x2, y2 = bboxes[primary][:4]
+
+    head_turn_ratio = None
+    if kpss is not None and len(kpss) > primary:
+        head_turn_ratio = calculate_head_turn(kpss[primary])
+
+    return {
+        "faceDetected": True,
+        "faceCount": int(len(bboxes)),
+        "box": [int(x1), int(y1), int(x2 - x1), int(y2 - y1)],
+        "headTurnRatio": head_turn_ratio,
+        "inferenceMs": inference_ms,
+    }
+
+
 # Helper to refresh the list manually if a new staff joins
 @app.get("/refresh", dependencies=[Depends(require_service_key)])
 def refresh():

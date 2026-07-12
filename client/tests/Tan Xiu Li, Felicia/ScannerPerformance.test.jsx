@@ -46,7 +46,10 @@ describe("frame capture optimisation", () => {
     expect(CAPTURE_JPEG_QUALITY).toBeLessThanOrEqual(0.7);
     for (const page of ["VPatrol.jsx", "GateScanner.jsx"]) {
       const source = readPage(page);
-      expect(source).toMatch(/toDataURL\('image\/jpeg',\s*CAPTURE_JPEG_QUALITY\)/);
+      // The shared capture helper is parameterized; recognition passes the
+      // tuned CAPTURE_JPEG_QUALITY constant through it.
+      expect(source).toMatch(/toDataURL\('image\/jpeg',\s*quality\)/);
+      expect(source).toMatch(/captureFrom\(canvasRef\.current,\s*CAPTURE_MAX_WIDTH,\s*CAPTURE_JPEG_QUALITY\)/);
       // No hardcoded full-quality (or stray) JPEG encodes remain.
       expect(source).not.toMatch(/toDataURL\('image\/jpeg',\s*[01]?\.?\d*\)/);
       expect(source).not.toMatch(/toDataURL\('image\/jpeg'\)/);

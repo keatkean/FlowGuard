@@ -15,7 +15,7 @@ import {
   fetchPiSnapshotBitmap,
 } from '../constants/piCamera';
 import { API_BASE_URL } from '../constants/api';
-import { clampBoxToFrame, faceBoxStyle } from '../constants/faceBox';
+import { clampBoxToFrame, faceBoxStyle, smoothBox } from '../constants/faceBox';
 import { describeRecognitionSubject, RECOGNITION_STATUS } from '../constants/recognition';
 import { formatSingaporeTimestamp, formatSingaporeFull } from '../constants/datetime';
 import {
@@ -31,43 +31,73 @@ import {
   TARGET_LOCK_MS,
   CAPTURE_MAX_WIDTH,
   CAPTURE_JPEG_QUALITY,
+  TRACK_INTERVAL_MS,
+  TRACK_MAX_WIDTH,
+  TRACK_JPEG_QUALITY,
+  BOX_CLEAR_TIMEOUT_MS,
   SERVICE_UNAVAILABLE_MSG,
   createScanGate,
   startTimer,
   logScanTimings,
+  logTrackingTimings,
+  logLivenessTelemetry,
+  nowMs,
 } from '../constants/scanControl';
+import {
+  createHeadTurnChallenge,
+  CHALLENGE_STATE,
+  LIVENESS_BASELINE_SAMPLES,
+} from '../constants/liveness';
+
+// Pi snapshot failures must persist this long before the page falls back to
+// the laptop webcam (time-based so the fast tracking loop cannot trip it on a
+// single hiccup).
+const PI_FAIL_FALLBACK_MS = 2500;
 
 const VPatrol = () => {
   const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const containerRef = useRef(null); // preview container, for face-box projection
+  const canvasRef = useRef(null);       // full-recognition capture canvas
+  const trackCanvasRef = useRef(null);  // small tracking capture canvas (independent of recognition)
+  const containerRef = useRef(null);    // preview container, for face-box projection
 
   // Camera source: Raspberry Pi Gate Camera is primary, laptop webcam is fallback
   const [cameraSource, setCameraSource] = useState(CAMERA_SOURCES.PI);
   const [cameraStatusMsg, setCameraStatusMsg] = useState("Connecting to Pi Gate Camera...");
   const cameraSourceRef = useRef(CAMERA_SOURCES.PI);
-  const piFailStreakRef = useRef(0);
+  const piFailSinceRef = useRef(0);
 
-  // Staged States: SYSTEM_ACTIVE, PRESENCE_DETECTED, TARGET_LOCKING, LIVENESS_CHECK, SECURE_MATCH, UNKNOWN_QUERY
+  // Staged States: SYSTEM_ACTIVE, PRESENCE_DETECTED, TARGET_LOCKING, LIVENESS_CHECK, AUTHORIZING, SECURE_MATCH, UNKNOWN_QUERY
   const [scanStatus, setScanStatus] = useState("SYSTEM_ACTIVE");
   const [identifiedUser, setIdentifiedUser] = useState(null);
   const [faceBox, setFaceBox] = useState(null);
   const [scanProgress, setScanProgress] = useState(0);
+  const [multipleFacesNotice, setMultipleFacesNotice] = useState(false);
 
   const scanStatusRef = useRef("SYSTEM_ACTIVE");
   const lockTimerRef = useRef(null);
   const progressIntervalRef = useRef(null);
+  const lockPendingRef = useRef(false);
 
-  // No-overlap + AI-error-backoff guard for the scan loop.
-  const scanGateRef = useRef(createScanGate());
+  // Two INDEPENDENT in-flight locks: tracking (box/liveness) and full
+  // recognition (identity) never share a guard.
+  const trackingInFlightRef = useRef(false);
+  const recognitionInFlightRef = useRef(createScanGate());
   const [serviceNotice, setServiceNotice] = useState('');
   // Bumped on camera-source switch and unmount; responses from an older
   // session are stale and must be ignored.
   const scanSessionRef = useRef(0);
 
-  // LIVENESS MEMORY: Tracks the head-turn validation
+  // LIVENESS MEMORY: candidate + baseline-movement head-turn challenge
   const candidateUserRef = useRef(null);
+  const challengeRef = useRef(null);
+  const finalizingRef = useRef(false);
   const lastLogRef = useRef({ name: null, timestamp: 0 });
+
+  // Live tracking state: smoothed frame-space box, last-seen time, and the
+  // recent valid head-turn ratios that seed the liveness baseline.
+  const smoothedBoxRef = useRef(null);
+  const lastFaceSeenAtRef = useRef(0);
+  const recentRatiosRef = useRef([]);
 
   const [systemTime, setSystemTime] = useState(new Date().toLocaleTimeString('en-SG', {
     hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
@@ -84,6 +114,7 @@ const VPatrol = () => {
   // All recognition traffic goes through the Node backend - never FastAPI directly.
   const NODE_SERVER_URL = `${API_BASE_URL}/api/security/logs`;
   const RECOGNIZE_URL = `${API_BASE_URL}/api/facial-recognition/recognize`;
+  const TRACK_URL = `${API_BASE_URL}/api/facial-recognition/track`;
   // V-Patrol is a monitoring post: it records access AUDIT events only and must
   // never toggle clock-in/out (that belongs to the Gate Scanner's scan endpoint).
   const ACCESS_EVENT_URL = `${API_BASE_URL}/api/facial-recognition/access-event`;
@@ -117,14 +148,19 @@ const VPatrol = () => {
       }));
     }, 1000);
 
+    const trackInterval = setInterval(() => {
+      performTrackingScan();
+    }, TRACK_INTERVAL_MS);
+
     const scanInterval = setInterval(() => {
-      performLiveScan();
+      performRecognitionScan();
     }, SCAN_INTERVAL_MS);
 
     return () => {
-      scanSessionRef.current += 1; // any in-flight recognition response is now stale
+      scanSessionRef.current += 1; // any in-flight tracking/recognition response is now stale
       stopCCTV();
       clearInterval(clockInterval);
+      clearInterval(trackInterval);
       clearInterval(scanInterval);
       if (lockTimerRef.current) clearTimeout(lockTimerRef.current);
       if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
@@ -135,7 +171,17 @@ const VPatrol = () => {
     cameraSourceRef.current = source;
     setCameraSource(source);
     setCameraStatusMsg(statusMsg);
-    piFailStreakRef.current = 0;
+    piFailSinceRef.current = 0;
+  };
+
+  // Wipe every per-source tracking artefact so a stale box from the old
+  // camera source can never render over the new one.
+  const clearTrackingState = () => {
+    smoothedBoxRef.current = null;
+    lastFaceSeenAtRef.current = 0;
+    recentRatiosRef.current = [];
+    setFaceBox(null);
+    setMultipleFacesNotice(false);
   };
 
   // Primary source: Raspberry Pi Gate Camera. Probe the snapshot endpoint on
@@ -156,6 +202,8 @@ const VPatrol = () => {
   const selectCameraSource = async (source) => {
     if (source === cameraSourceRef.current) return;
     scanSessionRef.current += 1; // invalidate responses captured from the old source
+    resetScanner();
+    clearTrackingState();
     if (source === CAMERA_SOURCES.PI) {
       const piReachable = await isPiCameraReachableCached();
       if (piReachable) {
@@ -256,55 +304,187 @@ const VPatrol = () => {
     setTimeout(() => { resetScanner(); }, 3500);
   };
 
-  // Capture one frame from the active camera source onto the hidden canvas
-  // and return it as a compressed JPEG data URL for the recognition API.
-  const captureFrameBase64 = async () => {
-    const canvas = canvasRef.current;
+  // Capture one frame from the active camera source onto the given hidden
+  // canvas and return it as a compressed JPEG data URL. The tracking loop uses
+  // a small/cheap frame; the recognition loop keeps its existing sizing.
+  const captureFrom = async (canvas, maxWidth, quality) => {
     if (!canvas) return null;
     const context = canvas.getContext('2d');
-    const MAX_WIDTH = CAPTURE_MAX_WIDTH;
 
     if (cameraSourceRef.current === CAMERA_SOURCES.PI) {
       let bitmap;
       try {
         bitmap = await fetchPiSnapshotBitmap();
-        piFailStreakRef.current = 0;
+        piFailSinceRef.current = 0;
       } catch {
-        // Pi snapshot failed mid-session - after 3 misses, fall back to webcam
-        // and cache the failure so the Pi isn't re-probed every scan cycle.
-        piFailStreakRef.current += 1;
-        if (piFailStreakRef.current >= 3) {
+        // Pi snapshot failed mid-session - once failures persist past the
+        // fallback window, switch to the webcam and cache the failure so the
+        // Pi isn't re-probed on every cycle.
+        const now = Date.now();
+        if (!piFailSinceRef.current) {
+          piFailSinceRef.current = now;
+        } else if (now - piFailSinceRef.current >= PI_FAIL_FALLBACK_MS) {
           markPiUnavailable();
           applyCameraSource(CAMERA_SOURCES.WEBCAM, CAMERA_STATUS_MESSAGES.PI_UNAVAILABLE);
           await startCCTV();
         }
         return null;
       }
-      const scale = Math.min(1, MAX_WIDTH / bitmap.width);
+      const scale = Math.min(1, maxWidth / bitmap.width);
       canvas.width = Math.round(bitmap.width * scale);
       canvas.height = Math.round(bitmap.height * scale);
       context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
       bitmap.close?.();
-      return canvas.toDataURL('image/jpeg', CAPTURE_JPEG_QUALITY);
+      return canvas.toDataURL('image/jpeg', quality);
     }
 
     const video = videoRef.current;
     if (!video || video.videoWidth === 0) return null;
-    const scale = Math.min(1, MAX_WIDTH / video.videoWidth);
+    const scale = Math.min(1, maxWidth / video.videoWidth);
     canvas.width = Math.round(video.videoWidth * scale);
     canvas.height = Math.round(video.videoHeight * scale);
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', CAPTURE_JPEG_QUALITY);
+    return canvas.toDataURL('image/jpeg', quality);
   };
 
-  const performLiveScan = async () => {
-    const gate = scanGateRef.current;
+  const captureFrameBase64 = () => captureFrom(canvasRef.current, CAPTURE_MAX_WIDTH, CAPTURE_JPEG_QUALITY);
+
+  // ------------------------------------------------------------------
+  // A. TRACKING LOOP — detection-only /track endpoint (no identity data).
+  // Moves the on-screen box, detects presence and samples head-turn movement
+  // at ~TRACK_INTERVAL_MS. It can never grant access by itself.
+  // ------------------------------------------------------------------
+  const performTrackingScan = async () => {
+    if (trackingInFlightRef.current) return;
+    const canvas = trackCanvasRef.current;
+    if (!canvas) return;
+    const status = scanStatusRef.current;
+    if (status === "SECURE_MATCH" || status === "UNKNOWN_QUERY" || status === "AUTHORIZING" || status === "HARDWARE_ERR") return;
+
+    trackingInFlightRef.current = true;
+    const scanSession = scanSessionRef.current;
+    try {
+      const captureTimer = startTimer();
+      const imageBase64 = await captureFrom(canvas, TRACK_MAX_WIDTH, TRACK_JPEG_QUALITY);
+      const captureMs = captureTimer();
+      if (!imageBase64) return;
+
+      const requestTimer = startTimer();
+      const res = await axios.post(TRACK_URL, { image: imageBase64 }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      // Stale response: camera source switched (or unmounted) mid-request.
+      if (scanSession !== scanSessionRef.current) return;
+      logTrackingTimings({ captureMs, requestMs: requestTimer(), inferenceMs: res.data?.inferenceMs });
+      handleTrackingResult(res.data, canvas);
+    } catch {
+      // Tracking is best-effort; the recognition loop owns service-fault
+      // messaging and backoff.
+    } finally {
+      trackingInFlightRef.current = false;
+    }
+  };
+
+  const handleTrackingResult = (data, canvas) => {
+    const { faceDetected, faceCount = 0, box, headTurnRatio } = data || {};
+    const now = nowMs();
+
+    if (faceDetected && Array.isArray(box) && box.length === 4) {
+      lastFaceSeenAtRef.current = now;
+      const frame = { width: canvas.width, height: canvas.height };
+      // Smooth in frame space, then project onto the current container size so
+      // preview/container resizes are handled on every tracking update.
+      smoothedBoxRef.current = smoothBox(smoothedBoxRef.current, clampBoxToFrame(box, frame.width, frame.height));
+      const containerEl = containerRef.current;
+      const container = containerEl
+        ? { width: containerEl.clientWidth, height: containerEl.clientHeight }
+        : frame;
+      const sb = smoothedBoxRef.current;
+      setFaceBox(faceBoxStyle([sb.x, sb.y, sb.width, sb.height], frame, container, 'contain'));
+
+      const ratio = headTurnRatio ?? null;
+      if (ratio !== null) {
+        recentRatiosRef.current = [...recentRatiosRef.current, ratio].slice(-LIVENESS_BASELINE_SAMPLES);
+      }
+
+      if (faceCount > 1) {
+        // Never continue authorisation with more than one person in frame.
+        abortAuthorizationForMultipleFaces();
+        return;
+      }
+      setMultipleFacesNotice(false);
+
+      const status = scanStatusRef.current;
+
+      if (status === "LIVENESS_CHECK") {
+        const challenge = challengeRef.current;
+        if (!challenge || !candidateUserRef.current) { resetScanner(); return; }
+        const result = challenge.observe(ratio, now);
+        logLivenessTelemetry({ baseline: result.baseline, current: ratio, delta: result.delta, consecutive: result.consecutive });
+        // Progress comes ONLY from real tracking observations.
+        setScanProgress(Math.min(96, Math.round((result.consecutive / challenge.requiredConsecutiveSamples) * 96)));
+        if (result.state === CHALLENGE_STATE.TIMED_OUT) {
+          failLivenessTimeout();
+        } else if (result.state === CHALLENGE_STATE.PASSED) {
+          runFinalConfirmation();
+        }
+        return;
+      }
+
+      if (status === "SYSTEM_ACTIVE" || status === "PRESENCE_DETECTED") {
+        const proximityPct = (sb.width / frame.width) * 100;
+        if (proximityPct < 5) {
+          changeScanState("PRESENCE_DETECTED");
+          setScanProgress(0);
+        } else {
+          changeScanState("TARGET_LOCKING");
+        }
+      }
+      return;
+    }
+
+    // No face in this tracking sample.
+    if (scanStatusRef.current === "LIVENESS_CHECK" && challengeRef.current) {
+      const result = challengeRef.current.observe(null, now);
+      if (result.state === CHALLENGE_STATE.TIMED_OUT) {
+        failLivenessTimeout();
+        return;
+      }
+    }
+    // Retain the box through a brief miss, then clear it and rearm.
+    if (lastFaceSeenAtRef.current && now - lastFaceSeenAtRef.current >= BOX_CLEAR_TIMEOUT_MS) {
+      clearTrackingState();
+      const status = scanStatusRef.current;
+      if (status === "PRESENCE_DETECTED" || status === "TARGET_LOCKING" || status === "LIVENESS_CHECK") {
+        // Person left the frame — fail closed and return to monitoring.
+        resetScanner();
+      }
+    }
+  };
+
+  const abortAuthorizationForMultipleFaces = () => {
+    if (lockTimerRef.current) clearTimeout(lockTimerRef.current);
+    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    lockPendingRef.current = false;
+    candidateUserRef.current = null;
+    challengeRef.current = null;
+    setScanProgress(0);
+    setMultipleFacesNotice(true);
+    changeScanState("PRESENCE_DETECTED");
+  };
+
+  // ------------------------------------------------------------------
+  // B. FULL RECOGNITION LOOP — identity only, ~once per SCAN_INTERVAL_MS,
+  // and ONLY while identification is needed (TARGET_LOCKING). Once a
+  // candidate is secured it stops until the final confirmation.
+  // ------------------------------------------------------------------
+  const performRecognitionScan = async () => {
+    const gate = recognitionInFlightRef.current;
     // No overlapping requests; short backoff after a recognition-service failure.
     if (!gate.canScan()) return;
-
     const canvas = canvasRef.current;
     if (!canvas) return;
-    if (scanStatusRef.current === "SECURE_MATCH" || scanStatusRef.current === "UNKNOWN_QUERY") return;
+    if (scanStatusRef.current !== "TARGET_LOCKING" || lockPendingRef.current) return;
 
     gate.begin();
     const totalTimer = startTimer();
@@ -331,131 +511,157 @@ const VPatrol = () => {
       });
       setServiceNotice('');
 
-      if (scanStatusRef.current === "SECURE_MATCH" || scanStatusRef.current === "UNKNOWN_QUERY") {
-        return;
-      }
+      if (scanStatusRef.current !== "TARGET_LOCKING" || lockPendingRef.current) return;
 
-      if (res.data && Array.isArray(res.data.box) && res.data.box.length === 4) {
-        // FastAPI contract: box is exactly [x, y, width, height] in pixels of
-        // the captured frame. Direct mapping (no corner-order guessing),
-        // clamped to the frame, projected onto the contain-fit preview.
-        const frame = { width: canvas.width, height: canvas.height };
-        const containerEl = containerRef.current;
-        const container = containerEl
-          ? { width: containerEl.clientWidth, height: containerEl.clientHeight }
-          : frame;
-        const { width: boxWidth } = clampBoxToFrame(res.data.box, frame.width, frame.height);
-        const targetBox = faceBoxStyle(res.data.box, frame, container, 'contain');
+      const recognizedUser = res.data?.user;
+      if (!recognizedUser) return; // presence/no-face resets belong to the tracking loop
 
-        // Calculate proximity based on the compressed canvas width
-        const faceProximityPercentage = (boxWidth / canvas.width) * 100;
-        const livenessRatio = res.data.liveness_ratio || 0.5;
-
-        if (faceProximityPercentage < 5 && scanStatusRef.current !== "LIVENESS_CHECK") {
-          if (scanStatusRef.current === "SYSTEM_ACTIVE" || scanStatusRef.current === "PRESENCE_DETECTED") {
-            changeScanState("PRESENCE_DETECTED");
-            setFaceBox(null);
-            setScanProgress(0);
-          }
-          return;
+      // TARGET LOCKING SEQUENCE — one decision per lock window.
+      lockPendingRef.current = true;
+      setScanProgress(12);
+      let progress = 12;
+      progressIntervalRef.current = setInterval(() => {
+        progress += Math.floor(Math.random() * 14) + 4;
+        if (progress >= 96) {
+          setScanProgress(96);
+          clearInterval(progressIntervalRef.current);
+        } else {
+          setScanProgress(progress);
         }
+      }, 120);
 
-        if (scanStatusRef.current === "LIVENESS_CHECK") {
-          setFaceBox(targetBox);
-          const currentRecognitionUser = res.data.user;
-          if (!candidateUserRef.current || !currentRecognitionUser || candidateUserRef.current.id !== currentRecognitionUser.id) {
-            resetScanner();
-            return;
-          }
-
-          if (livenessRatio < 0.45 || livenessRatio > 0.55) {
-            grantFinalAccess(candidateUserRef.current);
-          }
-          return;
-        }
-
-        if (scanStatusRef.current === "SYSTEM_ACTIVE" || scanStatusRef.current === "PRESENCE_DETECTED") {
-          changeScanState("TARGET_LOCKING");
-          setFaceBox(targetBox);
-          setScanProgress(12);
-
-          let progress = 12;
-          progressIntervalRef.current = setInterval(() => {
-            progress += Math.floor(Math.random() * 14) + 4;
-            if (progress >= 96) {
-              setScanProgress(96);
-              clearInterval(progressIntervalRef.current);
-            } else {
-              setScanProgress(progress);
-            }
-          }, 120);
-
-          lockTimerRef.current = setTimeout(() => {
-            clearInterval(progressIntervalRef.current);
-
-            const currentTimestamp = Date.now();
-            const logTimeStr = new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
-
-            const recognizedUser = res.data.user;
-            if (recognizedUser && recognizedUser.status === RECOGNITION_STATUS.AUTHORIZED) {
-              candidateUserRef.current = recognizedUser;
-              changeScanState("LIVENESS_CHECK");
-            } else {
-              // Suspended or unknown - the Node backend has already written the
-              // deduplicated SecurityLog; the client only updates its local timeline.
-              const isSuspended = recognizedUser && recognizedUser.status === RECOGNITION_STATUS.SUSPENDED;
-              const subject = describeRecognitionSubject(recognizedUser);
-
-              playFeedback('denied');
-              changeScanState("UNKNOWN_QUERY");
-              setIdentifiedUser(isSuspended ? `${subject.identityLabel} - SUSPENDED` : "UNKNOWN PERSONNEL");
-              setScanProgress(0);
-
-              const dedupName = isSuspended ? recognizedUser.name : "UNKNOWN";
-              if (lastLogRef.current.name !== dedupName || (currentTimestamp - lastLogRef.current.timestamp > 10000)) {
-                const newLog = {
-                  id: `SEC-${Date.now()}`,
-                  // New event happening right now - stamped at detection time.
-                  occurredAt: new Date(currentTimestamp).toISOString(),
-                  time: logTimeStr,
-                  type: isSuspended ? 'Suspended Access Attempt' : 'Intrusion Alert',
-                  desc: isSuspended
-                    ? `Suspended account denied at gantry: ${subject.identityLabel}.`
-                    : 'Unregistered personnel detected at gantry.',
-                  severity: 'critical',
-                  icon: isSuspended ? 'DENIED' : 'ALERT',
-                  personnelName: isSuspended ? recognizedUser.name : null,
-                  role: isSuspended ? recognizedUser.role : null,
-                  confidence: recognizedUser ? recognizedUser.confidence : null,
-                  cameraLocation: CAMERA_LOCATION
-                };
-
-                setIncidentLogs(prev => [newLog, ...prev.slice(0, 14)]);
-                lastLogRef.current = { name: dedupName, timestamp: currentTimestamp };
-              }
-
-              setTimeout(() => { resetScanner(); }, 3500);
-            }
-          }, TARGET_LOCK_MS);
-
-        } else if (scanStatusRef.current === "TARGET_LOCKING") {
-          setFaceBox(targetBox);
-        }
-
-      } else {
-        if (scanStatusRef.current !== "LIVENESS_CHECK" && scanStatusRef.current !== "TARGET_LOCKING") {
-          resetScanner();
-        }
-      }
+      lockTimerRef.current = setTimeout(() => {
+        clearInterval(progressIntervalRef.current);
+        lockPendingRef.current = false;
+        resolveCandidateDecision(recognizedUser);
+      }, TARGET_LOCK_MS);
     } catch (err) {
       // Node/FastAPI unavailable - back off instead of flooding the endpoint.
       // The camera preview keeps running; webcam fallback is ONLY for Pi failure.
       console.error("AI Command Loop Fault:", err);
-      scanGateRef.current.applyBackoff();
+      recognitionInFlightRef.current.applyBackoff();
       setServiceNotice(SERVICE_UNAVAILABLE_MSG);
     } finally {
-      scanGateRef.current.end();
+      recognitionInFlightRef.current.end();
     }
+  };
+
+  const resolveCandidateDecision = (recognizedUser) => {
+    if (scanStatusRef.current !== "TARGET_LOCKING") return;
+
+    const currentTimestamp = nowMs();
+    const logTimeStr = new Date(currentTimestamp).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+
+    if (recognizedUser && recognizedUser.status === RECOGNITION_STATUS.AUTHORIZED) {
+      candidateUserRef.current = recognizedUser;
+      // Baseline = median of up to three recent valid tracking ratios; the
+      // challenge then requires sustained CHANGE from that baseline.
+      challengeRef.current = createHeadTurnChallenge({
+        initialSamples: recentRatiosRef.current,
+      });
+      setScanProgress(0);
+      changeScanState("LIVENESS_CHECK");
+    } else {
+      // Suspended or unknown - the Node backend has already written the
+      // deduplicated SecurityLog; the client only updates its local timeline.
+      const isSuspended = recognizedUser && recognizedUser.status === RECOGNITION_STATUS.SUSPENDED;
+      const subject = describeRecognitionSubject(recognizedUser);
+
+      playFeedback('denied');
+      changeScanState("UNKNOWN_QUERY");
+      setIdentifiedUser(isSuspended ? `${subject.identityLabel} - SUSPENDED` : "UNKNOWN PERSONNEL");
+      setScanProgress(0);
+
+      const dedupName = isSuspended ? recognizedUser.name : "UNKNOWN";
+      if (lastLogRef.current.name !== dedupName || (currentTimestamp - lastLogRef.current.timestamp > 10000)) {
+        const newLog = {
+          id: `SEC-${currentTimestamp}`,
+          // New event happening right now - stamped at detection time.
+          occurredAt: new Date(currentTimestamp).toISOString(),
+          time: logTimeStr,
+          type: isSuspended ? 'Suspended Access Attempt' : 'Intrusion Alert',
+          desc: isSuspended
+            ? `Suspended account denied at gantry: ${subject.identityLabel}.`
+            : 'Unregistered personnel detected at gantry.',
+          severity: 'critical',
+          icon: isSuspended ? 'DENIED' : 'ALERT',
+          personnelName: isSuspended ? recognizedUser.name : null,
+          role: isSuspended ? recognizedUser.role : null,
+          confidence: recognizedUser ? recognizedUser.confidence : null,
+          cameraLocation: CAMERA_LOCATION
+        };
+
+        setIncidentLogs(prev => [newLog, ...prev.slice(0, 14)]);
+        lastLogRef.current = { name: dedupName, timestamp: currentTimestamp };
+      }
+
+      setTimeout(() => { resetScanner(); }, 3500);
+    }
+  };
+
+  // Liveness timeout: fail closed — no access event is ever recorded from an
+  // unconfirmed challenge.
+  const failLivenessTimeout = () => {
+    candidateUserRef.current = null;
+    challengeRef.current = null;
+    setScanProgress(0);
+    playFeedback('denied');
+    changeScanState("UNKNOWN_QUERY");
+    setIdentifiedUser("LIVENESS TIMEOUT — NOT CONFIRMED");
+    setTimeout(() => { resetScanner(); }, 3500);
+  };
+
+  // ------------------------------------------------------------------
+  // FINAL SAME-IDENTITY CONFIRMATION — the lightweight tracker never grants
+  // access. After the head-turn passes, one final full recognition must match
+  // the ORIGINAL candidate user ID (and still be AUTHORIZED) before the
+  // access event is recorded. Anything else fails closed.
+  // ------------------------------------------------------------------
+  const runFinalConfirmation = async () => {
+    const candidate = candidateUserRef.current;
+    if (!candidate || finalizingRef.current) return;
+    finalizingRef.current = true;
+    challengeRef.current = null;
+    changeScanState("AUTHORIZING");
+    const scanSession = scanSessionRef.current;
+
+    try {
+      const imageBase64 = await captureFrameBase64();
+      if (!imageBase64) { failFinalConfirmation(); return; }
+      const res = await axios.post(RECOGNIZE_URL,
+        { image: imageBase64, cameraLocation: CAMERA_LOCATION },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (scanSession !== scanSessionRef.current) return;
+
+      const finalUser = res.data?.user;
+      if (
+        finalUser &&
+        finalUser.id != null &&
+        finalUser.id === candidate.id &&
+        finalUser.status === RECOGNITION_STATUS.AUTHORIZED
+      ) {
+        grantFinalAccess(candidate);
+      } else {
+        // Identity differs, disappeared, unknown or suspended — fail closed.
+        failFinalConfirmation();
+      }
+    } catch (err) {
+      console.error("Final identity confirmation failed:", err);
+      failFinalConfirmation();
+    } finally {
+      finalizingRef.current = false;
+    }
+  };
+
+  const failFinalConfirmation = () => {
+    candidateUserRef.current = null;
+    challengeRef.current = null;
+    setScanProgress(0);
+    playFeedback('denied');
+    changeScanState("UNKNOWN_QUERY");
+    setIdentifiedUser("IDENTITY NOT CONFIRMED");
+    setTimeout(() => { resetScanner(); }, 3500);
   };
 
   // Frontend filtering of the loaded timeline records (PoC).
@@ -463,10 +669,16 @@ const VPatrol = () => {
   const filteredLogs = filterSecurityLogs(incidentLogs, activeFilters);
 
   const resetScanner = () => {
+    if (lockTimerRef.current) clearTimeout(lockTimerRef.current);
+    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    lockPendingRef.current = false;
     setIdentifiedUser(null);
     setFaceBox(null);
+    smoothedBoxRef.current = null;
     setScanProgress(0);
+    setMultipleFacesNotice(false);
     candidateUserRef.current = null;
+    challengeRef.current = null;
     changeScanState("SYSTEM_ACTIVE");
   };
 
@@ -528,6 +740,7 @@ const VPatrol = () => {
                 style={cameraSource === CAMERA_SOURCES.PI ? { display: 'none' } : undefined}
               />
               <canvas ref={canvasRef} style={{ display: 'none' }} />
+              <canvas ref={trackCanvasRef} style={{ display: 'none' }} />
 
               {scanStatus === "HARDWARE_ERR" && (
                 <div className="camera-error-overlay" style={{
@@ -557,7 +770,8 @@ const VPatrol = () => {
                     top: faceBox.top,
                     left: faceBox.left,
                     width: faceBox.width,
-                    height: faceBox.height
+                    height: faceBox.height,
+                    transition: 'top 100ms linear, left 100ms linear, width 100ms linear, height 100ms linear'
                   }}
                 >
                   <div className="corner-bracket top-left"></div>
@@ -570,15 +784,18 @@ const VPatrol = () => {
                   <div className="box-identity-panel">
                     <span className="access-status-label">
                       {scanStatus === "TARGET_LOCKING" && `ANALYZING: ${scanProgress}%`}
-                      {scanStatus === "LIVENESS_CHECK" && "LIVENESS CHECK"}
+                      {scanStatus === "LIVENESS_CHECK" && "MOTION LIVENESS ACTIVE"}
+                      {scanStatus === "AUTHORIZING" && "CONFIRMING IDENTITY"}
                       {scanStatus === "SECURE_MATCH" && "GRANT ACCESS"}
                       {scanStatus === "UNKNOWN_QUERY" && "ACCESS DENIED"}
                     </span>
                     <span className="person-name-label">
-                      {scanStatus === "TARGET_LOCKING" && "LOCKING VECTORS..."}
-                      {scanStatus === "LIVENESS_CHECK" && "TURN HEAD SLIGHTLY"}
-                      {scanStatus === "SECURE_MATCH" && identifiedUser}
-                      {scanStatus === "UNKNOWN_QUERY" && "SUSPICIOUS ACTIVITY"}
+                      {multipleFacesNotice && "MULTIPLE FACES DETECTED — ONE PERSON AT A TIME"}
+                      {!multipleFacesNotice && scanStatus === "TARGET_LOCKING" && "LOCKING VECTORS..."}
+                      {!multipleFacesNotice && scanStatus === "LIVENESS_CHECK" && "TURN HEAD SLIGHTLY AND HOLD"}
+                      {!multipleFacesNotice && scanStatus === "AUTHORIZING" && "HOLD STILL"}
+                      {!multipleFacesNotice && scanStatus === "SECURE_MATCH" && identifiedUser}
+                      {!multipleFacesNotice && scanStatus === "UNKNOWN_QUERY" && (identifiedUser || "SUSPICIOUS ACTIVITY")}
                     </span>
                   </div>
                 </div>
@@ -589,14 +806,17 @@ const VPatrol = () => {
                   <div className="hud-left-meta">
                     <span className="hud-node">SYS_MODE // BIOMETRIC_GANTRY</span>
                     {scanStatus === "PRESENCE_DETECTED" && (
-                      <span className="hud-radar-alert">PROXIMITY SIGNAL DETECTED</span>
+                      <span className="hud-radar-alert">
+                        {multipleFacesNotice ? "MULTIPLE FACES DETECTED" : "PROXIMITY SIGNAL DETECTED"}
+                      </span>
                     )}
                   </div>
                   <span className={`hud-status-badge status-${scanStatus.toLowerCase()}`}>
                     {scanStatus === "SYSTEM_ACTIVE" && "IDLE MONITORING"}
                     {scanStatus === "PRESENCE_DETECTED" && "MOTION ACQUIRED"}
                     {scanStatus === "TARGET_LOCKING" && "VECTOR LOCK ACTIVE"}
-                    {scanStatus === "LIVENESS_CHECK" && "AWAITING MOVEMENT"}
+                    {scanStatus === "LIVENESS_CHECK" && "HEAD-TURN VERIFICATION"}
+                    {scanStatus === "AUTHORIZING" && "FINAL IDENTITY CHECK"}
                     {scanStatus === "SECURE_MATCH" && "SUCCESS MATCH"}
                     {scanStatus === "UNKNOWN_QUERY" && "ALERT WARNING"}
                   </span>

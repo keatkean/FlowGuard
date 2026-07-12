@@ -190,6 +190,48 @@ router.post('/access-event', allowFMOrEdgeService, async (req, res) => {
   }
 });
 
+// POST /api/facial-recognition/track
+// Lightweight, side-effect-free face tracking for the scanners' live overlay
+// and head-turn movement sampling. Forwards one temporary frame to FastAPI's
+// detection-only endpoint and returns SAFE transient telemetry (box, count,
+// head-turn ratio) — never an identity, never a database read/write, never a
+// SecurityLog or Attendance record. Tracking alone can never grant access.
+const TRACK_TIMEOUT_MS = 5000; // much shorter than full recognition (15s)
+
+router.post('/track', allowFMOrEdgeService, async (req, res) => {
+  const validation = validateFrame(req.body?.image);
+  if (validation) return res.status(validation.status).json({ error: validation.error });
+
+  try {
+    const aiResponse = await axios.post(`${FACE_AI_URL()}/user/track`, { image: req.body.image }, {
+      timeout: TRACK_TIMEOUT_MS,
+      headers: { 'X-AI-Service-Key': process.env.AI_SERVICE_KEY || '' }
+    });
+    const {
+      faceDetected = false,
+      faceCount = 0,
+      box = null,
+      headTurnRatio = null,
+      inferenceMs = null
+    } = aiResponse.data || {};
+
+    // Whitelisted safe fields only — nothing else from the AI reply passes through.
+    return res.status(200).json({ faceDetected, faceCount, box, headTurnRatio, inferenceMs });
+  } catch (err) {
+    const isConnError = !err.response &&
+      ['ECONNREFUSED', 'ECONNABORTED', 'ETIMEDOUT', 'ENOTFOUND'].includes(err.code);
+    if (isConnError) {
+      return res.status(503).json({ error: 'Face tracking service is offline. Please try again shortly.' });
+    }
+    if (err.response) {
+      const status = err.response.status === 400 ? 400 : 502;
+      return res.status(status).json({ error: 'Face tracking service returned an error.' });
+    }
+    console.error('Tracking forwarding error:', err.message);
+    return res.status(502).json({ error: 'Face tracking service returned an error.' });
+  }
+});
+
 // POST /api/facial-recognition/recognize
 // Frontend (Gate Scanner / V-Patrol) -> Node -> FastAPI -> Node resolves the User
 // record from PostgreSQL -> safe recognition result. The DB - not the AI cache -
