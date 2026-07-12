@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
-import { getHardwareStreamUrl, getHardwareHealthUrl } from '../utils/securepiStream';
+import { getHardwareStreamUrl, getHardwareHealthUrl, getHardwarePeopleCountUrl } from '../utils/securepiStream';
 import '../css/Dashboard.css';
 import '../css/ObjectDetection.css';
 
@@ -14,14 +14,18 @@ const ANALYZE_FRAME_URL = '/ai/api/yolo/analyze-frame';
 const OPEN_ALERT_STATUSES = ['Active', 'Acknowledged', 'Investigating', 'Escalated', 'Dispatched'];
 const SECUREPI_STREAM_URL = import.meta.env.VITE_SECUREPI_STREAM_URL || '';
 const SECUREPI_HEALTH_URL = import.meta.env.VITE_SECUREPI_HEALTH_URL || '';
+const SECUREPI_PEOPLE_COUNT_URL = import.meta.env.VITE_SECUREPI_PEOPLE_COUNT_URL || '';
+const SECUREPI_PEOPLE_COUNT_POLL_MS = 3000;
 
 const Icon = ({ name }) => <span className={`od-icon od-icon-${name}`} aria-hidden="true" />;
 
 const alertSource = (alert) => alert?.source || 'Object Detection';
-const isSecurePiAlert = (alert) => /securepi/i.test(alertSource(alert)) || /unattended/i.test(`${alert?.alert_type || ''} ${alert?.object_class || ''}`);
+const isCrowdAlert = (alert) => /crowd/i.test(alert?.alert_type || '');
+const isUnattendedAlert = (alert) => /unattended/i.test(`${alert?.alert_type || ''} ${alert?.object_class || ''}`);
 const alertTitle = (alert) => {
   if (!alert) return '';
-  if (isSecurePiAlert(alert)) return 'Unattended pallet/object detected';
+  if (isCrowdAlert(alert)) return 'Crowd density threshold exceeded';
+  if (isUnattendedAlert(alert)) return 'Unattended pallet/object detected';
   const rawTitle = String(alert.object_class || alert.alert_type || 'Detection Alert').replace(/^(Critical|Warning):\s*/i, '');
   return /detect/i.test(rawTitle) ? rawTitle : `${rawTitle} Detected`;
 };
@@ -65,6 +69,7 @@ const ObjectDetection = () => {
   const [workflowMessage, setWorkflowMessage] = useState('');
   const [alertActionBusy, setAlertActionBusy] = useState(false);
   const [selectedAlertId, setSelectedAlertId] = useState(null);
+  const [alertsRefreshing, setAlertsRefreshing] = useState(false);
 
   const [streamError, setStreamError] = useState(false);
   const [aiOffline, setAiOffline] = useState(false);
@@ -109,7 +114,25 @@ const ObjectDetection = () => {
       .catch(() => setNodeOffline(true));
   }, []);
 
+  const handleRefreshAlerts = useCallback(() => {
+    setAlertsRefreshing(true);
+    axios.get(ALERTS_URL, { headers })
+      .then(res => { setAlerts(res.data); setNodeOffline(false); })
+      .catch(() => setNodeOffline(true))
+      .finally(() => setAlertsRefreshing(false));
+  }, []);
+
+  // Read by fetchPeopleCount to skip the browser-YOLO poll while SecurePi hardware mode
+  // owns peopleCount/detectionActive (see the hardware people-count effect below) — a
+  // ref (not a dependency) so the 5s interval set up on mount doesn't need to restart
+  // every time the user switches source mode.
+  const sourceModeRef = useRef('camera');
+  useEffect(() => {
+    sourceModeRef.current = sourceMode;
+  }, [sourceMode]);
+
   const fetchPeopleCount = useCallback(() => {
+    if (sourceModeRef.current === 'hardware') return;
     axios.get(PEOPLE_URL, { timeout: 8000 })
       .then(res => {
         aiHealthFailuresRef.current = 0;
@@ -145,6 +168,10 @@ const ObjectDetection = () => {
   );
   const hardwareHealthUrl = useMemo(
     () => getHardwareHealthUrl(hardwareStreamUrl, SECUREPI_HEALTH_URL),
+    [hardwareStreamUrl]
+  );
+  const hardwarePeopleCountUrl = useMemo(
+    () => getHardwarePeopleCountUrl(hardwareStreamUrl, SECUREPI_PEOPLE_COUNT_URL),
     [hardwareStreamUrl]
   );
 
@@ -329,6 +356,38 @@ const ObjectDetection = () => {
       clearInterval(interval);
     };
   }, [sourceMode, hardwareReloadKey, hardwareHealthUrl]);
+
+  // SecurePi runs its own onboard YOLO and reports live counts on /people-count — the
+  // browser never sees its frames, so without this poll the People Detected badge and
+  // Inference State card stay frozen at whatever the browser-camera poll last wrote.
+  // Only active in hardware mode (fetchPeopleCount above skips itself the rest of the
+  // time) so webcam/uploaded-video behaviour is unchanged.
+  useEffect(() => {
+    if (sourceMode !== 'hardware' || !hardwarePeopleCountUrl) return undefined;
+    let cancelled = false;
+    const pollHardwarePeopleCount = () => {
+      axios.get(hardwarePeopleCountUrl, { timeout: 3000 })
+        .then((res) => {
+          if (cancelled) return;
+          setPeopleCount(res.data.count ?? 0);
+          setDetectionActive(Boolean(res.data.detection_active));
+        })
+        .catch((err) => {
+          // Pi unreachable or its own status just went stale — treat as "no live data"
+          // rather than leaving a possibly-stale count/active state on screen.
+          if (cancelled) return;
+          console.error('[SecurePi people-count] request failed:', hardwarePeopleCountUrl, err);
+          setPeopleCount(0);
+          setDetectionActive(false);
+        });
+    };
+    pollHardwarePeopleCount();
+    const interval = setInterval(pollHardwarePeopleCount, SECUREPI_PEOPLE_COUNT_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [sourceMode, hardwarePeopleCountUrl]);
 
   const handleUpdateAlertStatus = async (id, status) => {
     setAlertActionBusy(true);
@@ -700,14 +759,25 @@ const ObjectDetection = () => {
                   <span><Icon name="alert" /> Active Alerts</span>
                   <h2>Latest Detection Alerts</h2>
                 </div>
-                <button
-                  type="button"
-                  className="od-clear-all-btn"
-                  onClick={handleClearAllAlerts}
-                  disabled={alertActionBusy || activeAlertCount === 0}
-                >
-                  Clear All
-                </button>
+                <div className="od-alert-heading-actions">
+                  <button
+                    type="button"
+                    className="od-refresh-btn"
+                    onClick={handleRefreshAlerts}
+                    disabled={alertsRefreshing}
+                    title="Refresh alerts"
+                  >
+                    {alertsRefreshing ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                  <button
+                    type="button"
+                    className="od-clear-all-btn"
+                    onClick={handleClearAllAlerts}
+                    disabled={alertActionBusy || activeAlertCount === 0}
+                  >
+                    Clear All
+                  </button>
+                </div>
               </div>
               <div className="od-live-alert-list">
                 {alerts.filter((alert) => OPEN_ALERT_STATUSES.includes(alert.status)).map((alert) => (

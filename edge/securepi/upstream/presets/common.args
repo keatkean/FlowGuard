@@ -9,6 +9,7 @@
 # --- Alerting ---
 --unattended-time 120       # seconds before an unattended bag alerts
 --alert-cooldown 30         # seconds between repeat alerts per bag
+--crowd-threshold 1         # post a FlowGuard person alert when hardware sees people
 --snapshot-dir alerts       # where alert JPEGs are saved
 --max-snapshots 500         # keep newest N snapshots; protects the SD card
 

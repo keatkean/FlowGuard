@@ -7,9 +7,9 @@ import '../css/Dashboard.css';
 const ALERTS_URL = '/api/detection-alerts';
 const URGENT_ALERT_STATUSES = ['Active', 'Acknowledged', 'Investigating', 'Escalated', 'Dispatched'];
 const alertTitle = (alert) => {
-  const source = alert.source || '';
   const descriptor = `${alert.alert_type || ''} ${alert.object_class || ''}`;
-  if (/securepi/i.test(source) || /unattended/i.test(descriptor)) return 'Unattended pallet/object alert';
+  if (/crowd/i.test(alert.alert_type || '')) return 'Crowd density alert';
+  if (/unattended/i.test(descriptor)) return 'Unattended pallet/object alert';
   return alert.object_class || alert.alert_type || 'Detection Alert';
 };
 

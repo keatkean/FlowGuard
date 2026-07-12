@@ -59,13 +59,18 @@ const loadObjectDetection = async () => {
   ({ default: ObjectDetection } = await import('../../src/pages/ObjectDetection'));
 };
 
-const mockBackend = (cameras) => {
+const mockBackend = (cameras, { peopleCount } = {}) => {
   axios.get.mockImplementation((url) => {
     if (url === '/api/zones') return Promise.resolve({ data: [] });
     if (url === '/api/cameras') return Promise.resolve({ data: cameras });
     if (url === '/api/detection-alerts') return Promise.resolve({ data: [] });
     if (url === '/ai/api/yolo/people-count') return Promise.resolve({ data: { count: 0, detection_active: false } });
     if (url.endsWith('/health')) return Promise.resolve({ data: { status: 'ok' } });
+    if (url.endsWith('/people-count')) {
+      return peopleCount
+        ? Promise.resolve({ data: peopleCount })
+        : Promise.reject(new Error('SecurePi /people-count not reachable'));
+    }
     return Promise.reject(new Error(`unexpected GET ${url}`));
   });
   axios.post.mockResolvedValue({ data: { detections: [], count: 0 } });
@@ -74,6 +79,9 @@ const mockBackend = (cameras) => {
 const renderPage = () => render(<MemoryRouter><ObjectDetection /></MemoryRouter>);
 
 const healthCalls = () => axios.get.mock.calls.filter(([url]) => url.endsWith('/health'));
+// SecurePi's own /people-count status route — distinct from the browser-YOLO
+// /ai/api/yolo/people-count polled in camera/file mode.
+const securePiPeopleCountCalls = () => axios.get.mock.calls.filter(([url]) => url.endsWith('/people-count') && !url.includes('/ai/api/yolo'));
 
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -167,6 +175,70 @@ describe('SecurePi Hardware mode', () => {
 
     const reconnected = await screen.findByAltText('SecurePi live hardware camera');
     expect(reconnected).toHaveAttribute('src', 'http://172.20.10.2:8001/video_feed?t=1');
+  });
+});
+
+describe('SecurePi Hardware mode - live people count', () => {
+  test('polls the derived /people-count URL and shows the live People Detected badge', async () => {
+    mockBackend([SECUREPI_CAMERA], { peopleCount: { count: 3, detection_active: true } });
+    renderPage();
+
+    await screen.findByRole('option', { name: /CAM-SECUREPI-01/ });
+    fireEvent.click(screen.getByRole('button', { name: 'SecurePi Hardware' }));
+
+    await waitFor(() => expect(securePiPeopleCountCalls().length).toBeGreaterThan(0));
+    expect(securePiPeopleCountCalls()[0][0]).toBe('http://172.20.10.2:8001/people-count');
+    expect(await screen.findByText('3 People Detected')).toBeTruthy();
+  });
+
+  test('a Pi-unreachable /people-count response falls back to 0 instead of leaving a stale count', async () => {
+    mockBackend([SECUREPI_CAMERA]); // no peopleCount stub => /people-count rejects
+    renderPage();
+
+    await screen.findByRole('option', { name: /CAM-SECUREPI-01/ });
+    fireEvent.click(screen.getByRole('button', { name: 'SecurePi Hardware' }));
+
+    await waitFor(() => expect(securePiPeopleCountCalls().length).toBeGreaterThan(0));
+    expect(await screen.findByText('0 People Detected')).toBeTruthy();
+  });
+
+  test('a stale (detection_active: false) Pi response is reflected, not treated as a live count', async () => {
+    mockBackend([SECUREPI_CAMERA], { peopleCount: { count: 0, bag_count: 0, detection_active: false, age_seconds: 12.4 } });
+    renderPage();
+
+    await screen.findByRole('option', { name: /CAM-SECUREPI-01/ });
+    fireEvent.click(screen.getByRole('button', { name: 'SecurePi Hardware' }));
+
+    await waitFor(() => expect(securePiPeopleCountCalls().length).toBeGreaterThan(0));
+    expect(await screen.findByText('0 People Detected')).toBeTruthy();
+  });
+
+  test('webcam mode never calls the SecurePi /people-count route (only the browser-YOLO endpoint)', async () => {
+    mockBackend([SECUREPI_CAMERA], { peopleCount: { count: 5, detection_active: true } });
+    renderPage();
+
+    await screen.findByRole('option', { name: /CAM-SECUREPI-01/ });
+    await waitFor(() => expect(axios.get.mock.calls.some(([url]) => url === '/ai/api/yolo/people-count')).toBe(true));
+    expect(securePiPeopleCountCalls()).toHaveLength(0);
+  });
+
+  test('leaving hardware mode stops the SecurePi /people-count poll from growing further', async () => {
+    mockBackend([SECUREPI_CAMERA], { peopleCount: { count: 2, detection_active: true } });
+    renderPage();
+
+    await screen.findByRole('option', { name: /CAM-SECUREPI-01/ });
+    fireEvent.click(screen.getByRole('button', { name: 'SecurePi Hardware' }));
+    await screen.findByText('2 People Detected');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Browser Camera' }));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(2));
+
+    const callsRightAfterSwitch = securePiPeopleCountCalls().length;
+    // The one-shot poll on entering hardware mode already fired; the effect's cleanup
+    // (on the sourceMode dependency changing away from 'hardware') must prevent any
+    // further poll from firing once we've left hardware mode.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(securePiPeopleCountCalls().length).toBe(callsRightAfterSwitch);
   });
 });
 
