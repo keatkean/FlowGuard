@@ -13,9 +13,9 @@ const HowItWorks = () => {
       <div className="features-header">
         <h2 className="section-title">How FlowGuard Works</h2>
       </div>
-      <div className="features-grid">
+      <div className="features-grid workflow-grid">
         {steps.map((step, index) => (
-          <div key={step.title} className="feature-card">
+          <div key={step.title} className="feature-card workflow-card" data-testid="workflow-step">
             <span className="step-index">{index + 1}</span>
             <h3 className="feature-title">{step.title}</h3>
             <p className="feature-description">{step.text}</p>

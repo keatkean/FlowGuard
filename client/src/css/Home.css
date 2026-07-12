@@ -608,10 +608,6 @@
     gap: 14px;
 }
 
-.hero-button-secondary {
-    color: #cbd5e1;
-    border-color: #334155;
-}
 
 .section-subtitle-spaced {
     margin-top: 12px;
@@ -678,5 +674,69 @@
         width: 100%;
         max-width: 280px;
         justify-content: center;
+    }
+}
+
+/* Homepage layout polish: four-card desktop rows */
+.features-section {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.module-grid,
+.workflow-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-items: stretch;
+}
+
+.module-card,
+.workflow-card {
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.module-card .feature-title,
+.workflow-card .feature-title {
+    min-height: 3.5rem;
+    display: flex;
+    align-items: flex-start;
+}
+
+.module-card .feature-description,
+.workflow-card .feature-description {
+    margin-bottom: 0;
+}
+
+.module-card .feature-list {
+    margin-top: 18px;
+}
+
+.workflow-card .step-index {
+    flex: 0 0 auto;
+}
+
+.hero-actions-single {
+    justify-content: center;
+}
+
+@media (max-width: 1099px) {
+    .module-grid,
+    .workflow-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 699px) {
+    .module-grid,
+    .workflow-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .module-card .feature-title,
+    .workflow-card .feature-title {
+        min-height: 0;
     }
 }

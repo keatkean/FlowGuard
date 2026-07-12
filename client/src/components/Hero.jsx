@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 
 const Hero = () => {
   return (
-    <section className="hero-container">
+    <section className="hero-container" data-testid="homepage-hero">
       <span className="hero-badge">Academic Proof of Concept</span>
       <h1 className="hero-title">FlowGuard</h1>
       <p className="hero-subheading">
@@ -13,7 +13,7 @@ const Hero = () => {
         FlowGuard combines facial access management, camera-based object monitoring,
         loading-bay coordination and operational support in one integrated proof of concept.
       </p>
-      <div className="hero-actions">
+      <div className="hero-actions hero-actions-single">
         <Link to="/innovation" className="hero-button">
           Explore Capabilities
           <svg className="button-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -21,7 +21,6 @@ const Hero = () => {
             <polyline points="12 5 19 12 12 19"></polyline>
           </svg>
         </Link>
-        <Link to="/login" className="hero-button hero-button-secondary">Client Login</Link>
       </div>
     </section>
   );

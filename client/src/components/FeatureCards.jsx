@@ -30,9 +30,9 @@ const FeatureCards = () => {
         <h2 className="section-title">Actual Group Modules</h2>
         <p className="section-subtitle">Four implemented areas make up the current FlowGuard proof of concept.</p>
       </div>
-      <div className="features-grid">
+      <div className="features-grid module-grid">
         {features.map((f) => (
-          <div key={f.title} className="feature-card">
+          <div key={f.title} className="feature-card module-card" data-testid="module-card">
             <h3 className="feature-title">{f.title}</h3>
             <p className="feature-description">{f.description}</p>
             <ul className="feature-list">

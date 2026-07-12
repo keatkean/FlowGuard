@@ -1,7 +1,7 @@
 import React from 'react';
 import '@testing-library/jest-dom/vitest';
 import { describe, expect, test, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import fs from 'fs';
 import path from 'path';
@@ -15,6 +15,50 @@ const forbiddenClaims = /128\+|PPE|Spill|pest|HVAC|temperature|humidity|99\.8|40
 const internalData = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}|\\+65\\s?\\d{4}\\s?\\d{4}|192\\.168\\.|10\\.0\\.|SG[A-Z0-9]{6,}|faceVector|passwordResetTokenHash/i;
 
 describe('public FlowGuard website PoC positioning', () => {
+  test('homepage module and workflow cards render as four ordered public cards', () => {
+    renderPublic(<Home />);
+
+    const moduleCards = screen.getAllByTestId('module-card');
+    expect(moduleCards).toHaveLength(4);
+    expect(moduleCards.map((card) => within(card).getByRole('heading').textContent)).toEqual([
+      'Facial Recognition & Access Management',
+      'Object Detection & Space Management',
+      'Smart Logistics & Loading-Bay Management',
+      'AI Helpdesk & Incident Support'
+    ]);
+
+    const workflowSteps = screen.getAllByTestId('workflow-step');
+    expect(workflowSteps).toHaveLength(4);
+    expect(workflowSteps.map((card) => within(card).getByRole('heading').textContent)).toEqual([
+      'Configure',
+      'Monitor',
+      'Respond',
+      'Review'
+    ]);
+  });
+
+  test('homepage hero has one capabilities CTA while navbar keeps Client Login', () => {
+    renderPublic(<Home />);
+
+    const hero = within(screen.getByTestId('homepage-hero'));
+    expect(hero.getByRole('link', { name: /Explore Capabilities/i })).toHaveAttribute('href', '/innovation');
+    expect(hero.queryByRole('link', { name: /Client Login/i })).toBeNull();
+
+    const nav = within(screen.getByRole('navigation'));
+    expect(nav.getByRole('link', { name: /Client Login/i })).toHaveAttribute('href', '/login');
+  });
+
+  test('homepage CSS defines four-two-one responsive grids for public cards', () => {
+    const css = fs.readFileSync(path.resolve(process.cwd(), 'src/css/Home.css'), 'utf8');
+
+    expect(css).toContain('.module-grid,');
+    expect(css).toContain('.workflow-grid');
+    expect(css).toContain('grid-template-columns: repeat(4, minmax(0, 1fr));');
+    expect(css).toContain('@media (max-width: 1099px)');
+    expect(css).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(css).toContain('@media (max-width: 699px)');
+    expect(css).toContain('grid-template-columns: 1fr;');
+  });
   test('homepage shows academic PoC positioning, four real modules and no fake telemetry claims', () => {
     renderPublic(<Home />);
 
