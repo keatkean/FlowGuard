@@ -1,34 +1,41 @@
 import React, { useRef, useState, useEffect } from 'react';
 import axios from 'axios';
 import Sidebar from '../components/Sidebar';
-import { DECISION_STATES } from '../components/RecognitionDecisionCard';
-import EvaluationRecorderModal from '../components/EvaluationRecorderModal';
-import LiveConfusionMatrixPanel from '../components/LiveConfusionMatrixPanel';
-import useEvaluationParticipants from '../hooks/useEvaluationParticipants';
 import '../css/Dashboard.css';
 import '../css/VPatrol.css'; // Reusing the high-tech tracking box and HUD dashboard styles
 import {
   PI_CAMERA_STREAM_URL,
   CAMERA_SOURCES,
   CAMERA_STATUS_MESSAGES,
-  isPiCameraReachable,
+  isPiCameraReachableCached,
+  markPiUnavailable,
   fetchPiSnapshotBitmap,
 } from '../constants/piCamera';
 import { API_BASE_URL } from '../constants/api';
 import { clampBoxToFrame, faceBoxStyle } from '../constants/faceBox';
 import { describeRecognitionSubject, RECOGNITION_STATUS } from '../constants/recognition';
-import { loadLabelMap, buildEvaluationDraftFromRecognition, loadRecords, saveRecords, saveEvaluationRecordFromDraft, notifyEvaluationRecordsUpdated, DETECTION_OUTCOMES } from '../constants/evaluation';
 import {
   SCAN_INTERVAL_MS,
   TARGET_LOCK_MS,
   CAPTURE_MAX_WIDTH,
+  CAPTURE_JPEG_QUALITY,
   SERVICE_UNAVAILABLE_MSG,
   createScanGate,
   startTimer,
   logScanTimings,
 } from '../constants/scanControl';
 
-const MATRIX_ORIGIN = 'Gate Scanner';
+// Concise operator-facing label for each kiosk state (right-hand status card).
+const GATE_STATE_LABELS = {
+  SYSTEM_ACTIVE: 'Awaiting target',
+  PRESENCE_DETECTED: 'Target detected — move closer',
+  TARGET_LOCKING: 'Analysing biometric vectors',
+  LIVENESS_CHECK: 'Liveness check — turn head slightly',
+  AUTHORIZING: 'Authorising gate transaction',
+  SECURE_MATCH: 'Access granted',
+  UNKNOWN_QUERY: 'Access denied',
+  HARDWARE_ERR: 'Camera unavailable',
+};
 
 const GateScanner = () => {
   const videoRef = useRef(null);
@@ -44,21 +51,14 @@ const GateScanner = () => {
   const [cameraSource, setCameraSource] = useState(CAMERA_SOURCES.PI);
   const [cameraStatusMsg, setCameraStatusMsg] = useState("Connecting to Pi Gate Camera...");
 
-  // Last gate decision - safe display fields only (never biometric data).
+  // Last gate transaction - safe display fields only (never biometric data):
+  // { identityLabel, attendanceResult, gateAction }.
   const [lastDecision, setLastDecision] = useState(null);
-  const [evalModal, setEvalModal] = useState({ open: false, draft: null });
-  const [scanMode, setScanMode] = useState('operational');
-  const [evaluationConfig, setEvaluationConfig] = useState({ actualLabel: '', condition: 'Front', autoRecord: true });
-  const { participants, labels: participantLabels, loading: participantsLoading, error: participantsError } = useEvaluationParticipants();
-  const scanModeRef = useRef('operational');
-  const evaluationConfigRef = useRef({ actualLabel: '', condition: 'Front', autoRecord: true });
-  const lastRecordedScanRef = useRef(null);
-  // Switching modes clears the previous decision so the evaluation accordion
-  // only ever shows results produced in Live Evaluation Mode.
-  const updateScanMode = (mode) => { setScanMode(mode); scanModeRef.current = mode; lastRecordedScanRef.current = null; setLastDecision(null); };
-  const updateEvaluationConfig = (next) => { setEvaluationConfig(next); evaluationConfigRef.current = next; };
   const cameraSourceRef = useRef(CAMERA_SOURCES.PI);
   const piFailStreakRef = useRef(0);
+  // Bumped on camera-source switch and unmount; responses from an older
+  // session are stale and must be ignored.
+  const scanSessionRef = useRef(0);
 
   const scanStatusRef = useRef("SYSTEM_ACTIVE");
   const lockTimerRef = useRef(null);
@@ -71,22 +71,7 @@ const GateScanner = () => {
   // All recognition traffic goes through the Node backend - never FastAPI directly.
   const ATTENDANCE_SCAN_URL = `${API_BASE_URL}/api/attendance/scan`;
   const RECOGNIZE_URL = `${API_BASE_URL}/api/facial-recognition/recognize`;
-  const EVALUATE_URL = `${API_BASE_URL}/api/facial-recognition/evaluate`;
   const CAMERA_LOCATION = "South Entrance Turnstile";
-
-  const cameraSourceLabel = cameraSource === CAMERA_SOURCES.PI ? 'Raspberry Pi Gate Camera' : 'Laptop Webcam';
-
-  // Recording ground truth only stores one local evaluation record - it never
-  // re-runs recognition and never creates Attendance or SecurityLogs.
-  const openEvaluationRecorder = (result) => {
-    const draft = buildEvaluationDraftFromRecognition({ result, labelMap: loadLabelMap(), origin: MATRIX_ORIGIN });
-    setEvalModal({ open: true, draft });
-  };
-
-  const handleEvaluationSaved = () => {
-    setEvalModal({ open: false, draft: null });
-    setLastDecision((prev) => prev ? { ...prev, evaluationMessage: 'Live evaluation result recorded' } : prev);
-  };
 
   const changeScanState = (nextState, message) => {
     setScanStatus(nextState);
@@ -99,6 +84,7 @@ const GateScanner = () => {
     const scanInterval = setInterval(() => performPerimeterScan(), SCAN_INTERVAL_MS);
 
     return () => {
+      scanSessionRef.current += 1; // any in-flight recognition response is now stale
       stopGateCamera();
       clearInterval(scanInterval);
       if (lockTimerRef.current) clearTimeout(lockTimerRef.current);
@@ -116,7 +102,7 @@ const GateScanner = () => {
   // Primary source: Raspberry Pi Gate Camera. Probe the snapshot endpoint on
   // load; if unreachable, automatically fall back to the laptop webcam.
   const initCameraSource = async () => {
-    const piReachable = await isPiCameraReachable();
+    const piReachable = await isPiCameraReachableCached();
     if (piReachable) {
       stopGateCamera();
       applyCameraSource(CAMERA_SOURCES.PI, CAMERA_STATUS_MESSAGES.PI_CONNECTED);
@@ -130,8 +116,9 @@ const GateScanner = () => {
   // Manual camera source switch (Pi Gate Camera / Laptop Webcam)
   const selectCameraSource = async (source) => {
     if (source === cameraSourceRef.current) return;
+    scanSessionRef.current += 1; // invalidate responses captured from the old source
     if (source === CAMERA_SOURCES.PI) {
-      const piReachable = await isPiCameraReachable();
+      const piReachable = await isPiCameraReachableCached();
       if (piReachable) {
         stopGateCamera();
         applyCameraSource(CAMERA_SOURCES.PI, CAMERA_STATUS_MESSAGES.PI_CONNECTED);
@@ -183,10 +170,6 @@ const GateScanner = () => {
     changeScanState("AUTHORIZING", "AUTHORISING GATE TRANSACTION");
     setScanProgress(100);
 
-    const evaluationResult = verifiedUser._evaluationResult;
-    const confidence = verifiedUser.confidence ?? evaluationResult?.user?.confidence ?? null;
-    const latencyMs = evaluationResult?.timings?.totalRequestMs ?? evaluationResult?.timings?.nodeToAiMs ?? null;
-
     try {
       // Hit the Node.js automatic clock-in/out controller with the
       // server-verified unique user ID - never a name.
@@ -203,27 +186,19 @@ const GateScanner = () => {
         const actionMessage = res.data.action.replace(/_/g, " ");
         setDisplayMessage(`${subject.identityLabel} - ${actionMessage}`);
         setLastDecision({
-          state: DECISION_STATES.GRANTED,
           identityLabel: subject.identityLabel,
-          confidence,
-          latencyMs,
-          livenessVerified: true,
-          cameraSourceLabel,
-          evaluationResult
+          attendanceResult: `Access granted — ${actionMessage.toLowerCase()} successful`,
+          gateAction: 'Turnstile unlocked'
         });
       }
     } catch (err) {
+      // Fail closed: any gate-transaction fault leaves the turnstile locked.
       console.error("Attendance Sync Failed:", err);
       setDisplayMessage("GATE TRANSACTION ROUTING FAULT");
       setLastDecision({
-        state: DECISION_STATES.UNKNOWN,
         identityLabel: subject.identityLabel,
-        confidence,
-        latencyMs,
-        livenessVerified: true,
-        cameraSourceLabel,
-        actionOverride: 'Gate authorisation failed - access remains locked.',
-        evaluationResult
+        attendanceResult: 'Gate transaction failed — turnstile remains locked',
+        gateAction: 'Turnstile remains locked'
       });
     }
 
@@ -245,8 +220,10 @@ const GateScanner = () => {
         piFailStreakRef.current = 0;
       } catch {
         // Pi snapshot failed mid-session - after 3 misses, fall back to webcam
+        // and cache the failure so the Pi isn't re-probed every scan cycle.
         piFailStreakRef.current += 1;
         if (piFailStreakRef.current >= 3) {
+          markPiUnavailable();
           applyCameraSource(CAMERA_SOURCES.WEBCAM, CAMERA_STATUS_MESSAGES.PI_UNAVAILABLE);
           await startGateCamera();
         }
@@ -257,7 +234,7 @@ const GateScanner = () => {
       canvas.height = Math.round(bitmap.height * scale);
       context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
       bitmap.close?.();
-      return canvas.toDataURL('image/jpeg', 0.3);
+      return canvas.toDataURL('image/jpeg', CAPTURE_JPEG_QUALITY);
     }
 
     const video = videoRef.current;
@@ -266,7 +243,7 @@ const GateScanner = () => {
     canvas.width = Math.round(video.videoWidth * scale);
     canvas.height = Math.round(video.videoHeight * scale);
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', 0.3);
+    return canvas.toDataURL('image/jpeg', CAPTURE_JPEG_QUALITY);
   };
 
   const performPerimeterScan = async () => {
@@ -280,32 +257,13 @@ const GateScanner = () => {
 
     gate.begin();
     const totalTimer = startTimer();
+    const scanSession = scanSessionRef.current;
 
     try {
       const captureTimer = startTimer();
       const imageBase64 = await captureFrameBase64();
       const captureMs = captureTimer();
       if (!imageBase64) return;
-
-      if (scanModeRef.current === 'evaluation') {
-        const cycleId = lastRecordedScanRef.current || `EVAL-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        const res = await axios.post(EVALUATE_URL, { image: imageBase64 }, { headers: { Authorization: `Bearer ${token}` } });
-        const draft = buildEvaluationDraftFromRecognition({ result: res.data, labelMap: loadLabelMap(), source: 'Live', origin: 'Gate Scanner' });
-        if (draft.detectionOutcome === DETECTION_OUTCOMES.NO_FACE) {
-          setLastDecision({ state: DECISION_STATES.NO_FACE, cameraSourceLabel, evaluationResult: res.data });
-          return;
-        }
-        const config = evaluationConfigRef.current;
-        if (config.autoRecord && config.actualLabel && !lastRecordedScanRef.current && !draft.needsMapping) {
-          lastRecordedScanRef.current = cycleId;
-          const record = saveEvaluationRecordFromDraft(draft, { actualLabel: config.actualLabel, condition: config.condition });
-          saveRecords([record, ...loadRecords()]);
-          notifyEvaluationRecordsUpdated({ origin: 'Gate Scanner' });
-          setLastDecision({ state: res.data.policyDecision === 'GRANTED' ? DECISION_STATES.GRANTED : DECISION_STATES.UNKNOWN, identityLabel: draft.predictedLabel, confidence: draft.confidence, latencyMs: draft.latencyMs, cameraSourceLabel, evaluationResult: res.data, evaluationMessage: 'Live evaluation sample recorded' });
-          setTimeout(() => { lastRecordedScanRef.current = null; }, 3500);
-        }
-        return;
-      }
 
       const apiTimer = startTimer();
       const res = await axios.post(RECOGNIZE_URL, {
@@ -314,6 +272,8 @@ const GateScanner = () => {
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      // Stale response: camera source switched (or unmounted) mid-request.
+      if (scanSession !== scanSessionRef.current) return;
       logScanTimings({
         captureMs,
         apiMs: apiTimer(),
@@ -375,23 +335,18 @@ const GateScanner = () => {
             clearInterval(progressIntervalRef.current);
 
             const recognizedUser = res.data.user;
-            const confidence = recognizedUser?.confidence ?? null;
-            const latencyMs = res.data?.timings?.totalRequestMs ?? res.data?.timings?.nodeToAiMs ?? null;
 
             if (recognizedUser && recognizedUser.status === RECOGNITION_STATUS.AUTHORIZED) {
-              candidateUserRef.current = { ...recognizedUser, _evaluationResult: res.data };
+              candidateUserRef.current = recognizedUser;
               changeScanState("LIVENESS_CHECK", "VERIFYING LIVENESS: TURN HEAD SLIGHTLY");
             } else if (recognizedUser && recognizedUser.status === RECOGNITION_STATUS.SUSPENDED) {
               // Server already denied access and wrote the security log.
               const subject = describeRecognitionSubject(recognizedUser);
               changeScanState("UNKNOWN_QUERY", `${subject.identityLabel} - ${subject.accessLabel}`);
               setLastDecision({
-                state: DECISION_STATES.SUSPENDED,
                 identityLabel: subject.identityLabel,
-                confidence,
-                latencyMs,
-                cameraSourceLabel,
-                evaluationResult: res.data
+                attendanceResult: 'Access denied — account suspended',
+                gateAction: 'Turnstile remains locked'
               });
               setScanProgress(0);
               setTimeout(() => { resetTurnstileKiosk(); }, 3500);
@@ -399,12 +354,9 @@ const GateScanner = () => {
               // Unknown person - server already wrote the intrusion log.
               changeScanState("UNKNOWN_QUERY", "PERIMETER BREACH: ACCESS DENIED");
               setLastDecision({
-                state: DECISION_STATES.UNKNOWN,
                 identityLabel: describeRecognitionSubject(recognizedUser).identityLabel,
-                confidence,
-                latencyMs,
-                cameraSourceLabel,
-                evaluationResult: res.data
+                attendanceResult: 'Access denied — unknown person',
+                gateAction: 'Turnstile remains locked'
               });
               setScanProgress(0);
               setTimeout(() => { resetTurnstileKiosk(); }, 3500);
@@ -414,12 +366,9 @@ const GateScanner = () => {
           setFaceBox(targetBox);
         }
       } else {
+        // No face in frame — reset the kiosk but keep the last transaction
+        // visible on the status card for the operator.
         if (scanStatusRef.current !== "LIVENESS_CHECK" && scanStatusRef.current !== "TARGET_LOCKING") {
-          setLastDecision({
-            state: DECISION_STATES.NO_FACE,
-            cameraSourceLabel,
-            evaluationResult: res.data
-          });
           resetTurnstileKiosk();
         }
       }
@@ -477,21 +426,7 @@ const GateScanner = () => {
           <span style={{ color: '#38bdf8', fontSize: '0.82rem' }}>{cameraStatusMsg}</span>
         </div>
 
-        <section className="evaluation-mode-controls" aria-label="Scanner mode">
-          <div className="scan-mode-selector">
-            <button type="button" aria-pressed={scanMode === 'operational'} className={scanMode === 'operational' ? 'active' : ''} onClick={() => updateScanMode('operational')}>Operational Mode</button>
-            <button type="button" aria-pressed={scanMode === 'evaluation'} className={scanMode === 'evaluation' ? 'active' : ''} onClick={() => updateScanMode('evaluation')}>Live Evaluation Mode</button>
-          </div>
-        </section>
-
-        <EvaluationRecorderModal
-          open={evalModal.open}
-          draft={evalModal.draft}
-          onSaved={handleEvaluationSaved}
-          onClose={() => setEvalModal({ open: false, draft: null })}
-        />
-
-        <div className="vpatrol-grid" style={{ gridTemplateColumns: '1fr' }}>
+        <div className="vpatrol-grid gate-grid">
           <div className="vpatrol-card monitor-section">
             <div ref={containerRef} className={`cctv-container state-theme-${scanStatus.toLowerCase()}`} style={{ width: '100%', height: '100%' }}>
               {cameraSource === CAMERA_SOURCES.PI && (
@@ -550,37 +485,39 @@ const GateScanner = () => {
 
             </div>
           </div>
-        </div>
 
-        {/* Collapsed evaluation accordion below the kiosk — Live Evaluation Mode only */}
-        {scanMode === 'evaluation' && <LiveConfusionMatrixPanel origin={MATRIX_ORIGIN} participantLabels={participantLabels}>
-          <div className="evaluation-config">
-            <label>Actual participant:<select value={evaluationConfig.actualLabel} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, actualLabel: e.target.value })}><option value="">Select ground-truth identity</option>{participants.map((participant) => <option key={participant.evaluationLabel} value={participant.evaluationLabel}>{participant.evaluationLabel} — {participant.name}</option>)}<option value="Unknown">Unknown Person</option></select>{participantsLoading && <span>Loading participants...</span>}{participantsError && <span role="alert">{participantsError}</span>}{!participantsLoading && !participantsError && participants.length === 0 && <span>No enrolled evaluation participants available.</span>}</label>
-            <label>Condition:<select value={evaluationConfig.condition} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, condition: e.target.value })}>{['Front','Left Angle','Right Angle','Normal Lighting','Low Lighting','Glasses','Other'].map((condition) => <option key={condition}>{condition}</option>)}</select></label>
-            <label><input type="checkbox" checked={evaluationConfig.autoRecord} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, autoRecord: e.target.checked })} /> Auto-record completed scans</label>
+          {/* Compact gate status / transaction result card (right of the camera) */}
+          <div className="vpatrol-card gate-status-card" role="status" aria-label="Gate status">
+            <div className="section-header">
+              <h2>Gate Status</h2>
+            </div>
+            <dl className="gate-status-list">
+              <div className="gate-status-row">
+                <dt>Current State</dt>
+                <dd className={`gate-state-value state-${scanStatus.toLowerCase()}`}>
+                  {GATE_STATE_LABELS[scanStatus] || 'Awaiting target'}
+                </dd>
+              </div>
+              {lastDecision?.identityLabel && (
+                <div className="gate-status-row">
+                  <dt>Last Recognised Person</dt>
+                  <dd>{lastDecision.identityLabel}</dd>
+                </div>
+              )}
+              {lastDecision?.attendanceResult && (
+                <div className="gate-status-row">
+                  <dt>Attendance Result</dt>
+                  <dd>{lastDecision.attendanceResult}</dd>
+                </div>
+              )}
+              <div className="gate-status-row">
+                <dt>Gate Action</dt>
+                <dd>{lastDecision?.gateAction || 'Turnstile locked — standby'}</dd>
+              </div>
+            </dl>
+            <p className="gate-status-message">{displayMessage}</p>
           </div>
-          <div className="eval-last-result" role="status">
-            {lastDecision ? (
-              <>
-                <p>
-                  Last evaluation result: {lastDecision.state === DECISION_STATES.NO_FACE
-                    ? 'No face detected'
-                    : `${lastDecision.identityLabel || 'Unknown'} — ${lastDecision.state === DECISION_STATES.GRANTED ? 'Access Granted' : 'Access Denied'}`}
-                  {lastDecision.confidence != null ? ` · Confidence ${Math.round(lastDecision.confidence * 100)}%` : ''}
-                  {lastDecision.latencyMs != null ? ` · ${Math.round(lastDecision.latencyMs)} ms` : ''}
-                </p>
-                {lastDecision.evaluationMessage && <p className="eval-last-result-message">{lastDecision.evaluationMessage}</p>}
-                {lastDecision.evaluationResult && (
-                  <button type="button" className="decision-record-btn" onClick={() => openEvaluationRecorder(lastDecision.evaluationResult)}>
-                    {lastDecision.state === DECISION_STATES.NO_FACE ? 'Record No-Face Test' : 'Record for Evaluation'}
-                  </button>
-                )}
-              </>
-            ) : (
-              <p>No evaluation result yet — run a scan in Live Evaluation Mode.</p>
-            )}
-          </div>
-        </LiveConfusionMatrixPanel>}
+        </div>
       </main>
     </div>
   );

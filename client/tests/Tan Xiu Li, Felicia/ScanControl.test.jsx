@@ -5,6 +5,7 @@ import {
   SCAN_INTERVAL_MS,
   TARGET_LOCK_MS,
   CAPTURE_MAX_WIDTH,
+  CAPTURE_JPEG_QUALITY,
   AI_ERROR_BACKOFF_MS,
   createScanGate,
 } from "../../src/constants/scanControl";
@@ -26,6 +27,12 @@ describe("scan tuning values", () => {
 
   test("AI-error backoff is a short pause (~5 s)", () => {
     expect(AI_ERROR_BACKOFF_MS).toBe(5000);
+  });
+
+  test("capture JPEG quality is reduced but not lossy-extreme (0.55–0.70)", () => {
+    expect(CAPTURE_JPEG_QUALITY).toBeGreaterThanOrEqual(0.55);
+    expect(CAPTURE_JPEG_QUALITY).toBeLessThanOrEqual(0.7);
+    expect(CAPTURE_JPEG_QUALITY).toBeLessThan(1); // never full quality
   });
 });
 

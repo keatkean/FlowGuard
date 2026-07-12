@@ -195,6 +195,49 @@
 .active-bookings .table-container { overflow-x: auto; }
 .active-bookings .management-table { min-width: 820px; } /* 8 columns; full-width card fits a laptop without scroll */
 
+/* --- Bookings table: readable cells + tidy action column --- */
+.booking-ref-cell {
+  font-family: monospace;
+  white-space: nowrap;         /* keep FG-XXXXXX refs on one line */
+}
+.booking-wrap-cell {
+  min-width: 0;
+  overflow-wrap: anywhere;     /* company / driver names wrap cleanly */
+}
+.active-bookings .status-badge { white-space: nowrap; }
+
+/* Compact action group: uniform buttons, primary first, destructive Cancel
+   full-width on its own row — no uneven wrapping, no stretched rows. */
+.booking-actions-cell { width: 240px; }
+.booking-action-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+  gap: 6px;
+  max-width: 232px;
+}
+.booking-action-btn {
+  margin: 0;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  text-align: center;
+  white-space: nowrap;
+}
+.booking-action-btn:only-child { grid-column: 1 / -1; }
+.booking-action-primary {
+  background: #1d4ed8;
+  color: #fff;
+}
+.booking-action-primary:hover { background: #2563eb; color: #fff; }
+.booking-action-danger {
+  grid-column: 1 / -1;         /* destructive Cancel sits alone below */
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  color: #fb7185;
+}
+.booking-action-danger:hover { background: #7f1d1d; color: #fff; }
+.booking-actions-none { color: #475569; }
+
 /* Tablet / smaller laptop: stack the form above the bookings table. */
 @media (max-width: 1024px) {
   .booking-grid { grid-template-columns: 1fr; }

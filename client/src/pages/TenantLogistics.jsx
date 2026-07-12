@@ -314,33 +314,39 @@ const TenantLogistics = () => {
                   {filtered.map((b) => {
                     const nextStatus = STATUS_FLOW[b.status];
                     const isClosed = CLOSED.includes(b.status);
+                    const canEditOrCancel = !isClosed && (role === 'FM' || role === 'Tenant');
+                    const hasActions = (canManage && nextStatus) || canEditOrCancel;
                     return (
                       <tr key={b.id}>
-                        <td data-label="Ref" style={{ fontFamily: 'monospace' }}>{b.booking_ref}</td>
+                        <td data-label="Ref" className="booking-ref-cell">{b.booking_ref}</td>
                         <td data-label="Plate">{b.license_plate}</td>
-                        <td data-label="Company">{b.transport_company}</td>
-                        <td data-label="Driver">{b.driver_name || '—'}</td>
+                        <td data-label="Company" className="booking-wrap-cell">{b.transport_company}</td>
+                        <td data-label="Driver" className="booking-wrap-cell">{b.driver_name || '—'}</td>
                         <td data-label="Bay">{b.loading_bay}</td>
                         <td data-label="Slot">{fmtSlot(b)}</td>
                         <td data-label="Status"><span className={`status-badge ${String(b.status).toLowerCase()}`}>{b.status}</span></td>
-                        <td data-label="Actions">
-                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                            {canManage && nextStatus && (
-                              <button className="edit-btn" onClick={() => updateStatus(b.id, nextStatus)}>
-                                Mark {nextStatus}
-                              </button>
-                            )}
-                            {!isClosed && (role === 'FM' || role === 'Tenant') && (
-                              <button className="edit-btn" onClick={() => openEdit(b)}>
-                                Edit
-                              </button>
-                            )}
-                            {!isClosed && (role === 'FM' || role === 'Tenant') && (
-                              <button className="edit-btn" style={{ background: '#7f1d1d' }} onClick={() => cancelBooking(b.id)}>
-                                Cancel
-                              </button>
-                            )}
-                          </div>
+                        <td data-label="Actions" className="booking-actions-cell">
+                          {hasActions ? (
+                            <div className="booking-action-group" aria-label={`Actions for ${b.booking_ref}`}>
+                              {canManage && nextStatus && (
+                                <button className="edit-btn booking-action-btn booking-action-primary" onClick={() => updateStatus(b.id, nextStatus)}>
+                                  Mark {nextStatus}
+                                </button>
+                              )}
+                              {canEditOrCancel && (
+                                <button className="edit-btn booking-action-btn" onClick={() => openEdit(b)}>
+                                  Edit
+                                </button>
+                              )}
+                              {canEditOrCancel && (
+                                <button className="edit-btn booking-action-btn booking-action-danger" onClick={() => cancelBooking(b.id)}>
+                                  Cancel
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="booking-actions-none">—</span>
+                          )}
                         </td>
                       </tr>
                     );

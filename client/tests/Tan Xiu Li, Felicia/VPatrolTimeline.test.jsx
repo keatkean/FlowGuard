@@ -11,6 +11,7 @@ const mockAxios = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 vi.mock("axios", () => ({ default: mockAxios }));
 
 import VPatrol from "../../src/pages/VPatrol";
+import { resetPiAvailabilityCache } from "../../src/constants/piCamera";
 
 // Backend rows as returned by GET /api/security/logs (fixed past timestamps —
 // the card must show THESE, not a freshly generated time).
@@ -45,6 +46,7 @@ const BACKEND_LOGS = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetPiAvailabilityCache(); // Pi-unavailable cooldown must not leak between tests
   mockAxios.get.mockResolvedValue({ data: BACKEND_LOGS });
   mockAxios.post.mockResolvedValue({ data: {} });
   // Pi probe fails fast → webcam fallback path (camera behaviour covered elsewhere).
@@ -122,25 +124,14 @@ describe("V-Patrol operational layout", () => {
     expect(screen.getByRole("button", { name: "Laptop Webcam" })).toBeTruthy();
   });
 
-  test("Operational Mode hides the evaluation section; Live Evaluation Mode shows the collapsed accordion", async () => {
+  test("mode pills, evaluation accordion and confusion matrix are gone from V-Patrol", async () => {
     await renderTimeline();
-    expect(screen.queryByText("Facial Recognition Evaluation")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Operational Mode" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Live Evaluation Mode" })).toBeNull();
+    expect(screen.queryByText(/Facial Recognition Evaluation/)).toBeNull();
     expect(screen.queryByTestId("live-matrix-vpatrol")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Live Evaluation Mode" }));
-    const accordion = screen.getByRole("button", { name: /Facial Recognition Evaluation/ });
-    expect(accordion.getAttribute("aria-expanded")).toBe("false");
-    // Controls stay hidden until expanded.
-    expect(screen.queryByText("Select ground-truth identity")).toBeNull();
-
-    fireEvent.click(accordion);
-    expect(screen.getByText(/compares evaluator-confirmed ground truth against the real AI prediction/)).toBeTruthy();
-    expect(screen.getByText("Select ground-truth identity")).toBeTruthy();
-    expect(screen.getByText(/Auto-record completed scans/)).toBeTruthy();
-    expect(screen.queryByText("No Face Tests")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Operational Mode" }));
-    expect(screen.queryByTestId("live-matrix-vpatrol")).toBeNull();
+    expect(screen.queryByText(/Select ground-truth identity/)).toBeNull();
+    expect(screen.queryByText(/Auto-record completed scans/)).toBeNull();
   });
 });
 

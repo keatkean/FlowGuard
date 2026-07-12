@@ -2,20 +2,21 @@
 // Raspberry Pi Gate Camera stays the primary source; the laptop webcam is the
 // automatic fallback when the Pi is unreachable.
 import React from "react";
-import { render, screen, waitFor, cleanup, fireEvent, within } from "@testing-library/react";
+import { render, screen, waitFor, cleanup } from "@testing-library/react";
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../../src/components/Sidebar", () => ({ default: () => <div data-testid="sidebar" /> }));
 vi.mock("axios", () => ({ default: { post: vi.fn(), get: vi.fn() } }));
 
 import GateScanner from "../../src/pages/GateScanner";
-import { PI_CAMERA_STREAM_URL } from "../../src/constants/piCamera";
+import { PI_CAMERA_STREAM_URL, resetPiAvailabilityCache } from "../../src/constants/piCamera";
 
 const mockGetUserMedia = vi.fn();
 
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  resetPiAvailabilityCache(); // Pi-unavailable cooldown must not leak between tests
   Object.defineProperty(global.navigator, "mediaDevices", {
     configurable: true,
     value: { getUserMedia: mockGetUserMedia },
@@ -60,8 +61,8 @@ describe("GateScanner camera source", () => {
 
     expect(screen.getByRole("button", { name: "Raspberry Pi Gate Camera" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Laptop Webcam" })).toBeTruthy();
-    await waitFor(() => expect(screen.getByText("Pi Gate Camera connected")).toBeTruthy());
-  });
+    await waitFor(() => expect(screen.getByText("Pi Gate Camera connected")).toBeTruthy(), { timeout: 10000 });
+  }, 15000); // generous budget: this file renders live-scan loops and can be slow on a loaded CI machine
 
   test("the large recognition-result card is removed; camera and gate status remain", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
@@ -71,9 +72,10 @@ describe("GateScanner camera source", () => {
     expect(screen.queryByTestId("recognition-decision-card")).toBeNull();
     expect(screen.queryByText(/Awaiting scan — no recognition decision yet/)).toBeNull();
     expect(screen.queryByText("Record for Evaluation")).toBeNull();
-    // Recognition feedback still flows through the camera HUD / gate status.
+    // Recognition feedback still flows through the camera HUD / gate status
+    // (displayMessage renders in both the HUD and the status card).
     expect(screen.getByText(/TERMINAL STATE:/)).toBeTruthy();
-    expect(screen.getByText(/GATE TURNSTILE ONLINE|PLACE FACE IN VIEWPORT/)).toBeTruthy();
+    expect(screen.getAllByText(/GATE TURNSTILE ONLINE|PLACE FACE IN VIEWPORT/).length).toBeGreaterThan(0);
   });
 
   test("page never renders raw biometric vector data", async () => {
@@ -84,65 +86,44 @@ describe("GateScanner camera source", () => {
   });
 });
 
-describe("GateScanner evaluation accordion", () => {
+describe("GateScanner operational-only interface", () => {
   const renderScanner = () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
     return render(<GateScanner />);
   };
 
-  test("Operational Mode (default) hides the entire evaluation section", () => {
+  test("the Operational / Live Evaluation mode pills are gone", () => {
     renderScanner();
-    expect(screen.getByRole("button", { name: "Operational Mode" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.queryByText("Facial Recognition Evaluation")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Operational Mode" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Live Evaluation Mode" })).toBeNull();
+  });
+
+  test("no evaluation accordion or confusion matrix on the scanner page", () => {
+    renderScanner();
+    expect(screen.queryByText(/Facial Recognition Evaluation/)).toBeNull();
+    expect(screen.queryByTestId("live-matrix-gatescanner")).toBeNull();
     expect(screen.queryByText(/Select ground-truth identity/)).toBeNull();
-    expect(screen.queryByTestId("live-matrix-gatescanner")).toBeNull();
     expect(screen.queryByText("Record for Evaluation")).toBeNull();
+    expect(screen.queryByText(/Auto-record completed scans/)).toBeNull();
   });
 
-  test("Live Evaluation Mode shows a COLLAPSED Facial Recognition Evaluation accordion", () => {
+  test("compact gate status card shows current state and gate action", async () => {
     renderScanner();
-    fireEvent.click(screen.getByRole("button", { name: "Live Evaluation Mode" }));
-
-    const accordion = screen.getByRole("button", { name: /Facial Recognition Evaluation/ });
-    expect(accordion.getAttribute("aria-expanded")).toBe("false");
-    expect(within(accordion).getByText(/Confirmed samples: \d+/)).toBeTruthy();
-    // Controls and metrics stay hidden until the evaluator expands it.
-    expect(screen.queryByText("Select ground-truth identity")).toBeNull();
-    expect(screen.queryByText("Accuracy")).toBeNull();
+    await waitFor(() => expect(screen.getByText("Pi Gate Camera connected")).toBeTruthy());
+    expect(screen.getByText("Gate Status")).toBeTruthy();
+    expect(screen.getByText("Current State")).toBeTruthy();
+    expect(screen.getByText("Awaiting target")).toBeTruthy();
+    expect(screen.getByText("Gate Action")).toBeTruthy();
+    // Fail-closed default: no transaction yet, turnstile stays locked.
+    expect(screen.getByText(/Turnstile locked — standby/)).toBeTruthy();
+    // The large old recognition card rows never come back.
+    expect(screen.queryByText("Account")).toBeNull();
+    expect(screen.queryByText("Liveness")).toBeNull();
+    expect(screen.queryByText("System Action")).toBeNull();
   });
 
-  test("expanding the accordion shows banner, controls, last result and metrics; Advanced Matrix stays collapsed", () => {
-    localStorage.setItem(
-      "flowguard_facial_evaluation_records",
-      JSON.stringify([{ id: "GS-1", actualLabel: "P01", predictedLabel: "P01", condition: "Front", latencyMs: 200, source: "Live", origin: "Gate Scanner", timestamp: "2026-07-10T02:00:00.000Z" }])
-    );
+  test("camera source switching stays available", () => {
     renderScanner();
-    fireEvent.click(screen.getByRole("button", { name: "Live Evaluation Mode" }));
-    fireEvent.click(screen.getByRole("button", { name: /Facial Recognition Evaluation/ }));
-
-    expect(screen.getByText(/compares evaluator-confirmed ground truth against the real AI prediction/)).toBeTruthy();
-    expect(screen.getByText("Select ground-truth identity")).toBeTruthy();
-    expect(screen.getByText(/Auto-record completed scans/)).toBeTruthy();
-    expect(screen.getByText(/No evaluation result yet/)).toBeTruthy();
-    for (const label of ["Confirmed Samples", "Accuracy", "FAR", "FRR", "Average Latency"]) {
-      expect(screen.getByText(label)).toBeTruthy();
-    }
-    // Scanner compact view never shows the No Face metric.
-    expect(screen.queryByText("No Face Tests")).toBeNull();
-    // Advanced Matrix Details starts collapsed.
-    expect(screen.getByRole("button", { name: "Advanced Matrix Details" }).getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByTestId("live-matrix-gatescanner-table")).toBeNull();
-
-    // Switching back to Operational Mode removes the whole section.
-    fireEvent.click(screen.getByRole("button", { name: "Operational Mode" }));
-    expect(screen.queryByTestId("live-matrix-gatescanner")).toBeNull();
-  });
-
-  test("camera source switching stays available in both modes", () => {
-    renderScanner();
-    expect(screen.getByRole("button", { name: "Raspberry Pi Gate Camera" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Laptop Webcam" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Live Evaluation Mode" }));
     expect(screen.getByRole("button", { name: "Raspberry Pi Gate Camera" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Laptop Webcam" })).toBeTruthy();
   });

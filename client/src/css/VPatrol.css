@@ -41,10 +41,10 @@
 .vpatrol-main .vpatrol-grid {
     flex: 1;
     min-height: 0;
-    display: flex;              /* flex row: height-driven sizing avoids grid/aspect-ratio conflicts */
+    display: flex;              /* flex row: camera ~40%, timeline ~60% */
     flex-direction: row;
-    align-items: flex-start;
-    gap: 24px;                  /* more breathing room between camera and timeline */
+    align-items: flex-start;    /* top edges of camera + timeline aligned */
+    gap: 20px;
 }
 
 .vpatrol-main .vpatrol-card {
@@ -55,14 +55,20 @@
     overflow: hidden;
 }
 
-/* camera card: height fills row (capped 600px), width auto-derived — always square */
+/* camera card: ~40% of the row width, square, never dominating the page */
 .vpatrol-main .vpatrol-card.monitor-section {
-    flex: none;
-    width: auto;
-    height: 100%;
-    max-height: 600px;
+    flex: 0 0 40%;
+    width: 40%;
+    max-width: 40%;
+    height: auto;
+    max-height: 100%;
     aspect-ratio: 1 / 1;
     margin: 0;
+}
+
+/* timeline card: remaining ~60%, scrolls inside its own card */
+.vpatrol-main .vpatrol-card.timeline-section {
+    flex: 1 1 60%;
 }
 
 /* timeline: header is fixed, list scrolls internally */
@@ -72,7 +78,7 @@
     overflow-y: auto;
 }
 
-/* GateScanner: single square card centered in available space */
+/* GateScanner: focused terminal layout — camera left, gate status card right */
 .gate-main {
     display: flex;
     flex-direction: column;
@@ -86,6 +92,7 @@
     display: flex;
     justify-content: flex-start;   /* left-align like Camera Network */
     align-items: flex-start;
+    gap: 20px;
 }
 
 .gate-main .vpatrol-card.monitor-section {
@@ -97,6 +104,53 @@
     margin: 0;
     min-height: 0;
     overflow: hidden;
+}
+
+/* Compact gate status / transaction result card */
+.gate-status-card {
+    flex: 0 1 420px;
+    min-width: 280px;
+    height: auto;
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.gate-status-list {
+    margin: 12px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.gate-status-row dt {
+    color: #94a3b8;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+}
+
+.gate-status-row dd {
+    margin: 0;
+    color: #f8fafc;
+    font-size: 0.95rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.gate-state-value.state-secure_match { color: #34d399; }
+.gate-state-value.state-unknown_query { color: #f87171; }
+.gate-state-value.state-hardware_err { color: #f59e0b; }
+
+.gate-status-message {
+    margin: 16px 0 0;
+    padding-top: 12px;
+    border-top: 1px dashed #2d364f;
+    color: #707a91;
+    font-family: monospace;
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
 }
 
 .vpatrol-card h2 {
@@ -459,6 +513,7 @@
     .vpatrol-main { overflow-y: auto; }
     .vpatrol-main .vpatrol-grid { flex-direction: column; align-items: stretch; gap: 16px; }
     .vpatrol-main .vpatrol-card.monitor-section {
+        flex: none;
         width: 100%;
         max-width: 600px;
         height: auto;
@@ -467,6 +522,25 @@
         aspect-ratio: 1 / 1;
     }
     .vpatrol-main .vpatrol-card.timeline-section { height: auto; min-height: 360px; }
+
+    /* Gate Scanner terminal stacks the same way on small screens. */
+    .gate-main { overflow-y: auto; }
+    .gate-main .vpatrol-grid { flex-direction: column; align-items: stretch; gap: 16px; }
+    .gate-main .vpatrol-card.monitor-section {
+        width: 100%;
+        max-width: 600px;
+        height: auto;
+        max-height: none;
+        margin: 0 auto;
+        aspect-ratio: 1 / 1;
+    }
+    .gate-status-card {
+        flex: none;
+        width: 100%;
+        max-width: 600px;
+        margin: 0 auto;
+        min-height: 0;
+    }
 
     .cctv-container {
         height: auto;
@@ -482,11 +556,8 @@
         object-fit: contain !important; /* keep the face overlay aligned on mobile too */
     }
 }
-.evaluation-mode-controls { margin: 0 0 16px; }
-.scan-mode-selector { display: inline-flex; padding: 4px; gap: 4px; border: 1px solid #334155; border-radius: 12px; background: #0f172a; }
-.scan-mode-selector button { border: 0; border-radius: 8px; padding: 9px 16px; background: transparent; color: #94a3b8; font-weight: 700; cursor: pointer; }
-.scan-mode-selector button.active { background: #2563eb; color: #fff; box-shadow: 0 3px 12px rgba(37, 99, 235, .35); }
-.scan-mode-selector button:focus-visible { outline: 3px solid #7dd3fc; outline-offset: 2px; }
+/* Evaluation controls live on the dedicated Facial Evaluation page — the
+   scanner pages are operator-only and no longer render mode pills. */
 .evaluation-config { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; margin-top: 12px; padding: 14px; border: 1px solid #334155; border-radius: 12px; background: #111827; }
 .evaluation-config h3, .evaluation-mode-banner { width: 100%; margin: 0; }
 .evaluation-config label { display: grid; gap: 6px; }

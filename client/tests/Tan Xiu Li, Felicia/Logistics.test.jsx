@@ -111,6 +111,62 @@ describe("Logistics page", () => {
     expect(screen.getByLabelText(/Filter by bay/i)).toBeTruthy();
   });
 
+  test("action buttons render in a consistent grouped layout (primary first, Cancel destructive)", async () => {
+    mockGet.mockResolvedValueOnce({
+      data: [{ id: 1, booking_ref: "FG-AAA", license_plate: "P1", transport_company: "C1", driver_name: "D1", loading_bay: "Bay A", slot_start: "2026-06-21T09:00", status: "Pending" }],
+    });
+    renderPage();
+    await screen.findByText("FG-AAA");
+
+    const group = screen.getByLabelText("Actions for FG-AAA");
+    expect(group.classList.contains("booking-action-group")).toBe(true);
+
+    const buttons = [...group.querySelectorAll("button")];
+    expect(buttons.map((b) => b.textContent)).toEqual(["Mark Confirmed", "Edit", "Cancel"]);
+    // Every action shares the uniform sizing class — no uneven stacking.
+    expect(buttons.every((b) => b.classList.contains("booking-action-btn"))).toBe(true);
+    // Primary action leads; Cancel stays visually destructive.
+    expect(buttons[0].classList.contains("booking-action-primary")).toBe(true);
+    expect(buttons[2].classList.contains("booking-action-danger")).toBe(true);
+  });
+
+  test("grouped action buttons still fire their original handlers", async () => {
+    mockGet.mockResolvedValue({
+      data: [{ id: 7, booking_ref: "FG-CCC", license_plate: "P7", transport_company: "C7", driver_name: "D7", loading_bay: "Bay B", slot_start: "2026-06-23T09:00", status: "Pending" }],
+    });
+    renderPage();
+    await screen.findByText("FG-CCC");
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark Confirmed" }));
+    await waitFor(() =>
+      expect(axios.patch).toHaveBeenCalledWith(
+        "/api/bookings/7/status",
+        { status: "Confirmed" },
+        expect.any(Object)
+      )
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(axios.patch).toHaveBeenCalledWith(
+        "/api/bookings/7/cancel",
+        {},
+        expect.any(Object)
+      )
+    );
+  });
+
+  test("closed bookings show no action buttons (status only)", async () => {
+    mockGet.mockResolvedValueOnce({
+      data: [{ id: 9, booking_ref: "FG-DDD", license_plate: "P9", transport_company: "C9", driver_name: "D9", loading_bay: "Bay A", slot_start: "2026-06-20T09:00", status: "Completed" }],
+    });
+    renderPage();
+    await screen.findByText("FG-DDD");
+    expect(screen.queryByLabelText("Actions for FG-DDD")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
   test("date filter narrows the table to bookings on that slot date", async () => {
     mockGet.mockResolvedValueOnce({
       data: [

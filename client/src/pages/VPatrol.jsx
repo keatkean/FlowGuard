@@ -3,10 +3,6 @@ import axios from 'axios';
 import VideocamOffIcon from '@mui/icons-material/VideocamOff';
 import Sidebar from '../components/Sidebar';
 import SafeMuiIcon from '../components/SafeMuiIcon';
-import { DECISION_STATES } from '../components/RecognitionDecisionCard';
-import EvaluationRecorderModal from '../components/EvaluationRecorderModal';
-import LiveConfusionMatrixPanel from '../components/LiveConfusionMatrixPanel';
-import useEvaluationParticipants from '../hooks/useEvaluationParticipants';
 import SecurityLogIcon from '../components/SecurityLogIcon';
 import '../css/Dashboard.css';
 import '../css/VPatrol.css';
@@ -14,14 +10,14 @@ import {
   PI_CAMERA_STREAM_URL,
   CAMERA_SOURCES,
   CAMERA_STATUS_MESSAGES,
-  isPiCameraReachable,
+  isPiCameraReachableCached,
+  markPiUnavailable,
   fetchPiSnapshotBitmap,
 } from '../constants/piCamera';
 import { API_BASE_URL } from '../constants/api';
 import { clampBoxToFrame, faceBoxStyle } from '../constants/faceBox';
 import { describeRecognitionSubject, RECOGNITION_STATUS } from '../constants/recognition';
 import { formatSingaporeTimestamp, formatSingaporeFull } from '../constants/datetime';
-import { loadLabelMap, buildEvaluationDraftFromRecognition, loadRecords, saveRecords, saveEvaluationRecordFromDraft, notifyEvaluationRecordsUpdated, DETECTION_OUTCOMES } from '../constants/evaluation';
 import {
   deriveAccessResult,
   getLogTimestamp,
@@ -34,13 +30,12 @@ import {
   SCAN_INTERVAL_MS,
   TARGET_LOCK_MS,
   CAPTURE_MAX_WIDTH,
+  CAPTURE_JPEG_QUALITY,
   SERVICE_UNAVAILABLE_MSG,
   createScanGate,
   startTimer,
   logScanTimings,
 } from '../constants/scanControl';
-
-const MATRIX_ORIGIN = 'V-Patrol';
 
 const VPatrol = () => {
   const videoRef = useRef(null);
@@ -66,18 +61,9 @@ const VPatrol = () => {
   // No-overlap + AI-error-backoff guard for the scan loop.
   const scanGateRef = useRef(createScanGate());
   const [serviceNotice, setServiceNotice] = useState('');
-  const [lastDecision, setLastDecision] = useState(null);
-  const [evalModal, setEvalModal] = useState({ open: false, draft: null });
-  const [scanMode, setScanMode] = useState('operational');
-  const [evaluationConfig, setEvaluationConfig] = useState({ actualLabel: '', condition: 'Front', autoRecord: true });
-  const { participants, labels: participantLabels, loading: participantsLoading, error: participantsError } = useEvaluationParticipants();
-  const scanModeRef = useRef('operational');
-  const evaluationConfigRef = useRef({ actualLabel: '', condition: 'Front', autoRecord: true });
-  const lastRecordedScanRef = useRef(null);
-  // Switching modes clears the previous decision so the evaluation accordion
-  // only ever shows results produced in Live Evaluation Mode.
-  const updateScanMode = (mode) => { setScanMode(mode); scanModeRef.current = mode; lastRecordedScanRef.current = null; setLastDecision(null); };
-  const updateEvaluationConfig = (next) => { setEvaluationConfig(next); evaluationConfigRef.current = next; };
+  // Bumped on camera-source switch and unmount; responses from an older
+  // session are stale and must be ignored.
+  const scanSessionRef = useRef(0);
 
   // LIVENESS MEMORY: Tracks the head-turn validation
   const candidateUserRef = useRef(null);
@@ -98,25 +84,10 @@ const VPatrol = () => {
   // All recognition traffic goes through the Node backend - never FastAPI directly.
   const NODE_SERVER_URL = `${API_BASE_URL}/api/security/logs`;
   const RECOGNIZE_URL = `${API_BASE_URL}/api/facial-recognition/recognize`;
-  const EVALUATE_URL = `${API_BASE_URL}/api/facial-recognition/evaluate`;
   // V-Patrol is a monitoring post: it records access AUDIT events only and must
   // never toggle clock-in/out (that belongs to the Gate Scanner's scan endpoint).
   const ACCESS_EVENT_URL = `${API_BASE_URL}/api/facial-recognition/access-event`;
   const CAMERA_LOCATION = "Biometric Gantry";
-
-  const cameraSourceLabel = cameraSource === CAMERA_SOURCES.PI ? 'Raspberry Pi Gate Camera' : 'Laptop Webcam';
-
-  // Recording ground truth only stores one local evaluation record - it never
-  // re-runs recognition and never creates Attendance or SecurityLogs.
-  const openEvaluationRecorder = (result) => {
-    const draft = buildEvaluationDraftFromRecognition({ result, labelMap: loadLabelMap(), origin: MATRIX_ORIGIN });
-    setEvalModal({ open: true, draft });
-  };
-
-  const handleEvaluationSaved = () => {
-    setEvalModal({ open: false, draft: null });
-    setLastDecision((prev) => prev ? { ...prev, evaluationMessage: 'Live evaluation result recorded' } : prev);
-  };
 
   const changeScanState = (nextState) => {
     setScanStatus(nextState);
@@ -151,6 +122,7 @@ const VPatrol = () => {
     }, SCAN_INTERVAL_MS);
 
     return () => {
+      scanSessionRef.current += 1; // any in-flight recognition response is now stale
       stopCCTV();
       clearInterval(clockInterval);
       clearInterval(scanInterval);
@@ -169,7 +141,7 @@ const VPatrol = () => {
   // Primary source: Raspberry Pi Gate Camera. Probe the snapshot endpoint on
   // load; if unreachable, automatically fall back to the laptop webcam.
   const initCameraSource = async () => {
-    const piReachable = await isPiCameraReachable();
+    const piReachable = await isPiCameraReachableCached();
     if (piReachable) {
       stopCCTV();
       applyCameraSource(CAMERA_SOURCES.PI, CAMERA_STATUS_MESSAGES.PI_CONNECTED);
@@ -183,8 +155,9 @@ const VPatrol = () => {
   // Manual camera source switch (Pi Gate Camera / Laptop Webcam)
   const selectCameraSource = async (source) => {
     if (source === cameraSourceRef.current) return;
+    scanSessionRef.current += 1; // invalidate responses captured from the old source
     if (source === CAMERA_SOURCES.PI) {
-      const piReachable = await isPiCameraReachable();
+      const piReachable = await isPiCameraReachableCached();
       if (piReachable) {
         stopCCTV();
         applyCameraSource(CAMERA_SOURCES.PI, CAMERA_STATUS_MESSAGES.PI_CONNECTED);
@@ -246,16 +219,6 @@ const VPatrol = () => {
     playFeedback('success');
     changeScanState("SECURE_MATCH");
     setIdentifiedUser(subject.identityLabel);
-    const evaluationResult = verifiedUser._evaluationResult;
-    setLastDecision({
-      state: DECISION_STATES.GRANTED,
-      identityLabel: subject.identityLabel,
-      confidence: verifiedUser.confidence ?? evaluationResult?.user?.confidence ?? null,
-      latencyMs: evaluationResult?.timings?.totalRequestMs ?? evaluationResult?.timings?.nodeToAiMs ?? null,
-      livenessVerified: true,
-      cameraSourceLabel,
-      evaluationResult
-    });
     setScanProgress(100);
 
     const currentTimestamp = Date.now();
@@ -308,8 +271,10 @@ const VPatrol = () => {
         piFailStreakRef.current = 0;
       } catch {
         // Pi snapshot failed mid-session - after 3 misses, fall back to webcam
+        // and cache the failure so the Pi isn't re-probed every scan cycle.
         piFailStreakRef.current += 1;
         if (piFailStreakRef.current >= 3) {
+          markPiUnavailable();
           applyCameraSource(CAMERA_SOURCES.WEBCAM, CAMERA_STATUS_MESSAGES.PI_UNAVAILABLE);
           await startCCTV();
         }
@@ -320,16 +285,16 @@ const VPatrol = () => {
       canvas.height = Math.round(bitmap.height * scale);
       context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
       bitmap.close?.();
-      return canvas.toDataURL('image/jpeg', 0.3);
+      return canvas.toDataURL('image/jpeg', CAPTURE_JPEG_QUALITY);
     }
 
     const video = videoRef.current;
     if (!video || video.videoWidth === 0) return null;
-    const scaleDownRatio = MAX_WIDTH / video.videoWidth;
-    canvas.width = MAX_WIDTH;
-    canvas.height = video.videoHeight * scaleDownRatio;
+    const scale = Math.min(1, MAX_WIDTH / video.videoWidth);
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', 0.3);
+    return canvas.toDataURL('image/jpeg', CAPTURE_JPEG_QUALITY);
   };
 
   const performLiveScan = async () => {
@@ -343,6 +308,7 @@ const VPatrol = () => {
 
     gate.begin();
     const totalTimer = startTimer();
+    const scanSession = scanSessionRef.current;
 
     try {
       const captureTimer = startTimer();
@@ -350,31 +316,13 @@ const VPatrol = () => {
       const captureMs = captureTimer();
       if (!imageBase64) return;
 
-      if (scanModeRef.current === 'evaluation') {
-        const cycleId = lastRecordedScanRef.current || `EVAL-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        const res = await axios.post(EVALUATE_URL, { image: imageBase64 }, { headers: { Authorization: `Bearer ${token}` } });
-        const draft = buildEvaluationDraftFromRecognition({ result: res.data, labelMap: loadLabelMap(), source: 'Live', origin: 'V-Patrol' });
-        if (draft.detectionOutcome === DETECTION_OUTCOMES.NO_FACE) {
-          setLastDecision({ state: DECISION_STATES.NO_FACE, cameraSourceLabel, evaluationResult: res.data });
-          return;
-        }
-        const config = evaluationConfigRef.current;
-        if (config.autoRecord && config.actualLabel && !lastRecordedScanRef.current && !draft.needsMapping) {
-          lastRecordedScanRef.current = cycleId;
-          const record = saveEvaluationRecordFromDraft(draft, { actualLabel: config.actualLabel, condition: config.condition });
-          saveRecords([record, ...loadRecords()]);
-          notifyEvaluationRecordsUpdated({ origin: 'V-Patrol' });
-          setLastDecision({ state: res.data.policyDecision === 'GRANTED' ? DECISION_STATES.GRANTED : DECISION_STATES.UNKNOWN, identityLabel: draft.predictedLabel, confidence: draft.confidence, latencyMs: draft.latencyMs, cameraSourceLabel, evaluationResult: res.data, evaluationMessage: 'Live evaluation sample recorded' });
-          setTimeout(() => { lastRecordedScanRef.current = null; }, 3500);
-        }
-        return;
-      }
-
       const apiTimer = startTimer();
       const res = await axios.post(RECOGNIZE_URL,
         { image: imageBase64, cameraLocation: CAMERA_LOCATION },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      // Stale response: camera source switched (or unmounted) mid-request.
+      if (scanSession !== scanSessionRef.current) return;
       logScanTimings({
         captureMs,
         apiMs: apiTimer(),
@@ -450,27 +398,18 @@ const VPatrol = () => {
 
             const recognizedUser = res.data.user;
             if (recognizedUser && recognizedUser.status === RECOGNITION_STATUS.AUTHORIZED) {
-              candidateUserRef.current = { ...recognizedUser, _evaluationResult: res.data };
+              candidateUserRef.current = recognizedUser;
               changeScanState("LIVENESS_CHECK");
             } else {
               // Suspended or unknown - the Node backend has already written the
               // deduplicated SecurityLog; the client only updates its local timeline.
               const isSuspended = recognizedUser && recognizedUser.status === RECOGNITION_STATUS.SUSPENDED;
               const subject = describeRecognitionSubject(recognizedUser);
-              const latencyMs = res.data?.timings?.totalRequestMs ?? res.data?.timings?.nodeToAiMs ?? null;
 
               playFeedback('denied');
               changeScanState("UNKNOWN_QUERY");
               setIdentifiedUser(isSuspended ? `${subject.identityLabel} - SUSPENDED` : "UNKNOWN PERSONNEL");
               setScanProgress(0);
-              setLastDecision({
-                state: isSuspended ? DECISION_STATES.SUSPENDED : DECISION_STATES.UNKNOWN,
-                identityLabel: isSuspended ? subject.identityLabel : 'Unknown Person',
-                confidence: recognizedUser?.confidence ?? null,
-                latencyMs,
-                cameraSourceLabel,
-                evaluationResult: res.data
-              });
 
               const dedupName = isSuspended ? recognizedUser.name : "UNKNOWN";
               if (lastLogRef.current.name !== dedupName || (currentTimestamp - lastLogRef.current.timestamp > 10000)) {
@@ -505,11 +444,6 @@ const VPatrol = () => {
 
       } else {
         if (scanStatusRef.current !== "LIVENESS_CHECK" && scanStatusRef.current !== "TARGET_LOCKING") {
-          setLastDecision({
-            state: DECISION_STATES.NO_FACE,
-            cameraSourceLabel,
-            evaluationResult: res.data
-          });
           resetScanner();
         }
       }
@@ -574,20 +508,6 @@ const VPatrol = () => {
             <span style={{ color: '#f59e0b', fontSize: '0.82rem', fontWeight: 600 }}>{serviceNotice}</span>
           )}
         </div>
-
-        <section className="evaluation-mode-controls" aria-label="Scanner mode">
-          <div className="scan-mode-selector">
-            <button type="button" aria-pressed={scanMode === 'operational'} className={scanMode === 'operational' ? 'active' : ''} onClick={() => updateScanMode('operational')}>Operational Mode</button>
-            <button type="button" aria-pressed={scanMode === 'evaluation'} className={scanMode === 'evaluation' ? 'active' : ''} onClick={() => updateScanMode('evaluation')}>Live Evaluation Mode</button>
-          </div>
-        </section>
-
-        <EvaluationRecorderModal
-          open={evalModal.open}
-          draft={evalModal.draft}
-          onSaved={handleEvaluationSaved}
-          onClose={() => setEvalModal({ open: false, draft: null })}
-        />
 
         <div className="vpatrol-grid">
           <div className="vpatrol-card monitor-section">
@@ -790,36 +710,6 @@ const VPatrol = () => {
             </div>
           </div>
         </div>
-
-        {/* Collapsed evaluation accordion below the patrol grid — Live Evaluation Mode only */}
-        {scanMode === 'evaluation' && <LiveConfusionMatrixPanel origin={MATRIX_ORIGIN} participantLabels={participantLabels}>
-          <div className="evaluation-config">
-            <label>Actual participant:<select value={evaluationConfig.actualLabel} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, actualLabel: e.target.value })}><option value="">Select ground-truth identity</option>{participants.map((participant) => <option key={participant.evaluationLabel} value={participant.evaluationLabel}>{participant.evaluationLabel} — {participant.name}</option>)}<option value="Unknown">Unknown Person</option></select>{participantsLoading && <span>Loading participants...</span>}{participantsError && <span role="alert">{participantsError}</span>}{!participantsLoading && !participantsError && participants.length === 0 && <span>No enrolled evaluation participants available.</span>}</label>
-            <label>Condition:<select value={evaluationConfig.condition} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, condition: e.target.value })}>{['Front','Left Angle','Right Angle','Normal Lighting','Low Lighting','Glasses','Other'].map((condition) => <option key={condition}>{condition}</option>)}</select></label>
-            <label><input type="checkbox" checked={evaluationConfig.autoRecord} onChange={(e) => updateEvaluationConfig({ ...evaluationConfig, autoRecord: e.target.checked })} /> Auto-record completed scans</label>
-          </div>
-          <div className="eval-last-result" role="status">
-            {lastDecision ? (
-              <>
-                <p>
-                  Last evaluation result: {lastDecision.state === DECISION_STATES.NO_FACE
-                    ? 'No face detected'
-                    : `${lastDecision.identityLabel || 'Unknown'} — ${lastDecision.state === DECISION_STATES.GRANTED ? 'Access Granted' : 'Access Denied'}`}
-                  {lastDecision.confidence != null ? ` · Confidence ${Math.round(lastDecision.confidence * 100)}%` : ''}
-                  {lastDecision.latencyMs != null ? ` · ${Math.round(lastDecision.latencyMs)} ms` : ''}
-                </p>
-                {lastDecision.evaluationMessage && <p className="eval-last-result-message">{lastDecision.evaluationMessage}</p>}
-                {lastDecision.evaluationResult && (
-                  <button type="button" className="decision-record-btn" onClick={() => openEvaluationRecorder(lastDecision.evaluationResult)}>
-                    {lastDecision.state === DECISION_STATES.NO_FACE ? 'Record No-Face Test' : 'Record for Evaluation'}
-                  </button>
-                )}
-              </>
-            ) : (
-              <p>No evaluation result yet — run a scan in Live Evaluation Mode.</p>
-            )}
-          </div>
-        </LiveConfusionMatrixPanel>}
       </main>
     </div>
   );

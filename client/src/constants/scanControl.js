@@ -10,6 +10,10 @@ export const TARGET_LOCK_MS = 600;
 // inference time; InsightFace still detects comfortably at this size.
 export const CAPTURE_MAX_WIDTH = 352;
 
+// JPEG quality for recognition frames. Never full quality (payload size), but
+// high enough that compression artefacts don't degrade face embeddings.
+export const CAPTURE_JPEG_QUALITY = 0.62;
+
 // When Node/FastAPI is unreachable, pause scanning briefly instead of flooding
 // the endpoint every second. The camera preview keeps running.
 export const AI_ERROR_BACKOFF_MS = 5000;

@@ -1,5 +1,7 @@
 // Frontend tests — manual add-user controls (role-gated) on User Management & My Staff.
 import React from "react";
+import fs from "node:fs";
+import path from "node:path";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { vi, describe, test, expect, beforeEach } from "vitest";
@@ -74,6 +76,62 @@ describe("User Management — Add Tenant (FM)", () => {
     renderUsers();
     fireEvent.click(screen.getByRole("button", { name: /Add Tenant/i }));
     expect(await screen.findByText(/Add Tenant Account/i)).toBeTruthy();
+  });
+});
+
+describe("User Management — table layout", () => {
+  const USERS = [
+    { id: 5, name: "Tan Xiu Li, Felicia", email: "felicia@flowguard.dev", role: "FM", isActive: true, isEnrolled: true, createdAt: "2026-01-05T08:00:00+08:00" },
+    { id: 6, name: "Jane Tan", email: "jane.tan@very-long-company-domain.example.com", role: "Tenant", isActive: true, isEnrolled: false, createdAt: "2026-02-10T08:00:00+08:00" },
+  ];
+
+  beforeEach(() => {
+    localStorage.setItem("userRole", "FM");
+    localStorage.setItem("userId", "5");
+    mockGet.mockResolvedValueOnce({ data: USERS });
+  });
+
+  test("'(You)' renders as ONE inline badge beside the name — it cannot split apart", async () => {
+    const { container } = renderUsers();
+    await screen.findByText("Tan Xiu Li, Felicia");
+
+    const selfTags = container.querySelectorAll(".self-tag");
+    expect(selfTags.length).toBe(1); // only the signed-in user's row
+    // The whole "(You)" string lives in a single badge element, so the old
+    // "(You" + ")" line-split cannot happen.
+    expect(selfTags[0].textContent).toBe("(You)");
+    // Badge sits inside the same name cell as the personnel name.
+    expect(selfTags[0].closest(".user-name-text")).not.toBeNull();
+    // Other rows never get the badge.
+    expect(screen.getByText("Jane Tan").closest("tr").querySelector(".self-tag")).toBeNull();
+  });
+
+  test("email and Face ID status remain visible for every row", async () => {
+    const { container } = renderUsers();
+    await screen.findByText("Jane Tan");
+    expect(screen.getByText("felicia@flowguard.dev")).toBeTruthy();
+    expect(screen.getByText("jane.tan@very-long-company-domain.example.com")).toBeTruthy();
+    const faceIdBadges = [...container.querySelectorAll(".presence-tag")].map((el) => el.textContent.trim());
+    expect(faceIdBadges).toEqual(["Enrolled", "Not Enrolled"]);
+    // Joined dates stay visible too.
+    expect(container.querySelectorAll(".time-cell").length).toBe(2);
+  });
+
+  test("table no longer forces a 1280px min-width (desktop fits without horizontal scroll)", () => {
+    const css = fs.readFileSync(path.resolve(__dirname, "../../src/css/Users.css"), "utf8");
+    expect(css).not.toMatch(/min-width:\s*1280px/);
+    // Fixed layout + percentage columns keep the table within the viewport.
+    expect(css).toMatch(/table-layout:\s*fixed/);
+  });
+
+  test("self row keeps suspend/delete restrictions (buttons disabled for yourself)", async () => {
+    renderUsers();
+    const selfRow = (await screen.findByText("Tan Xiu Li, Felicia")).closest("tr");
+    const rowButtons = [...selfRow.querySelectorAll("button")];
+    const suspendBtn = rowButtons.find((b) => /Suspend/.test(b.textContent));
+    const deleteBtn = rowButtons.find((b) => /Delete/.test(b.textContent));
+    expect(suspendBtn.disabled).toBe(true);
+    expect(deleteBtn.disabled).toBe(true);
   });
 });
 

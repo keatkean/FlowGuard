@@ -311,7 +311,10 @@ const Users = () => {
                         <td className="user-name-cell" data-label="Personnel">
                           <div className="user-identity">
                             <div className="user-avatar-small">{u.name?.charAt(0).toUpperCase()}</div>
-                            <span className="user-name-text">{u.name} {isSelf && <span className="self-tag">(You)</span>}</span>
+                            <span className="user-name-text">
+                              <span className="user-name-value">{u.name}</span>
+                              {isSelf && <span className="self-tag">(You)</span>}
+                            </span>
                           </div>
                         </td>
                         <td data-label="Role">{renderRoleBadge(u.role)}</td>
