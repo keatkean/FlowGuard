@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Sidebar from '../components/Sidebar';
 import '../css/Dashboard.css';
@@ -13,6 +14,7 @@ const PRIORITIES = ['High', 'Medium', 'Low'];
 
 // ─── SUPPORT DASHBOARD ────────────────────────────────────────────────────────
 const SupportDashboard = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('tickets');
 
   // ── Tickets state ──
@@ -202,6 +204,9 @@ const SupportDashboard = () => {
             <h1>Support Management</h1>
             <p>Manage escalated tenant tickets and the AI knowledge base</p>
           </div>
+          <button className="sup-back-btn" onClick={() => navigate('/incidents')}>
+            ← Incident Logs
+          </button>
         </header>
 
         {/* Toast */}
@@ -228,6 +233,26 @@ const SupportDashboard = () => {
         {/* ── TICKETS TAB ─────────────────────────────────────────────────── */}
         {activeTab === 'tickets' && (
           <>
+            {/* Summary cards — placeholders until ticket stats are wired up */}
+            <div className="sup-stats-grid">
+              <div className="sup-stat-card sup-stat-blue">
+                <div className="sup-stat-value">—</div>
+                <div className="sup-stat-label">Total Tickets</div>
+              </div>
+              <div className="sup-stat-card sup-stat-red">
+                <div className="sup-stat-value">—</div>
+                <div className="sup-stat-label">High Priority</div>
+              </div>
+              <div className="sup-stat-card sup-stat-orange">
+                <div className="sup-stat-value">—</div>
+                <div className="sup-stat-label">In Progress</div>
+              </div>
+              <div className="sup-stat-card sup-stat-green">
+                <div className="sup-stat-value">—</div>
+                <div className="sup-stat-label">Resolved</div>
+              </div>
+            </div>
+
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '1rem' }}>
               <label style={{ color: '#94a3b8' }}>Filter:</label>
               <select

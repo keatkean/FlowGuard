@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Sidebar from '../components/Sidebar';
 import '../css/Dashboard.css';
@@ -89,6 +90,8 @@ const formatLocation = (str) => {
 // Component
 // ---------------------------------------------------------------------------
 const IncidentDashboard = () => {
+  const navigate = useNavigate();
+
   // --- Data ---
   const [incidents, setIncidents]   = useState([]);
   const [loading, setLoading]       = useState(true);
@@ -381,14 +384,19 @@ const IncidentDashboard = () => {
         {/* ---- Header ---- */}
         <header className="dashboard-header">
           <div className="header-titles">
-            <h1>Incident Command Center</h1>
+            <h1>Incident Dashboard</h1>
             <p style={{ color: '#94a3b8', marginTop: '4px' }}>
               AI-generated and manually logged security incidents
             </p>
           </div>
-          <button className="inc-create-btn" onClick={() => setShowCreate(true)}>
-            + Log Incident
-          </button>
+          <div className="inc-header-actions">
+            <button className="inc-create-btn" onClick={() => setShowCreate(true)}>
+              + Log Incident
+            </button>
+            <button className="inc-support-btn" onClick={() => navigate('/support-dashboard')}>
+              Support Tickets →
+            </button>
+          </div>
         </header>
 
         {/* ---- Summary Cards ---- */}
@@ -399,11 +407,11 @@ const IncidentDashboard = () => {
           </div>
           <div className="inc-stat-card inc-stat-red">
             <div className="inc-stat-value">{stats.critical}</div>
-            <div className="inc-stat-label">Critical / Active</div>
+            <div className="inc-stat-label">Critical</div>
           </div>
           <div className="inc-stat-card inc-stat-orange">
             <div className="inc-stat-value">{stats.investigating}</div>
-            <div className="inc-stat-label">Under Investigation</div>
+            <div className="inc-stat-label">Investigating</div>
           </div>
           <div className="inc-stat-card inc-stat-green">
             <div className="inc-stat-value">{stats.cleared}</div>
@@ -482,8 +490,8 @@ const IncidentDashboard = () => {
         )}
 
         {/* ---- Incidents Table ---- */}
-        <div className="table-container">
-          <table className="management-table">
+        <div className="table-container inc-table-wrap">
+          <table className="management-table inc-table">
             <thead>
               <tr>
                 <th>TIMESTAMP</th>
@@ -514,7 +522,8 @@ const IncidentDashboard = () => {
                   return (
                     <tr key={incident.id} className={rowClass || undefined}>
                       <td style={{ fontFamily: 'monospace', color: '#cbd5e1', fontSize: '0.83rem' }}>
-                        {new Date(incident.createdAt).toLocaleString('en-SG')}
+                        <div>{new Date(incident.createdAt).toLocaleDateString('en-SG')}</div>
+                        <div>{new Date(incident.createdAt).toLocaleTimeString('en-SG')}</div>
                       </td>
                       <td style={{ color: '#e2e8f0' }} title={incident.camera_location}>
                         <span style={{ whiteSpace: 'pre-line', lineHeight: '1.45', overflowWrap: 'anywhere', wordBreak: 'break-all' }}>
