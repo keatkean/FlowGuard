@@ -43,6 +43,8 @@ User accounts/authentication are a shared feature across the team.
 | **Incident Tracking & Resolution** | **Gladwin** | Centralised incident dashboard, automatic + manual incident creation, resolution pipeline, archiving |
 | **User Accounts & Auth (shared)** | All | Registration, login, JWT auth, role-based protected routes |
 
+Felicia also implemented a Phase 1 Smart Logistics enhancement with loading bay booking CRUD and WhatsApp notification support to address the client’s two-loading-bay congestion requirement.
+
 ---
 
 ## 🛠️ Technical Stack
@@ -52,7 +54,7 @@ User accounts/authentication are a shared feature across the team.
 - **Backend:** Node.js + Express ⚙️
 - **AI Service:** Python + FastAPI 🧠
 - **Computer-Vision Models:** InsightFace (faces) + Ultralytics YOLO (objects/people) 👁️
-- **Database:** PostgreSQL — face embeddings are stored as a native `FLOAT[]` array column (`faceVector`). The server attempts to enable the `pgvector` extension on startup and automatically falls back to `FLOAT[]` when it is unavailable, so no extension is required to run the project. 🗄️
+- **Database:** PostgreSQL — face embeddings are stored as a native `FLOAT[]` array column (`faceVector`). The project does not require the `pgvector` extension for local development. 🗄️
 - **ORM:** Sequelize
 - **Validation:** Yup & Formik ✅
 
@@ -92,17 +94,25 @@ Copy each `.env.example` to a real `.env` and fill in your own values.
 
 ```bash
 # server/.env
+APP_PORT=5001
 DB_HOST=your-host
 DB_NAME=your-db
 DB_USER=your-user
 DB_PWD=your-password
 JWT_SECRET=your-secret
 FRONTEND_URL=http://localhost:5173
-AI_SERVICE_URL=http://127.0.0.1:8500
+FACE_AI_URL=http://127.0.0.1:8501
+PYTHON_AI_URL=http://127.0.0.1:8000/recognize
+WHATSAPP_ENABLED=false
+WHATSAPP_API_URL=https://graph.facebook.com/vXX.X
+WHATSAPP_API_KEY=your_whatsapp_api_key_here
+WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id_here
 
 # client/.env
-VITE_API_URL=http://localhost:3000
+VITE_API_URL=http://localhost:5001
 ```
+
+> **WhatsApp notifications are disabled by default.** When `WHATSAPP_ENABLED=false`, FlowGuard uses a safe simulated notification mode for local demos. Never commit a real WhatsApp API key.
 
 ### 4. Start the services 🏃‍♂️ (one terminal each)
 
@@ -128,6 +138,43 @@ cd ai-service && uvicorn main:app --host 0.0.0.0 --port 8501 --reload
 
 **Seed a demo login:** run `node seed.js` once inside `server/` to create the FM admin
 account → `admin@harrison.com` / `Admin123!`. Change the password after first login.
+
+---
+
+## 🧪 Testing
+
+```bash
+# Backend (Jest)
+cd server && npm test
+
+# Frontend (Vitest)
+cd client && npm test -- --run
+
+# Frontend production build
+cd client && npm run build
+```
+
+Latest verified status: **backend 79/79 passed**, **frontend 70/70 passed**, **build success**.
+Some tests print expected console warnings (e.g. simulated-WhatsApp or deliberate error paths) —
+these are non-blocking; the suites still pass.
+
+---
+
+## 🚚 Smart Logistics & Loading Bay Management
+
+FlowGuard includes a Smart Logistics module to help Harrison Food Factory manage congestion across its two loading bays.
+
+Key features:
+
+* Create loading bay booking requests
+* View today’s bay queue
+* Update booking status: Pending, Confirmed, Arrived, Completed, Cancelled
+* Cancel bookings using a soft-cancel status for auditability
+* Role-based access for Facilities Managers, Staff, and Tenants
+* Public driver pass route using booking reference
+* WhatsApp notification service with safe mock mode when credentials are disabled
+
+The WhatsApp service is designed to avoid exposing secrets. Real API keys must only be stored inside `server/.env`, while `.env.example` should contain placeholders only.
 
 ---
 

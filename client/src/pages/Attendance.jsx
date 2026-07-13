@@ -16,6 +16,16 @@ const Attendance = () => {
   const userRole = localStorage.getItem("userRole") || 'Tenant';
   const userName = localStorage.getItem("userName") || 'User';
 
+  // Role-aware copy so the page never implies workforce-wide access it doesn't grant.
+  const isFM = userRole === 'FM';
+  const isStaff = userRole === 'Staff';
+  const pageTitle = isFM ? 'Workforce Attendance Management'
+    : userRole === 'Tenant' ? 'Unit Staff Attendance'
+    : 'My Attendance';
+  const pageSubtitle = isFM ? 'Global facility occupancy and labor tracking logs'
+    : userRole === 'Tenant' ? 'Attendance records for your registered unit staff'
+    : 'View your own check-in and attendance records';
+
   const fetchAttendanceData = async () => {
     try {
       const res = await axios.get('/api/attendance/logs', {
@@ -84,12 +94,8 @@ const Attendance = () => {
         {/* 🎯 Class assigned here */}
         <header className="dashboard-header attendance-header">
           <div className="header-titles">
-            <h1>Workforce Attendance Management</h1>
-            <p>
-              {userRole === 'FM' 
-                ? 'Global facility occupancy and labor tracking logs' 
-                : `Daily attendance metrics for registered company staff`}
-            </p>
+            <h1>{pageTitle}</h1>
+            <p>{pageSubtitle}</p>
           </div>
           
           {/* 🎯 Class assigned here */}
@@ -109,17 +115,17 @@ const Attendance = () => {
         {/* 🎯 Classes assigned to the metrics block items below */}
         <div className="attendance-metrics-grid">
           <div className="attendance-metric-card blue-status">
-            <h3>{userRole === 'FM' ? 'Total Personnel On-Site' : 'Active On-Site Staff'}</h3>
+            <h3>{isFM ? 'Total Personnel On-Site' : isStaff ? 'My On-Site Status' : 'Active On-Site Staff'}</h3>
             <p className="value-neutral">{metrics.totalPresent}</p>
           </div>
-          
+
           <div className="attendance-metric-card green-status">
-            <h3>On-Time Arrivals</h3>
+            <h3>{isStaff ? 'My On-Time Arrivals' : 'On-Time Arrivals'}</h3>
             <p className="value-success">{metrics.onTime}</p>
           </div>
 
           <div className="attendance-metric-card orange-status">
-            <h3>Late Exceptions</h3>
+            <h3>{isStaff ? 'My Late Exceptions' : 'Late Exceptions'}</h3>
             <p className="value-warning">{metrics.lateCount}</p>
           </div>
         </div>
@@ -179,7 +185,9 @@ const Attendance = () => {
               }) : (
                 <tr>
                   <td colSpan="5" className="table-notice-state muted-text">
-                    No workforce check-in records discovered for this billing cycle.
+                    {isStaff
+                      ? 'No attendance records found for your account.'
+                      : 'No workforce check-in records discovered for this billing cycle.'}
                   </td>
                 </tr>
               )}

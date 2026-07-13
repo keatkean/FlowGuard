@@ -1,94 +1,117 @@
-# API Documentation — Facial Recognition & Access Management (Felicia)
+# API Documentation — Felicia (Facial Recognition + Smart Logistics)
 
-Base URLs: Node backend `/user`, `/security`, `/attendance`; Python AI service on port 8500.
-Protected routes require `Authorization: Bearer <JWT>`. Common error codes:
-`400` bad request, `401` unauthorized, `403` forbidden, `404` not found, `409` conflict,
-`500` server error.
+Base: Node backend (`/user`, `/api/security`, `/api/attendance`, `/api/bookings`); Python AI service
+on **port 8501**. Protected routes need `Authorization: Bearer <JWT>`.
+Errors: `400` bad request · `401` no/invalid token · `403` wrong role · `404` not found ·
+`409` conflict · `500` server error · `503` AI service offline.
+🔒 = requires JWT.
+
+---
 
 ## Authentication
 
-### POST `/user/register`
-Register a new user (validates Google reCAPTCHA).
-- Body: `{ "name","email","password","recaptchaToken","companyCode?" }`
-- 200: `{ message }` · 400: missing reCAPTCHA / validation · 409: email exists
-
 ### POST `/user/login`
-Authenticate and receive a JWT.
-- Body: `{ "email","password","recaptchaToken" }`
-- 200: `{ accessToken, user }` · 401: invalid credentials
+- Body: `{ "email", "password", "recaptchaToken" }`
+- 200: `{ token, user: { id, name, role, isEnrolled } }` · 400 invalid credentials · 403 suspended
 
-## Biometric Enrolment
+### POST `/user/register`
+Public self-registration (reCAPTCHA + invite/unit code). 200 `{ message, id }` · 400 validation ·
+401 bad/expired code · 403 FM self-register blocked.
 
-### POST `/user/enroll-face`  🔒
-Forwards captured images to the AI service, stores the returned 512-d vector.
-- Body: `{ "images": { "front": "<base64>", "left": "<base64?>", "right": "<base64?>" } }`
-- 200: `{ message: "Biometric enrollment successful" }` · 400: no face detected · 500: vectoring failed
+### POST `/user/manual-create` 🔒
+Manual account creation. **FM → Tenant**, **Tenant → Staff**; no FM creation; Staff/Public blocked.
+- Body: `{ "name", "email", "password", "role?" }`
+- 201: `{ message, user: { id, name, email, role, isActive } }` (no password hash) ·
+  400 validation/duplicate email · 403 wrong role.
 
-### POST `/api/encode-faces` (Python)
-Extracts and averages face embeddings from 1–3 images.
-- Body: `{ "front": "<base64>", "left": "<base64?>", "right": "<base64?>" }`
-- 200: `{ status, vector: number[512], samples }` · 400: no/multiple faces
+---
 
-## Recognition
+## Biometric Enrolment & Recognition
 
-### POST `/user/recognize` (Python)
-Matches a live frame against enrolled users (cosine similarity).
-- Body: `{ "image": "data:image/jpeg;base64,..." }`
-- 200: `{ user:{name,status,confidence}, box:[x,y,w,h], liveness_ratio }`
+### POST `/user/enroll-face` 🔒
+Self, or FM for another user (`targetUserId`). Forwards images to the AI service, stores the vector,
+refreshes the AI cache.
+- Body: `{ "images": { "front", "left", "right" }, "targetUserId?" }`
+- 200: `{ message: "Biometric enrollment successful" }` (or "…refresh pending") ·
+  400 missing images / no face · 502 unexpected AI response · 503 AI offline.
 
-### GET `/refresh` (Python)
-Reloads enrolled embeddings from the DB. → `{ message }`
+### POST `/api/encode-faces` (AI, 8501)
+Encodes/averages face embeddings. → `{ status, vector: number[512] }` · 400 no/multiple faces.
 
-### POST `/attendance/scan`
-Records an IN/OUT attendance event from a recognised face.
+### POST `/user/recognize` (AI, 8501)
+Matches a live frame. → `{ user: { name, status, confidence }, box, liveness_ratio }`.
 
-## Security Logs  🔒
-All `/security/*` routes now require a valid JWT (`router.use(verifyToken)`).
+### GET `/refresh` (AI, 8501)
+Reloads enrolled embeddings from the DB. → `{ message }`.
 
-### POST `/security/logs`
-Create a security/access event (used by the AI gantry — automatic task). Safe events are
-stored as `reviewStatus: 'Resolved'`; non-safe events default to `'Pending Review'`.
-→ `201 { log }`
+---
 
-### GET `/security/logs`
-List events for the V-Patrol dashboard / review queue.
-- Query: `?status=<Pending Review|False Positive|Escalated|Resolved>` and `?limit=<n≤200>`
-- `200` array of logs · `400` invalid status filter
+## Security & Attendance logs
 
-### GET `/security/logs/personnel/:name`
-Events filtered by personnel name.
+### `* /api/security/*` 🔒 (JWT on all)
 
-### GET `/security/logs/user/:id`
-Events for a specific user id.
+- **POST `/api/security/logs`** — create an access/intrusion event (safe → Resolved, else Pending
+  Review). → 201 `{ log }`.
+- **GET `/api/security/logs`** — list; `?status=` and `?limit=` (≤200). → 200 array · 400 bad filter.
+- **GET `/api/security/logs/user/:id`** — a person's access logs. **Ownership:** FM any; Tenant only
+  their own staff (`managerId`); else 403. → 200 `{ personnelName, logs }` · 403 · 404.
+- **PATCH `/api/security/logs/:id/review`** 🔒 **FM only** — `{ reviewStatus, reviewNotes }`.
+  → 200 `{ log }` · 400 invalid status · 403 · 404.
 
-### PATCH `/security/logs/:id/review`  🔒 FM-only
-**Manual task** — an FM triages a suspicious log.
-- Body: `{ "reviewStatus": "Escalated", "reviewNotes": "..." }`
-- `200 { log }` · `400` invalid/missing status · `403` non-FM · `404` log not found
+### GET `/api/attendance/logs` 🔒
+Role-scoped: **FM** all · **Tenant** own unit staff · **Staff** own records only. → 200 array · 401.
 
-## Access & User Management  🔒
+### POST `/api/attendance/scan`
+Public kiosk — records IN/OUT for a recognised name. → 200 `{ action, worker, timestamp }` ·
+400 missing name · 404 name not registered.
 
-### POST `/user/invite-tenant`
-Create a tenant invitation. → `{ invite }`
+---
 
-### PUT `/user/generate-code`
-Generate/refresh a tenant's registration code (48h, max-usage limited).
+## Access & User Management 🔒
 
-### GET `/user/my-code` · GET `/user/my-staff`
-Return the caller's active code / their enrolled staff.
+- **GET `/user/`** (FM) — list users. · **PUT `/user/suspend/:id`** (FM) — toggle active.
+- **GET `/user/logs/:id`** (FM) — a user's attendance history.
+- **DELETE `/user/:id`** (FM, or Tenant for own staff) — PDPA off-board: wipes `faceVector`, deletes
+  attendance, anonymises security logs, removes user.
+- **POST `/user/invite-tenant`** (FM) · **PUT `/user/generate-code`** (Tenant) ·
+  **GET `/user/my-code`**, **GET `/user/my-staff`**.
 
-### GET `/user/`
-List users (for the access-management table).
+---
 
-### PUT `/user/suspend/:id`
-Toggle a user's active status (soft access revocation).
+## Smart Logistics — Bookings
 
-### GET `/user/logs/:id`
-Access history for a user.
+### POST `/api/bookings/create` 🔒 (FM / Tenant / Staff)
+Create a loading-bay booking. Staff bookings link to their unit via `managerId`.
+- Body: `{ "transport_company", "license_plate", "driver_phone", "loading_bay",
+  "driver_name?", "slot_start?", "slot_end?", "notes?" }`
+- 201: `{ message, booking, whatsapp: { success, simulated } }` · 400 missing/invalid ·
+  409 slot clash.
+- **Side effect:** WhatsApp driver-pass link (simulated if disabled; never fails the booking).
 
-### DELETE `/user/:id`
-PDPA off-boarding. Wipes `faceVector`, hard-deletes the user + attendance trail, and
-**anonymises** (nulls `personnelName` on) the user's security logs so the audit trail is
-kept but no biometric-linked identity remains.
+### GET `/api/bookings/` 🔒
+Role-scoped list: **FM** all · **Tenant** own (`tenantId`) · **Staff** own unit. → 200 array.
 
-🔒 = requires a valid JWT.
+### PATCH `/api/bookings/:id/status` 🔒 **FM only**
+`{ "status": "Confirmed|Arrived|Completed|Cancelled" }`. Confirmed → WhatsApp; Completed →
+next-in-line WhatsApp. → 200 `{ booking, whatsapp, nextInLine }` · 400 bad status · 404.
+
+### PATCH `/api/bookings/:id/cancel` 🔒 (FM or owning Tenant)
+Soft-cancel (status Cancelled). → 200 `{ booking, whatsapp }` · 403 · 404.
+
+### PATCH `/api/bookings/:ref/gate-scan` 🔒 **FM only**
+- Body: `{ "action": "entry|exit", "observedPlate?" }`
+- entry: Pending/Confirmed → Arrived; exit: Arrived/Confirmed → Completed (+ next-in-line).
+- 200 `{ booking, action, plateMatched, whatsappStatus, nextInLine }` · 400 bad action ·
+  403 Tenant/Staff · 404 · 409 (entry on Cancelled/Completed; exit on Cancelled).
+
+### GET `/api/bookings/:ref`  (public — driver pass)
+Look up a booking by reference for the QR pass. → 200 booking · 404.
+
+---
+
+## WhatsApp behaviour (side-effect, no secrets)
+All driver messages go through `server/services/whatsappService.js`. It sends only when
+`WHATSAPP_ENABLED=true` **and** `WHATSAPP_API_URL` + a token (`WHATSAPP_ACCESS_TOKEN` or
+`WHATSAPP_API_KEY`) + `WHATSAPP_PHONE_NUMBER_ID` are present; otherwise it returns a simulated
+success. It never throws (booking flows can't fail on it), masks token/phone in logs, and reads all
+credentials from environment variables only — none are committed.

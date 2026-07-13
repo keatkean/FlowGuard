@@ -448,4 +448,75 @@ router.post('/enroll-face', verifyToken, async (req, res) => {
     }
 });
 
+// --- MANUAL USER CREATION (role-gated, additive) ---
+// Role rules (enforced server-side):
+//   FM     -> may create Tenant accounts
+//   Tenant -> may create Staff accounts (linked to that Tenant via managerId)
+//   Staff / Public -> cannot create users
+//   No one can create FM accounts through this flow.
+// The invite-code self-registration flow (POST /register) remains unchanged as an alternative.
+router.post('/manual-create', authenticateToken, async (req, res) => {
+    try {
+        const creatorRole = req.user.role;
+
+        let targetRole;
+        if (creatorRole === 'FM') targetRole = 'Tenant';
+        else if (creatorRole === 'Tenant') targetRole = 'Staff';
+        else return res.status(403).json({ errors: ["You do not have permission to add users."] });
+
+        // If the client sends an explicit role, it must match what this creator may create.
+        // This blocks FM->FM/Staff and Tenant->Tenant/FM even if the request is tampered with.
+        if (req.body.role && req.body.role !== targetRole) {
+            return res.status(403).json({ errors: [`You can only create ${targetRole} accounts.`] });
+        }
+
+        const { firstName, lastName, name, email, password } = req.body;
+        const displayName = (name && String(name).trim())
+            || [firstName, lastName].map(v => (v || '').trim()).filter(Boolean).join(' ');
+
+        const schema = yup.object({
+            name: yup.string().trim().min(2, "Name is required").required("Name is required"),
+            email: yup.string().trim().email("Invalid email format").required("Email is required"),
+            password: yup.string().min(8, "Temporary password must be at least 8 characters").required("Password is required"),
+        });
+        const validated = await schema.validate(
+            { name: displayName, email, password },
+            { abortEarly: false }
+        );
+
+        const hashedPassword = await bcrypt.hash(validated.password, 10);
+
+        const newUser = await User.create({
+            name: validated.name,
+            email: validated.email,
+            password: hashedPassword,
+            role: targetRole,
+            isActive: true,
+            // Tenant-created Staff belong to that Tenant so they appear in /my-staff.
+            managerId: creatorRole === 'Tenant' ? req.user.id : null,
+        });
+
+        // Never return the password hash.
+        return res.status(201).json({
+            message: `${targetRole} account created.`,
+            user: {
+                id: newUser.id,
+                name: newUser.name,
+                email: newUser.email,
+                role: newUser.role,
+                isActive: newUser.isActive,
+            }
+        });
+    } catch (err) {
+        if (err.name === 'SequelizeUniqueConstraintError') {
+            return res.status(400).json({ errors: ["This email is already registered in our system."] });
+        }
+        if (err.errors && Array.isArray(err.errors)) {
+            return res.status(400).json({ errors: err.errors.map(e => (typeof e === 'object' ? e.message : e)) });
+        }
+        console.error("Manual create error:", err);
+        return res.status(500).json({ errors: ["An unexpected error occurred while creating the account."] });
+    }
+});
+
 module.exports = router;

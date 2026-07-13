@@ -34,6 +34,8 @@ app.use("/user", userRouter);
 
 const fmPayload = { id: 99, role: "FM" };
 const fmToken = jwt.sign(fmPayload, process.env.APP_SECRET);
+const tenantToken = jwt.sign({ id: 50, role: "Tenant" }, process.env.APP_SECRET);
+const staffToken = jwt.sign({ id: 60, role: "Staff" }, process.env.APP_SECRET);
 
 describe("User routes", () => {
   beforeEach(() => jest.clearAllMocks());
@@ -98,5 +100,84 @@ describe("User routes", () => {
       { personnelName: null },
       { where: { personnelName: "Worker Bee" } }
     );
+  });
+
+  // --- Manual user creation (role rules) ---
+  describe("POST /user/manual-create", () => {
+    const body = { name: "New Person", email: "new@harrison.com", password: "Temp1234!" };
+
+    test("FM can create a Tenant; no password hash returned", async () => {
+      mockUser.findByPk.mockResolvedValue({ id: 99, role: "FM", isActive: true }); // authenticateToken
+      mockUser.create.mockResolvedValue({ id: 7, name: body.name, email: body.email, role: "Tenant", isActive: true });
+      const res = await request(app)
+        .post("/user/manual-create")
+        .set("Authorization", `Bearer ${fmToken}`)
+        .send(body);
+      expect(res.status).toBe(201);
+      expect(mockUser.create).toHaveBeenCalledWith(expect.objectContaining({ role: "Tenant" }));
+      expect(res.body.user.role).toBe("Tenant");
+      expect(res.body.user.password).toBeUndefined();
+    });
+
+    test("Tenant can create Staff (linked via managerId)", async () => {
+      mockUser.findByPk.mockResolvedValue({ id: 50, role: "Tenant", isActive: true });
+      mockUser.create.mockResolvedValue({ id: 8, name: body.name, email: body.email, role: "Staff", isActive: true });
+      const res = await request(app)
+        .post("/user/manual-create")
+        .set("Authorization", `Bearer ${tenantToken}`)
+        .send(body);
+      expect(res.status).toBe(201);
+      expect(mockUser.create).toHaveBeenCalledWith(expect.objectContaining({ role: "Staff", managerId: 50 }));
+    });
+
+    test("Tenant cannot create a Tenant (role mismatch → 403)", async () => {
+      mockUser.findByPk.mockResolvedValue({ id: 50, role: "Tenant", isActive: true });
+      const res = await request(app)
+        .post("/user/manual-create")
+        .set("Authorization", `Bearer ${tenantToken}`)
+        .send({ ...body, role: "Tenant" });
+      expect(res.status).toBe(403);
+      expect(mockUser.create).not.toHaveBeenCalled();
+    });
+
+    test("No one can create an FM via manual flow (FM->FM blocked → 403)", async () => {
+      mockUser.findByPk.mockResolvedValue({ id: 99, role: "FM", isActive: true });
+      const res = await request(app)
+        .post("/user/manual-create")
+        .set("Authorization", `Bearer ${fmToken}`)
+        .send({ ...body, role: "FM" });
+      expect(res.status).toBe(403);
+      expect(mockUser.create).not.toHaveBeenCalled();
+    });
+
+    test("Staff cannot create users (403)", async () => {
+      mockUser.findByPk.mockResolvedValue({ id: 60, role: "Staff", isActive: true });
+      const res = await request(app)
+        .post("/user/manual-create")
+        .set("Authorization", `Bearer ${staffToken}`)
+        .send(body);
+      expect(res.status).toBe(403);
+      expect(mockUser.create).not.toHaveBeenCalled();
+    });
+
+    test("Duplicate email fails with 400", async () => {
+      mockUser.findByPk.mockResolvedValue({ id: 99, role: "FM", isActive: true });
+      mockUser.create.mockRejectedValue({ name: "SequelizeUniqueConstraintError" });
+      const res = await request(app)
+        .post("/user/manual-create")
+        .set("Authorization", `Bearer ${fmToken}`)
+        .send(body);
+      expect(res.status).toBe(400);
+      expect(res.body.errors[0]).toMatch(/already registered/i);
+    });
+
+    test("Missing fields return 400", async () => {
+      mockUser.findByPk.mockResolvedValue({ id: 99, role: "FM", isActive: true });
+      const res = await request(app)
+        .post("/user/manual-create")
+        .set("Authorization", `Bearer ${fmToken}`)
+        .send({ email: "x@y.com" });
+      expect(res.status).toBe(400);
+    });
   });
 });

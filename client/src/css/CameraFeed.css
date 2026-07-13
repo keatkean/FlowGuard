@@ -1,0 +1,12 @@
+.camera-feed-hud {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  color: #8ea0c8;
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  z-index: 4;
+}

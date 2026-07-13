@@ -63,7 +63,48 @@
   min-width: 200px; /* Ensures controls have breathing room */
 }
 
-/* Toggle Switch, Slider, and Select styles remain the same... */
+/* Primary dashboard button (Re-enroll My Face ID, Save Changes) — was unstyled
+   and rendered as a default white browser button. */
+.save-btn {
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 22px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.save-btn:hover { background: #2563eb; }
+.save-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.4); }
+
+/* Dark-themed dropdown (e.g. Camera Feed Quality) — matches the FlowGuard UI. */
+.dark-select {
+  background: #0b0f1a;
+  color: #f8fafc;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  min-width: 220px;       /* roomy on laptop, but not full-width */
+  max-width: 280px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.dark-select:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+/* Style the option list too (most browsers honour this). */
+.dark-select option {
+  background: #0b0f1a;
+  color: #f8fafc;
+}
 
 /* --- Danger Zone --- */
 .danger-zone { border-color: rgba(239, 68, 68, 0.3); }
@@ -98,6 +139,15 @@
   
   .setting-control {
     width: 100%;
-    justify-content: flex-end; 
+    justify-content: flex-end;
   }
+
+  /* Let the dropdown fill the row on phones for easier tapping. */
+  .dark-select {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .save-btn { width: 100%; }
 }

@@ -11,6 +11,8 @@ const Settings = () => {
   const [ppeStrictness, setPpeStrictness] = useState(85);
   const currentUserId = localStorage.getItem("userId");
   const currentUserName = localStorage.getItem("userName");
+  const role = localStorage.getItem("userRole");
+  const isFM = role === 'FM';
 
   const handleSelfReEnroll = () => {
     const params = new URLSearchParams({
@@ -30,12 +32,20 @@ const Settings = () => {
       <main className="dashboard-main">
         <header className="dashboard-header settings-header">
           <div className="header-titles">
-            <h1>System Configuration</h1>
-            <p>Manage AI thresholds, camera networks, and alert routing</p>
+            <h1>{isFM ? 'System Configuration' : 'Settings'}</h1>
+            <p>
+              {isFM
+                ? 'Manage AI thresholds, camera networks, and alert routing'
+                : 'Manage your personal biometric profile and access settings.'}
+            </p>
           </div>
         </header>
 
         <div className="settings-grid">
+
+          {/* --- FM-only system administration --- */}
+          {isFM && (
+            <>
           {/* AI Configuration Card */}
           <section className="settings-card">
             <div className="card-header">
@@ -106,7 +116,10 @@ const Settings = () => {
               </div>
             </div>
           </section>
+            </>
+          )}
 
+          {/* --- Biometric Profile: available to ALL authenticated users --- */}
           <section className="settings-card">
             <div className="card-header">
               <h3>Biometric Profile</h3>
@@ -123,6 +136,9 @@ const Settings = () => {
             </div>
           </section>
 
+          {/* --- FM-only: Danger Zone + system save --- */}
+          {isFM && (
+            <>
           {/* Danger Zone Card */}
           <section className="settings-card danger-zone">
             <div className="card-header">
@@ -142,6 +158,8 @@ const Settings = () => {
           <div className="settings-actions">
             <button className="save-btn">Save Changes</button>
           </div>
+            </>
+          )}
 
         </div>
       </main>

@@ -6,7 +6,7 @@ import { describe, test, expect, beforeEach } from "vitest";
 
 import ProtectedRoute from "../../src/components/ProtectedRoute";
 import Sidebar from "../../src/components/Sidebar";
-import { ACCESS, ROLES } from "../../src/constants/roles";
+import { ACCESS, ROLES, roleLabel } from "../../src/constants/roles";
 
 const login = (role) => {
   localStorage.setItem("accessToken", "test-token");
@@ -58,9 +58,15 @@ describe("Route protection by role", () => {
     expect(screen.getByText("SECRET-PAGE")).toBeTruthy();
   });
 
-  test("Staff can enter a live-monitoring (FM+Staff) route", () => {
+  test("Staff is blocked (403) from FM-only monitoring routes (cameras/v-patrol/etc.)", () => {
     login(ROLES.STAFF);
-    renderRoute(ACCESS.FM_STAFF);
+    renderRoute(ACCESS.FM_ONLY);
+    expect(screen.getByText("FORBIDDEN-403")).toBeTruthy();
+  });
+
+  test("Staff can enter an all-roles route (attendance / logistics)", () => {
+    login(ROLES.STAFF);
+    renderRoute(ACCESS.ANY);
     expect(screen.getByText("SECRET-PAGE")).toBeTruthy();
   });
 
@@ -84,21 +90,30 @@ describe("Sidebar visibility by role", () => {
     expect(screen.queryByText("User Management")).toBeNull();
     expect(screen.queryByText("Security Review")).toBeNull();
     expect(screen.queryByText("Tenant Onboarding")).toBeNull();
-    expect(screen.queryByText("Settings")).toBeNull();
     expect(screen.queryByText("V-Patrol")).toBeNull();
     expect(screen.queryByText("Cameras")).toBeNull();
-    // ...but DOES see its own areas
+    // ...but DOES see its own areas + Settings (visible to all authenticated roles)
     expect(screen.getByText("Daily Attendance")).toBeTruthy();
     expect(screen.getByText("My Staff")).toBeTruthy();
+    expect(screen.getByText("Settings")).toBeTruthy();
   });
 
-  test("Staff sees monitoring links but NOT admin links", () => {
+  test("Staff sidebar = Dashboard, Daily Attendance, Logistics & Bays, Settings only", () => {
     login(ROLES.STAFF);
     renderSidebar();
-    expect(screen.getByText("V-Patrol")).toBeTruthy();
-    expect(screen.getByText("Gate Scanner")).toBeTruthy();
+    // Visible to Staff (factory worker)
+    expect(screen.getByText("Dashboard")).toBeTruthy();
+    expect(screen.getByText("Daily Attendance")).toBeTruthy();
+    expect(screen.getByText("Logistics & Bays")).toBeTruthy();
+    expect(screen.getByText("Settings")).toBeTruthy();
+    // Hidden: AI/security monitoring, admin, and My Staff
+    expect(screen.queryByText("Cameras")).toBeNull();
+    expect(screen.queryByText("V-Patrol")).toBeNull();
+    expect(screen.queryByText("Object Detection")).toBeNull();
+    expect(screen.queryByText("Gate Scanner")).toBeNull();
     expect(screen.queryByText("User Management")).toBeNull();
-    expect(screen.queryByText("Settings")).toBeNull();
+    expect(screen.queryByText("Security Review")).toBeNull();
+    expect(screen.queryByText("Tenant Onboarding")).toBeNull();
     expect(screen.queryByText("My Staff")).toBeNull();
   });
 
@@ -110,5 +125,13 @@ describe("Sidebar visibility by role", () => {
     expect(screen.getByText("Tenant Onboarding")).toBeTruthy();
     expect(screen.getByText("Settings")).toBeTruthy();
     expect(screen.getByText("V-Patrol")).toBeTruthy();
+  });
+});
+
+describe("roleLabel wording", () => {
+  test("Staff is labelled 'Staff' (not 'Security Staff')", () => {
+    expect(roleLabel(ROLES.STAFF)).toBe("Staff");
+    expect(roleLabel(ROLES.FM)).toBe("Facilities Manager");
+    expect(roleLabel(ROLES.TENANT)).toBe("Tenant");
   });
 });

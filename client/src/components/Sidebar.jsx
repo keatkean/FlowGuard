@@ -1,21 +1,19 @@
 // client/src/components/Sidebar.jsx
-import React, { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import LogoIcon from './LogoIcon';
 import { ROLES, roleLabel } from '../constants/roles';
 
 const Sidebar = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState({ name: 'Guest', role: ROLES.TENANT });
-  const [isOpen, setIsOpen] = useState(false);
-
-  useEffect(() => {
+  const [user] = useState(() => {
     const storedName = localStorage.getItem("userName");
     const storedRole = localStorage.getItem("userRole");
-    if (storedName && storedRole) {
-      setUser({ name: storedName, role: storedRole });
-    }
-  }, []);
+    return storedName && storedRole
+      ? { name: storedName, role: storedRole }
+      : { name: 'Guest', role: ROLES.TENANT };
+  });
+  const [isOpen, setIsOpen] = useState(false);
 
   // Visibility helpers — keep these in lock-step with the route wrappers in App.jsx
   // so a user never sees a link that would only bounce them to the 403 page.
@@ -54,23 +52,25 @@ const Sidebar = () => {
           {/* Everyone with a session */}
           <NavLink to="/dashboard" onClick={() => setIsOpen(false)}>Dashboard</NavLink>
 
-          {/* Live monitoring / operations — FM + Security Staff only */}
-          {(isFM || isStaff) && (
+          {/* Live monitoring / AI & security — FM only (Staff are factory workers) */}
+          {isFM && (
             <>
               <NavLink to="/cameras" onClick={() => setIsOpen(false)}>Cameras</NavLink>
+              <NavLink to="/camera-inventory" onClick={() => setIsOpen(false)}>Camera Inventory</NavLink>
               <NavLink to="/vpatrol" onClick={() => setIsOpen(false)}>V-Patrol</NavLink>
               <NavLink to="/object-detection" onClick={() => setIsOpen(false)}>Object Detection</NavLink>
+              <NavLink to="/detection-settings" onClick={() => setIsOpen(false)}>Detection Setup</NavLink>
               <NavLink to="/gate-scanner" onClick={() => setIsOpen(false)}>Gate Scanner</NavLink>
             </>
           )}
 
-          {/* Workforce attendance — FM + Tenant */}
-          {(isFM || isTenant) && (
+          {/* Workforce attendance — FM + Tenant + Staff (Staff see their own records) */}
+          {(isFM || isTenant || isStaff) && (
             <NavLink to="/attendance" onClick={() => setIsOpen(false)}>Daily Attendance</NavLink>
           )}
 
-          {/* Logistics & bays — FM + Tenant */}
-          {(isFM || isTenant) && (
+          {/* Logistics & bays — FM + Tenant (book) + Staff (operational view) */}
+          {(isFM || isStaff || isTenant) && (
             <NavLink to="/logistics" onClick={() => setIsOpen(false)}>Logistics & Bays</NavLink>
           )}
 
@@ -85,10 +85,13 @@ const Sidebar = () => {
               <NavLink to="/users" onClick={() => setIsOpen(false)}>User Management</NavLink>
               <NavLink to="/security-review" onClick={() => setIsOpen(false)}>Security Review</NavLink>
               <NavLink to="/incidents" onClick={() => setIsOpen(false)}>Incident Dashboard</NavLink>
+              <NavLink to="/support-dashboard" onClick={() => setIsOpen(false)}>Support Tickets</NavLink>
               <NavLink to="/tenant-management" onClick={() => setIsOpen(false)}>Tenant Onboarding</NavLink>
-              <NavLink to="/settings" onClick={() => setIsOpen(false)}>Settings</NavLink>
             </>
           )}
+
+          {/* Settings — all authenticated roles (content inside is role-gated) */}
+          <NavLink to="/settings" onClick={() => setIsOpen(false)}>Settings</NavLink>
         </nav>
 
         <div className="sidebar-bottom">

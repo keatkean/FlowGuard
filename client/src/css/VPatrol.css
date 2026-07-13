@@ -35,7 +35,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;           /* stop page-level scroll */
-    padding: 20px 8px;          /* tighter sides than default dashboard 30px */
+    padding: 30px;              /* match Camera Network container spacing + left alignment */
 }
 
 .vpatrol-main .vpatrol-grid {
@@ -44,6 +44,7 @@
     display: flex;              /* flex row: height-driven sizing avoids grid/aspect-ratio conflicts */
     flex-direction: row;
     align-items: flex-start;
+    gap: 24px;                  /* more breathing room between camera and timeline */
 }
 
 .vpatrol-main .vpatrol-card {
@@ -76,14 +77,14 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    padding: 20px 8px;
+    padding: 30px;              /* match Camera Network container spacing + left alignment */
 }
 
 .gate-main .vpatrol-grid {
     flex: 1;
     min-height: 0;
     display: flex;
-    justify-content: center;
+    justify-content: flex-start;   /* left-align like Camera Network */
     align-items: flex-start;
 }
 
@@ -371,7 +372,21 @@
 @media (max-width: 1024px) {
     .vpatrol-grid { grid-template-columns: 1fr; gap: 12px; }
     .vpatrol-card { height: auto; min-height: 450px; padding: 20px; }
-    
+
+    /* Stack the command-center panels cleanly (the flex-row override above is too
+       specific for grid-template-columns:1fr to take effect, so flip direction here). */
+    .vpatrol-main { overflow-y: auto; }
+    .vpatrol-main .vpatrol-grid { flex-direction: column; align-items: stretch; gap: 16px; }
+    .vpatrol-main .vpatrol-card.monitor-section {
+        width: 100%;
+        max-width: 600px;
+        height: auto;
+        max-height: none;
+        margin: 0 auto;
+        aspect-ratio: 1 / 1;
+    }
+    .vpatrol-main .vpatrol-card.timeline-section { height: auto; min-height: 360px; }
+
     .cctv-container {
         height: auto;
         flex: none;

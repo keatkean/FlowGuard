@@ -103,8 +103,8 @@ const SecurityReview = () => {
 
         {notification && <div className="toast-notification">{notification}</div>}
 
-        <div className="table-container">
-          <table className="management-table">
+        <div className="table-container review-table-container">
+          <table className="management-table security-review-table">
             <thead>
               <tr>
                 <th>TIMESTAMP</th>
@@ -126,56 +126,49 @@ const SecurityReview = () => {
                 const draft = drafts[log.id] || {};
                 return (
                   <tr key={log.id}>
-                    <td style={{ fontFamily: 'monospace', color: '#cbd5e1' }}>
+                    <td data-label="Timestamp" style={{ fontFamily: 'monospace', color: '#cbd5e1' }}>
                       {log.time || new Date(log.createdAt).toLocaleString('en-SG')}
                     </td>
-                    <td>
+                    <td data-label="Event">
                       <strong>{log.icon} {log.type}</strong>
                       <div style={{ color: '#94a3b8', fontSize: '0.85em' }}>{log.desc}</div>
                     </td>
-                    <td>{log.personnelName || <em style={{ color: '#64748b' }}>Unknown</em>}</td>
-                    <td>
+                    <td data-label="Personnel">{log.personnelName || <em style={{ color: '#64748b' }}>Unknown</em>}</td>
+                    <td data-label="Severity">
                       <span className={`status-badge ${log.severity === 'safe' ? 'active' : 'inactive'}`}>
                         {log.severity}
                       </span>
                     </td>
-                    <td>
+                    <td data-label="Review Status" className="review-status-cell">
                       <select
+                        className="review-select"
                         aria-label={`Review status for log ${log.id}`}
                         value={draft.reviewStatus ?? log.reviewStatus ?? 'Pending Review'}
                         onChange={(e) => setDraft(log.id, 'reviewStatus', e.target.value)}
-                        style={{ padding: '6px', borderRadius: '6px', background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155' }}
                       >
                         {REVIEW_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
-                      <div style={{ marginTop: '4px' }}>
-                        <span className={badgeClass(log.reviewStatus)}>{log.reviewStatus}</span>
-                      </div>
+                      <span className={`${badgeClass(log.reviewStatus)} review-current-status`}>{log.reviewStatus}</span>
                     </td>
-                    <td>
-                      <textarea
-                        aria-label={`Resolution notes for log ${log.id}`}
-                        placeholder="Add resolution notes..."
-                        value={draft.reviewNotes ?? log.reviewNotes ?? ''}
-                        onChange={(e) => setDraft(log.id, 'reviewNotes', e.target.value)}
-                        rows={2}
-                        style={{ width: '180px', padding: '6px', borderRadius: '6px', background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155' }}
-                      />
-                      <div>
+                    <td data-label="Resolution" className="review-resolution-cell">
+                      <div className="review-resolution">
+                        <textarea
+                          className="review-textarea"
+                          aria-label={`Resolution notes for log ${log.id}`}
+                          placeholder="Add resolution notes..."
+                          value={draft.reviewNotes ?? log.reviewNotes ?? ''}
+                          onChange={(e) => setDraft(log.id, 'reviewNotes', e.target.value)}
+                          rows={2}
+                        />
                         <button
-                          className="edit-btn"
+                          className="edit-btn review-save-btn"
                           disabled={savingId === log.id}
                           onClick={() => saveReview(log)}
-                          style={{ marginTop: '4px' }}
                         >
                           {savingId === log.id ? 'Saving...' : 'Save Review'}
                         </button>
+                        {log.reviewedBy && <span className="review-reviewer">by {log.reviewedBy}</span>}
                       </div>
-                      {log.reviewedBy && (
-                        <div style={{ color: '#64748b', fontSize: '0.75em', marginTop: '4px' }}>
-                          by {log.reviewedBy}
-                        </div>
-                      )}
                     </td>
                   </tr>
                 );

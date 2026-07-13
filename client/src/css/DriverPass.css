@@ -1,100 +1,169 @@
-/* --- FULL SCREEN CONTAINER --- */
-.driver-pass-container {
+/* =========================================
+   DRIVER PASS — mobile-first entry ticket
+   (class names match DriverPass.jsx)
+   ========================================= */
+.driver-container {
+  min-height: 100vh;
   display: flex;
   justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-  background-color: #0b0f1a; 
-  padding: 20px;
+  align-items: flex-start;            /* top-align so a tall card scrolls naturally */
+  padding: 24px 12px 56px;
+  background-color: #0b0f1a;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
-/* --- THE PASS CARD --- */
 .pass-card {
+  width: min(100% - 24px, 420px);
+  margin: 0 auto;
   background-color: #1e2539;
   border: 1px solid #2d364f;
-  border-radius: 24px;
-  padding: 40px 30px;
-  width: 100%;
-  max-width: 380px; 
+  border-radius: 20px;
+  padding: 28px 22px 24px;
   text-align: center;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.55);
   position: relative;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .pass-card::before {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  top: 0; left: 0; right: 0;
   height: 4px;
-  background: linear-gradient(to right, #3b82f6, #93c5fd);
+  background: linear-gradient(to right, #3b82f6, #34d399);
 }
 
-/* --- TYPOGRAPHY --- */
-.pass-card h2 {
+/* --- Header hierarchy --- */
+.pass-header { margin-bottom: 18px; }
+
+.pass-brand {
   margin: 0;
-  font-size: 1.8rem;
-  color: #f8fafc;
-  font-weight: 700;
+  font-size: 1.7rem;
+  font-weight: 800;
   letter-spacing: -0.5px;
+  background: linear-gradient(to right, #60a5fa, #34d399);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
-.pass-sub {
-  color: #60a5fa;
-  font-size: 0.85rem;
+.pass-org {
+  margin: 4px 0 12px;
+  color: #cbd5e1;
+  font-size: 0.95rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  margin: 8px 0 35px 0;
 }
 
-/* --- QR CODE WRAPPER --- */
-.qr-wrapper {
-  background-color: #ffffff; 
-  padding: 20px;
-  border-radius: 16px;
+.badge {
   display: inline-block;
-  margin-bottom: 35px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
-/* --- DETAILS BOX --- */
-.pass-details {
-  background-color: #0b0f1a;
-  border: 1px solid #2d364f;
-  border-radius: 12px;
-  padding: 20px;
+/* --- QR (prominent + scannable) --- */
+.qr-section {
+  margin: 14px 0 6px;
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  align-items: center;
 }
 
-.detail {
+.qr-section svg {
+  width: min(230px, 64vw);
+  height: auto;
+  background: #ffffff;
+  padding: 12px;
+  border-radius: 14px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+.qr-fallback {
+  width: min(230px, 64vw);
+  background: #0b0f1a;
+  border: 1px dashed #2d364f;
+  border-radius: 14px;
+  padding: 28px 12px;
+}
+
+.ref-text {
+  margin: 14px 0 6px;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #f8fafc;
+  word-break: break-word;
+}
+
+/* --- Detail rows --- */
+.info-grid {
+  background-color: #0b0f1a;
+  border: 1px solid #2d364f;
+  border-radius: 14px;
+  padding: 4px 16px;
+  margin-top: 14px;
+  text-align: left;
+}
+
+.info-item {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: baseline;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.info-item:last-child { border-bottom: none; }
+
+.info-item label {
+  color: #707a91;
+  font-size: 0.8rem;
+  font-weight: 500;
+  flex: 0 0 auto;
+}
+
+.info-item p {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: right;
+  word-break: break-word;
+}
+
+.bay-highlight { color: #60a5fa !important; }
+
+/* --- Footer + states --- */
+.pass-card footer { margin-top: 18px; }
+.pass-card footer p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.loader, .error {
+  color: #94a3b8;
+  text-align: center;
+  padding: 48px 8px;
   font-size: 0.95rem;
 }
+.error { color: #f87171; font-weight: 600; }
 
-.detail span {
-  color: #707a91;
-}
+/* Hide global floating widgets on the public pass so they don't overlap the ticket. */
+body.driver-pass-page .grecaptcha-badge { display: none !important; }
 
-.detail strong {
-  color: #f8fafc;
-  font-weight: 600;
-}
-
-/* --- SUCCESS STATUS PILL --- */
-.status-ready {
-  color: #34d399 !important; 
-  background: rgba(52, 211, 153, 0.1);
-  padding: 6px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(52, 211, 153, 0.2);
-  font-size: 0.85rem;
-  letter-spacing: 0.5px;
+/* Desktop: center the ticket vertically. */
+@media (min-width: 768px) {
+  .driver-container { align-items: center; }
 }

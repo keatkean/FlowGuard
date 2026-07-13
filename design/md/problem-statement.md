@@ -16,8 +16,9 @@ company data, the client's goal is to **showcase what AI can bring to the indust
 using the facility as a demonstrator for how an integrated, AI-driven system can run a
 modern factory with far less manual effort.
 
-The facility has 10–30 entry points, multiple tenants, and 2 loading bays, all of which
-are currently monitored and coordinated by hand.
+The facility has **40+ tenant units**, multiple entry points, and **only two loading bays**, all of
+which are currently monitored and coordinated by hand. With many tenants sharing just two bays,
+delivery coordination is complex and the bays congest at peak hours.
 
 ## 2. Who this is for (target users)
 
@@ -32,11 +33,15 @@ are currently monitored and coordinated by hand.
 Today, monitoring entry points, parking bays, deliveries, and compliance is **manual,
 time-consuming, and labour-intensive**:
 
-- Staff must watch multiple entry points, loading bays, and zones in person.
-- Tracking environmental conditions, compliance (PPE, HACCP), and anomalies
-  (pests, unauthorised access) relies on human observation.
-- The two loading bays suffer peak-hour congestion, and drivers have no way to know
-  when a bay will be free, so they cannot plan their trips.
+- Staff must watch multiple entry points, loading bays, and zones in person across 40+ units.
+- Tracking compliance and anomalies — unauthorised access, unattended objects, and incidents —
+  relies on human observation and is hard to log or audit manually.
+- Coordinating deliveries for 40+ tenants across only two loading bays is complex; the bays suffer
+  peak-hour congestion, and drivers have no way to know when a bay will be free, so they arrive
+  early and queue.
+
+FlowGuard reduces this manual workload and improves both access visibility (who entered, when, and
+whether authorised) and logistics visibility (bay bookings, driver passes, and gate entry/exit).
 
 ### Root cause
 
@@ -81,11 +86,12 @@ covers five capabilities:
 
 FlowGuard is a full-stack web application (React + Node.js + PostgreSQL) with a Python
 AI service. For this proof of concept, the team focuses on the **AI-vision and operations
-layer** of the client's vision, delivered as four integrated modules:
+layer** of the client's vision, delivered as five integrated feature modules:
 
 | Module | Owner | Maps to client capability |
 |--------|-------|----------------------------|
 | Facial Recognition & Access Management | Felicia | (1) AI CCTV & access control |
+| Smart Logistics & Loading Bay Management | Felicia | (4) Smart loading bay & logistics tracking |
 | Object Detection & Space Management | Charlisa | (1)(4) Density, unattended assets, zone rules |
 | AI Helpdesk & Facility Support | Lucas | (5) Tenant support & escalation |
 | Incident Tracking & Resolution | Gladwin | (5) Centralised incident dashboard |

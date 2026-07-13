@@ -5,6 +5,7 @@ import { useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 import NavBar from '../components/NavBar';
 import Footer from '../components/Footer';
 import LogoIcon from '../components/LogoIcon';
+import PasswordInput from '../components/PasswordInput';
 import '../css/Login.css';
 import '../css/DriverPass.css';
 
@@ -89,12 +90,11 @@ const Login = () => {
 
               <div className="input-group">
                 <label>Access Key</label>
-                <input 
-                  type="password" 
-                  placeholder="••••••••" 
+                <PasswordInput
+                  placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  required 
+                  required
                 />
                 <div className="forgot-link-wrapper">
                   <Link to="/forgot-password" className="forgot-link">Forgot Key?</Link>
