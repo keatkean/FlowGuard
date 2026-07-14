@@ -28,3 +28,17 @@ export const getHardwareHealthUrl = (streamUrl, envHealthUrl = '') => {
     return '';
   }
 };
+
+// Resolution order mirrors getHardwareHealthUrl:
+// 1. VITE_SECUREPI_PEOPLE_COUNT_URL
+// 2. derive <stream origin>/people-count from the MJPEG stream URL
+// 3. '' → caller disables live people-count polling
+export const getHardwarePeopleCountUrl = (streamUrl, envPeopleCountUrl = '') => {
+  if (isHttpUrl(envPeopleCountUrl)) return envPeopleCountUrl.trim();
+  if (!isHttpUrl(streamUrl)) return '';
+  try {
+    return `${new URL(streamUrl.trim()).origin}/people-count`;
+  } catch {
+    return '';
+  }
+};

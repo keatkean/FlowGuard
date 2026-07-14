@@ -67,7 +67,31 @@ const SummaryCard = ({ icon, label, value, helper, to, tone = 'blue-icon' }) => 
 const QUICK_LINK_ICONS = {
   '/attendance': FactCheckIcon,
   '/logistics': LocalShippingIcon,
-  '/settings': SettingsIcon
+  '/settings': SettingsIcon,
+};
+
+const ALERTS_URL = '/api/detection-alerts';
+
+const URGENT_ALERT_STATUSES = [
+  'Active',
+  'Acknowledged',
+  'Investigating',
+  'Escalated',
+  'Dispatched',
+];
+
+const alertTitle = (alert) => {
+  const descriptor = `${alert.alert_type || ''} ${alert.object_class || ''}`;
+
+  if (/crowd/i.test(alert.alert_type || '')) {
+    return 'Crowd density alert';
+  }
+
+  if (/unattended/i.test(descriptor)) {
+    return 'Unattended pallet/object alert';
+  }
+
+  return alert.object_class || alert.alert_type || 'Detection Alert';
 };
 
 const Dashboard = () => {
@@ -79,6 +103,8 @@ const Dashboard = () => {
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [detectionAlerts, setDetectionAlerts] = useState([]);
+  const [alertsOffline, setAlertsOffline] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -105,6 +131,22 @@ const Dashboard = () => {
   useEffect(() => { fetchSummary(); }, []);
 
   const role = dashboard?.role || user.role;
+  const isFM = role === 'FM';
+
+  useEffect(() => {
+    if (!isFM) return;
+    const token = localStorage.getItem('accessToken');
+    axios.get(`${API_BASE_URL}${ALERTS_URL}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => {
+        setDetectionAlerts(Array.isArray(res.data) ? res.data : []);
+        setAlertsOffline(false);
+      })
+      .catch(() => setAlertsOffline(true));
+  }, [isFM]);
+
+  const urgentDetectionAlerts = detectionAlerts
+    .filter((alert) => URGENT_ALERT_STATUSES.includes(alert.status))
+    .slice(0, 3);
   const title = role === 'FM' ? 'Operations Dashboard' : role === 'Tenant' ? 'Tenant Dashboard' : 'Staff Dashboard';
 
   const content = useMemo(() => {
@@ -112,6 +154,10 @@ const Dashboard = () => {
     const summary = dashboard.summary || {};
 
     if (dashboard.role === 'FM') {
+      const alertsToShow = urgentDetectionAlerts.length > 0
+        ? urgentDetectionAlerts
+        : (dashboard.recentHighPriorityAlerts || []);
+
       return (
         <>
           <section className="top-summary-row dashboard-summary-grid">
@@ -134,16 +180,17 @@ const Dashboard = () => {
               </div>
               <Link to="/object-detection">Open live console</Link>
             </div>
+            {alertsOffline && <p className="dashboard-alert-offline">Detection alerts are unavailable while the Node.js server is offline.</p>}
             <div className="dashboard-alert-grid">
-              {(dashboard.recentHighPriorityAlerts || []).map((alert) => (
+              {alertsToShow.map((alert) => (
                 <Link className="dashboard-alert-card" key={alert.id} to="/object-detection">
                   <span>{alert.severity || alert.status}</span>
-                  <h2>{alert.object_class || alert.alert_type || 'Detection Alert'}</h2>
+                  <h2>{alertTitle(alert)}</h2>
                   <p>{alert.zone_name} - {alert.camera_location}</p>
                   <small>{formatDateTime(alert.occurred_at || alert.createdAt)}</small>
                 </Link>
               ))}
-              {(dashboard.recentHighPriorityAlerts || []).length === 0 && (
+              {alertsToShow.length === 0 && (
                 <div className="dashboard-alert-empty"><h2>No high-priority alerts</h2><p>Urgent operational alerts will appear here when active.</p></div>
               )}
             </div>
@@ -209,7 +256,7 @@ const Dashboard = () => {
         </section>
       </>
     );
-  }, [dashboard]);
+  }, [dashboard, urgentDetectionAlerts, alertsOffline]);
 
   return (
     <div className="dashboard-layout">

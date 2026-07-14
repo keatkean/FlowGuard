@@ -43,6 +43,10 @@ export const buildZonePayload = (form) => {
   return {
     zone_name: form.zone_name.trim(),
     location: form.location.trim(),
+    // Tri-state for the backend: a camera id assigns it (atomically, in the same zone
+    // transaction), null explicitly releases whichever camera the zone currently holds.
+    camera_id: form.camera_id || null,
+    detection_type: form.detection_type,
     time_threshold: parseInt(form.time_threshold, 10),
     monitored_classes: monitoredClasses.split(',').map((item) => item.trim()).filter(Boolean),
     density_threshold: densityThreshold === '' ? null : parseInt(densityThreshold, 10),

@@ -18,6 +18,7 @@ The uploaded SecurePi project is preserved under `upstream/` and is the recommen
 - Starts the unattended timer only when no nearby person/owner is within `PROXIMITY_PX`.
 - Resets the timer when a person returns.
 - Sends a FlowGuard alert after `UNATTENDED_TIME`.
+- Sends a FlowGuard person alert from hardware when `CROWD_THRESHOLD` is reached.
 - Exposes the same annotated SecurePi frame as `GET /video_feed` when streaming is enabled.
 - Prevents duplicate alert spam with `ALERT_COOLDOWN`.
 - Can save a local snapshot path when the active detection source provides a frame.
@@ -84,6 +85,7 @@ STREAM_JPEG_QUALITY=70
 UNATTENDED_TIME=60
 PROXIMITY_PX=150
 ALERT_COOLDOWN=30
+CROWD_THRESHOLD=1
 SNAPSHOT_DIR=alerts/loading-bay
 HEADLESS=true
 ```

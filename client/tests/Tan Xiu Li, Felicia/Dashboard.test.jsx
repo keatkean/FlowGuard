@@ -38,11 +38,27 @@ const responses = {
   }
 };
 
+// URL-aware axios mock: the Dashboard performs two GETs (summary and, for FM,
+// detection alerts), so order-based mockResolvedValueOnce would leave the
+// second call returning undefined. Handlers are functions so a test can swap
+// them mid-flight (e.g. the retry test).
+const mockApi = ({ summary, detectionAlerts } = {}) => {
+  mockGet.mockImplementation((url) => {
+    if (url.includes('/api/dashboard/summary')) {
+      return summary ? summary() : Promise.resolve({ data: responses.FM });
+    }
+    if (url.includes('/api/detection-alerts')) {
+      return detectionAlerts ? detectionAlerts() : Promise.resolve({ data: [] });
+    }
+    return Promise.reject(new Error(`Unexpected GET request: ${url}`));
+  });
+};
+
 const renderRole = async (role) => {
   localStorage.setItem('accessToken', 'token');
   localStorage.setItem('userRole', role);
   localStorage.setItem('userName', 'Test User');
-  mockGet.mockResolvedValueOnce({ data: responses[role] });
+  mockApi({ summary: () => Promise.resolve({ data: responses[role] }) });
   render(<MemoryRouter><Dashboard /></MemoryRouter>);
   await waitFor(() => expect(mockGet).toHaveBeenCalled());
 };
@@ -76,14 +92,14 @@ describe('Dashboard - Phase 2 role-aware variants', () => {
   });
 
   test('shows loading state', () => {
-    mockGet.mockReturnValueOnce(new Promise(() => {}));
+    mockApi({ summary: () => new Promise(() => {}) });
     localStorage.setItem('userRole', 'FM');
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     expect(screen.getByText(/Loading dashboard summary/i)).toBeTruthy();
   });
 
   test('shows controlled error state', async () => {
-    mockGet.mockRejectedValueOnce({ response: { data: { error: 'No dashboard today.' } } });
+    mockApi({ summary: () => Promise.reject({ response: { data: { error: 'No dashboard today.' } } }) });
     localStorage.setItem('userRole', 'FM');
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     expect((await screen.findByRole('alert')).textContent).toContain('No dashboard today.');
@@ -93,6 +109,27 @@ describe('Dashboard - Phase 2 role-aware variants', () => {
     await renderRole('FM');
     expect(screen.queryByText('128')).toBeNull();
     expect(screen.queryByText('8,954')).toBeNull();
+  });
+
+  test('FM dashboard surfaces an urgent detection alert alongside summary cards', async () => {
+    localStorage.setItem('accessToken', 'token');
+    localStorage.setItem('userRole', 'FM');
+    localStorage.setItem('userName', 'Test User');
+    mockApi({
+      detectionAlerts: () => Promise.resolve({
+        data: [{
+          id: 1,
+          status: 'Active',
+          alert_type: 'unattended_object',
+          object_class: 'pallet',
+          zone_name: 'Zone A',
+          camera_location: 'Loading Bay 1'
+        }]
+      })
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect(await screen.findByText('Unattended pallet/object alert')).toBeTruthy();
+    expect(screen.getByText('Total Cameras')).toBeTruthy();
   });
 });
 
@@ -124,8 +161,10 @@ describe('Dashboard - real MUI summary-card icons', () => {
   test('null metric values render as Unavailable instead of crashing', async () => {
     localStorage.setItem('accessToken', 'token');
     localStorage.setItem('userRole', 'FM');
-    mockGet.mockResolvedValueOnce({
-      data: { role: 'FM', summary: { cameras: {}, attendance: {} }, recentHighPriorityAlerts: [] }
+    mockApi({
+      summary: () => Promise.resolve({
+        data: { role: 'FM', summary: { cameras: {}, attendance: {} }, recentHighPriorityAlerts: [] }
+      })
     });
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     expect((await screen.findAllByText('Unavailable')).length).toBeGreaterThan(0);
@@ -171,13 +210,14 @@ describe('Dashboard - real MUI summary-card icons', () => {
   test('network failure shows an in-page Retry state, not the global 500 boundary', async () => {
     localStorage.setItem('accessToken', 'token');
     localStorage.setItem('userRole', 'FM');
-    mockGet.mockRejectedValueOnce(new Error('Network Error'));
+    let summaryHandler = () => Promise.reject(new Error('Network Error'));
+    mockApi({ summary: () => summaryHandler() });
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toMatch(/Unable to load dashboard summary/i);
     const retry = screen.getByRole('button', { name: 'Retry' });
 
-    mockGet.mockResolvedValueOnce({ data: responses.FM });
+    summaryHandler = () => Promise.resolve({ data: responses.FM });
     retry.click();
     expect(await screen.findByText('Total Cameras')).toBeTruthy();
   });

@@ -36,8 +36,8 @@ from securePi import (Config, Detection, PersonTracker, BagTracker, TrackedBag, 
                       match_detections, smooth_box, parse_args, _alert_due,
                       save_snapshot_worker, append_event_worker,
                       Renderer, _fire_alert, SNAPSHOT_EXECUTOR, COLOR_ALERT,
-                      dedup_detections, _flowguard_payload,
-                      LatestJpegBuffer, SecurePiStreamServer)
+                      dedup_detections, FrameBuffer, StreamServer,
+                      FlowGuardBridge, CrowdGate)
 
 
 class FakeFrame:
@@ -133,6 +133,7 @@ def test_demo_preset():
     assert args.unattended_time == 10.0              # demo override
     assert args.owner_claim_time == 5.0              # demo override
     assert args.alert_cooldown == 15.0               # demo override
+    assert args.crowd_threshold == 1                 # inherited from common.args
     assert args.proximity == 150.0                   # inherited from common.args
     assert str(args.snapshot_dir).replace("\\", "/") == "alerts/demo"
 
@@ -142,6 +143,7 @@ def test_presets_resolution_and_layering():
     assert args.unattended_time == 60.0              # lobby override
     assert args.proximity == 120.0                   # lobby override
     assert args.alert_cooldown == 30.0               # inherited from common.args
+    assert args.crowd_threshold == 1                 # inherited from common.args
     args = parse_args(["@kitchen.args"])
     assert args.unattended_time == 300.0
     assert args.proximity == 150.0                   # inherited
@@ -202,30 +204,80 @@ def test_duplicate_bag_tracks_merge():
 
 
 def test_flowguard_payload():
-    cfg = Config(
-        flowguard_device_id="securepi-loading-bay-01",
-        flowguard_zone_name="Loading Bay",
-        flowguard_camera_location="Loading Bay Camera 01",
-        flowguard_severity="High",
+    bridge = FlowGuardBridge(
+        "http://flowguard.local:5001",
+        "/api/edge/detection-alerts",
+        "edge-token",
+        "securepi-loading-bay-01",
+        "Loading Bay",
+        "Loading Bay Camera 01",
+        "High",
     )
-    bag = TrackedBag(3, (100, 100), (80, 80, 40, 40), last_seen=1.0, created_at=0.0)
-    payload = _flowguard_payload(cfg, bag, 75, Path("alerts/loading-bay/alert_bag3.jpg"))
+    payload = bridge.build_payload("suitcase", 75, 0.91)
+    bridge.close()
     assert payload["alert_type"] == "Unattended Object"
-    assert payload["object_class"] == "package-like object"
+    assert payload["object_class"] == "suitcase"
     assert payload["source"] == "SecurePi Edge Node"
     assert payload["zone_name"] == "Loading Bay"
     assert payload["camera_location"] == "Loading Bay Camera 01"
     assert payload["duration_seconds"] == 75
     assert payload["device_id"] == "securepi-loading-bay-01"
-    assert payload["bag_id"] == 3
+    assert payload["confidence"] == 0.91
 
 
-def test_latest_jpeg_buffer_updates_sequence():
-    buf = LatestJpegBuffer()
+def test_crowd_gate_disabled_when_threshold_zero():
+    gate = CrowdGate()
+    assert gate.update(50, 0) is False
+    assert gate.update(0, 0) is False
+
+
+def test_crowd_gate_fires_once_then_rearms_below_threshold():
+    gate = CrowdGate()
+    assert gate.update(3, 5) is False          # below threshold
+    assert gate.update(5, 5) is True            # reaches threshold: fires
+    assert gate.update(6, 5) is False           # still crowded: no repeat
+    assert gate.update(7, 5) is False           # still crowded: no repeat
+    assert gate.update(4, 5) is False           # drops below: re-arm, no fire
+    assert gate.update(5, 5) is True            # crosses again: fires once more
+
+
+def test_crowd_gate_single_person_does_not_fire_unless_threshold_is_one():
+    gate = CrowdGate()
+    assert gate.update(1, 5) is False
+    gate2 = CrowdGate()
+    assert gate2.update(1, 1) is True           # explicitly configured for 1
+
+
+def test_flowguard_crowd_payload():
+    bridge = FlowGuardBridge(
+        "http://flowguard.local:5001",
+        "/api/edge/detection-alerts",
+        "edge-token",
+        "securepi-loading-bay-01",
+        "Loading Bay",
+        "Loading Bay Camera 01",
+        "High",
+    )
+    payload = bridge.build_person_payload(8)
+    assert payload["alert_type"] == "Critical: 8 People Detected"
+    assert payload["severity"] == "Critical"
+    assert payload["source"] == "SecurePi Edge Node"
+    assert payload["zone_name"] == "Loading Bay"
+    assert payload["camera_location"] == "Loading Bay Camera 01"
+    assert payload["device_id"] == "securepi-loading-bay-01"
+    assert payload["person_count"] == 8
+    single = bridge.build_person_payload(1)
+    bridge.close()
+    assert single["alert_type"] == "Warning: Person Detected"
+    assert single["severity"] == "Medium"
+
+
+def test_frame_buffer_updates_sequence():
+    buf = FrameBuffer()
     jpeg, seq = buf.wait_for_frame(0, timeout=0.01)
     assert jpeg is None
     assert seq == 0
-    buf.update(b"frame-a")
+    buf.publish(b"frame-a")
     jpeg, seq = buf.wait_for_frame(0, timeout=0.01)
     assert jpeg == b"frame-a"
     assert seq == 1
@@ -233,15 +285,33 @@ def test_latest_jpeg_buffer_updates_sequence():
 
 def test_stream_health_endpoint():
     cfg = Config(stream_enabled=True, stream_host="127.0.0.1", stream_port=0)
-    server = SecurePiStreamServer(cfg)
+    buf = FrameBuffer()
+    server = StreamServer(cfg, buf)
     server.start()
     try:
-        port = server._server.server_address[1]
+        port = server.port
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as response:
             payload = json.loads(response.read().decode("utf-8"))
         assert payload["status"] == "online"
         assert payload["camera"] == "IMX500"
         assert payload["streaming"] is True
+    finally:
+        server.stop()
+
+
+def test_stream_people_count_endpoint_reports_fresh_status():
+    cfg = Config(stream_enabled=True, stream_host="127.0.0.1", stream_port=0)
+    buf = FrameBuffer()
+    buf.publish_status(3, 1)
+    server = StreamServer(cfg, buf)
+    server.start()
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{server.port}/people-count", timeout=2) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        assert payload["count"] == 3
+        assert payload["person_count"] == 3
+        assert payload["bag_count"] == 1
+        assert payload["detection_active"] is True
     finally:
         server.stop()
 

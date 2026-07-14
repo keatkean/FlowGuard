@@ -52,6 +52,14 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.BOOLEAN,
             allowNull: false,
             defaultValue: true
+        },
+        // Explicit Detection Setup category, set by the FM instead of being guessed back
+        // from severity/density/monitored_classes after reload. Nullable so rows created
+        // before this field existed keep loading — serializeZone() below fills in the
+        // 'unattended_object' fallback for those.
+        detection_type: {
+            type: DataTypes.STRING(30),
+            allowNull: true
         }
     }, {
         tableName: 'monitoring_zones',

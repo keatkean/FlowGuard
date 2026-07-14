@@ -1,0 +1,562 @@
+openapi: 3.0.3
+info:
+  title: FlowGuard Object Detection & SecurePi Integration API
+  description: >
+    JSON REST endpoints for Camera Inventory, Monitoring Zones (Detection Setup),
+    Detection Alerts, and the SecurePi edge-ingest route. Derived from
+    server/routes/*.js and ai-service/main.py as implemented on
+    branch feature/object-detection-space (2026-07-11).
+    MJPEG endpoints (SecurePi /video_feed, AI Service /api/yolo/stream) are
+    intentionally excluded — they are not JSON REST responses.
+  version: "1.0.0"
+servers:
+  - url: http://localhost:5001
+    description: FlowGuard Node.js backend (dev)
+  - url: http://localhost:8501
+    description: FlowGuard AI Service (FastAPI, dev) - reached by the frontend via the Vite "/ai" proxy
+
+tags:
+  - name: Zones
+  - name: Cameras
+  - name: DetectionAlerts
+  - name: EdgeIngest
+  - name: AIService
+
+components:
+  securitySchemes:
+    bearerJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: FlowGuard user JWT (FM/Staff/Tenant), verified against APP_SECRET.
+    serviceKey:
+      type: apiKey
+      in: header
+      name: x-service-key
+      description: Shared secret used by the Python AI engine (AI_SERVICE_KEY).
+    edgeIngestToken:
+      type: http
+      scheme: bearer
+      description: Static device token used by the SecurePi edge node (EDGE_INGEST_TOKEN).
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      example:
+        error: "zone_name and camera_location are required."
+    AuthError:
+      type: object
+      properties:
+        message:
+          type: string
+      example:
+        message: "Access Denied. No security token provided."
+    MonitoringZone:
+      type: object
+      properties:
+        id: { type: integer }
+        zone_name: { type: string }
+        location: { type: string }
+        time_threshold: { type: integer, description: "Legacy threshold in minutes" }
+        monitored_classes:
+          type: array
+          items: { type: string }
+        density_threshold: { type: integer, nullable: true }
+        unattended_threshold_seconds: { type: integer, nullable: true }
+        alert_cooldown_seconds: { type: integer, nullable: true }
+        severity: { type: string, enum: [Low, Medium, High, Critical] }
+        assigned_team: { type: string, nullable: true }
+        detection_enabled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    MonitoringZoneInput:
+      type: object
+      required: [zone_name, location, time_threshold]
+      properties:
+        zone_name: { type: string }
+        location: { type: string }
+        time_threshold: { type: number, minimum: 1 }
+        density_threshold: { type: number, nullable: true }
+        unattended_threshold_seconds: { type: number, nullable: true }
+        alert_cooldown_seconds: { type: number, nullable: true }
+        severity: { type: string, enum: [Low, Medium, High, Critical] }
+        assigned_team: { type: string, nullable: true }
+        detection_enabled: { type: boolean }
+        monitored_classes:
+          oneOf:
+            - type: array
+              items: { type: string }
+            - type: string
+              description: comma-separated class list
+    Camera:
+      type: object
+      properties:
+        id: { type: integer }
+        camera_code: { type: string }
+        camera_name: { type: string }
+        location: { type: string }
+        zone_id: { type: integer, nullable: true }
+        stream_url: { type: string, nullable: true }
+        status: { type: string, enum: [Online, Offline, Maintenance, Disabled] }
+        camera_type: { type: string, nullable: true }
+        last_active_at: { type: string, format: date-time, nullable: true }
+        notes: { type: string, nullable: true }
+        zone:
+          $ref: '#/components/schemas/MonitoringZone'
+    CameraInput:
+      type: object
+      required: [camera_code, camera_name, location]
+      properties:
+        camera_code: { type: string }
+        camera_name: { type: string }
+        location: { type: string }
+        zone_id: { type: integer, nullable: true }
+        stream_url: { type: string, nullable: true }
+        status: { type: string, enum: [Online, Offline, Maintenance, Disabled] }
+        camera_type: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+    DetectionAlert:
+      type: object
+      properties:
+        id: { type: integer }
+        zone_name: { type: string }
+        camera_location: { type: string }
+        status:
+          type: string
+          enum: [Active, Acknowledged, Investigating, Dispatched, Escalated, Cleared]
+        object_class: { type: string, nullable: true }
+        duration_seconds: { type: integer, nullable: true }
+        person_name: { type: string, nullable: true }
+        alert_type: { type: string, nullable: true }
+        severity: { type: string, enum: [Low, Medium, High, Critical] }
+        source: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 1, nullable: true }
+        snapshot_url: { type: string, nullable: true }
+        device_id: { type: string, nullable: true }
+        occurred_at: { type: string, format: date-time, nullable: true }
+        camera_id: { type: integer, nullable: true }
+        zone_id: { type: integer, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DetectionAlertInput:
+      type: object
+      required: [zone_name, camera_location]
+      properties:
+        zone_name: { type: string }
+        camera_location: { type: string }
+        status:
+          type: string
+          enum: [Active, Acknowledged, Investigating, Dispatched, Escalated, Cleared]
+        object_class: { type: string }
+        duration_seconds: { type: integer, minimum: 0 }
+        person_name: { type: string }
+        alert_type: { type: string }
+        severity: { type: string, enum: [Low, Medium, High, Critical] }
+        source: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        snapshot_url: { type: string }
+        snapshot_path: { type: string, description: "Alias for snapshot_url" }
+        device_id: { type: string }
+        timestamp: { type: string, format: date-time }
+        occurred_at: { type: string, format: date-time, description: "Alias for timestamp" }
+    EdgeDetectionAlertInput:
+      allOf:
+        - $ref: '#/components/schemas/DetectionAlertInput'
+      example:
+        alert_type: "Unattended Object"
+        object_class: "bag"
+        zone_name: "Loading Bay"
+        camera_location: "Loading Bay Camera 01"
+        duration_seconds: 15
+        severity: "High"
+        status: "Active"
+        source: "SecurePi Edge Node"
+        confidence: 0.91
+        device_id: "securepi-loading-bay-01"
+        occurred_at: "2026-07-11T10:00:00.000Z"
+    AlertStatusUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [Active, Acknowledged, Investigating, Dispatched, Escalated, Cleared]
+    PeopleCount:
+      type: object
+      properties:
+        count: { type: integer }
+        detection_active: { type: boolean }
+        camera_status: { type: string }
+    AnalyzeFrameInput:
+      type: object
+      required: [image]
+      properties:
+        image:
+          type: string
+          description: Base64-encoded (data URL or raw) JPEG frame captured from the browser camera or an uploaded video.
+    AnalyzeFrameResult:
+      type: object
+      properties:
+        count: { type: integer }
+        detections:
+          type: array
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              box:
+                type: array
+                items: { type: integer }
+                minItems: 4
+                maxItems: 4
+              status: { type: string }
+              confidence: { type: number }
+              type: { type: string }
+        frame_width: { type: integer }
+        frame_height: { type: integer }
+        detection_active: { type: boolean }
+        camera_status: { type: string }
+    FastApiError:
+      type: object
+      properties:
+        detail:
+          type: string
+
+paths:
+  /api/zones:
+    get:
+      tags: [Zones]
+      summary: List monitoring zones (Detection Setup)
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: List of monitoring zones
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MonitoringZone' }
+        '401': { description: Missing/invalid token, content: { application/json: { schema: { $ref: '#/components/schemas/AuthError' } } } }
+        '403': { description: Role is not FM/Staff, content: { application/json: { schema: { $ref: '#/components/schemas/AuthError' } } } }
+        '500': { description: Server error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    post:
+      tags: [Zones]
+      summary: Create a monitoring zone
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MonitoringZoneInput' }
+      responses:
+        '201':
+          description: Created zone
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringZone' }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Missing/invalid token }
+        '403': { description: Role is not FM }
+        '500': { description: Server error }
+
+  /api/zones/{id}:
+    put:
+      tags: [Zones]
+      summary: Update a monitoring zone
+      security: [{ bearerJwt: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MonitoringZoneInput' }
+      responses:
+        '200':
+          description: Updated zone
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringZone' }
+        '400': { description: Validation error }
+        '401': { description: Missing/invalid token }
+        '403': { description: Role is not FM }
+        '404': { description: Zone not found (empty body) }
+        '500': { description: Server error }
+    delete:
+      tags: [Zones]
+      summary: Delete a monitoring zone
+      security: [{ bearerJwt: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: Deleted (empty body) }
+        '401': { description: Missing/invalid token }
+        '403': { description: Role is not FM }
+        '404': { description: Zone not found (empty body) }
+        '500': { description: Server error }
+
+  /api/cameras:
+    get:
+      tags: [Cameras]
+      summary: List cameras
+      security: [{ bearerJwt: [] }]
+      responses:
+        '200':
+          description: List of cameras
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Camera' }
+        '401': { description: Missing/invalid token }
+        '403': { description: Role is not FM/Staff }
+        '500': { description: Server error }
+    post:
+      tags: [Cameras]
+      summary: Create a camera
+      security: [{ bearerJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CameraInput' }
+      responses:
+        '201':
+          description: Created camera
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Camera' }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Missing/invalid token }
+        '403': { description: Role is not FM }
+        '409': { description: Duplicate camera_code, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Server error }
+
+  /api/cameras/{id}:
+    get:
+      tags: [Cameras]
+      summary: Get a single camera
+      security: [{ bearerJwt: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Camera found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Camera' }
+        '401': { description: Missing/invalid token }
+        '403': { description: Role is not FM/Staff }
+        '404': { description: Camera not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Server error }
+    put:
+      tags: [Cameras]
+      summary: Update a camera
+      security: [{ bearerJwt: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CameraInput' }
+      responses:
+        '200':
+          description: Updated camera
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Camera' }
+        '400': { description: Validation error }
+        '401': { description: Missing/invalid token }
+        '403': { description: Role is not FM }
+        '404': { description: Camera not found }
+        '409': { description: Duplicate camera_code }
+        '500': { description: Server error }
+    delete:
+      tags: [Cameras]
+      summary: Deactivate and soft-delete a camera
+      security: [{ bearerJwt: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: Deactivated (empty body) }
+        '401': { description: Missing/invalid token }
+        '403': { description: Role is not FM }
+        '404': { description: Camera not found }
+        '500': { description: Server error }
+
+  /api/detection-alerts:
+    get:
+      tags: [DetectionAlerts]
+      summary: List the latest 50 detection alerts
+      security: [{ bearerJwt: [] }]
+      parameters:
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+            enum: [Active, Acknowledged, Investigating, Dispatched, Escalated, Cleared]
+      responses:
+        '200':
+          description: List of detection alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DetectionAlert' }
+        '401': { description: Missing/invalid token }
+        '403': { description: Role is not FM/Staff }
+        '500': { description: Server error }
+    post:
+      tags: [DetectionAlerts]
+      summary: Create a detection alert (AI engine service key, or FM/Staff manual test alert)
+      description: >
+        Not called from the Object Detection page's UI. Accepts either a JWT
+        (FM/Staff) or the AI engine's shared x-service-key header.
+      security:
+        - bearerJwt: []
+        - serviceKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DetectionAlertInput' }
+      responses:
+        '201':
+          description: Created alert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DetectionAlert' }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: No/invalid service key and no/invalid JWT }
+        '403': { description: Valid JWT but role not FM/Staff }
+        '500': { description: Server error }
+
+  /api/detection-alerts/{id}:
+    put:
+      tags: [DetectionAlerts]
+      summary: Update a detection alert's status (Acknowledge / Investigate / Escalate / Clear)
+      description: >
+        Backs the Object Detection page's incident action buttons
+        (Acknowledge, Mark Investigating, Escalate, Mark Resolved/Cleared).
+      security: [{ bearerJwt: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlertStatusUpdate' }
+      responses:
+        '200':
+          description: Updated alert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DetectionAlert' }
+        '400': { description: Invalid status value, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Missing/invalid token }
+        '403': { description: Role is not FM/Staff }
+        '404': { description: Alert not found (empty body) }
+        '500': { description: Server error }
+
+  /api/edge/detection-alerts:
+    post:
+      tags: [EdgeIngest]
+      summary: SecurePi edge-device alert ingest
+      description: >
+        Called by the SecurePi Raspberry Pi edge node (edge/securepi/securepi_edge.py)
+        to report an unattended object. Uses a static device bearer token, not a user
+        JWT or the AI-service shared key.
+      security: [{ edgeIngestToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EdgeDetectionAlertInput' }
+      responses:
+        '201':
+          description: Created alert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DetectionAlert' }
+        '400':
+          description: zone_name/camera_location missing, or invalid status/severity
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Missing or incorrect bearer token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: EDGE_INGEST_TOKEN not configured on the server
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/yolo/people-count:
+    get:
+      tags: [AIService]
+      summary: Poll current people count from the AI service's YOLO loop
+      description: >
+        Served by the FastAPI AI Service (ai-service/main.py), reached by the
+        frontend via the Vite dev proxy at /ai/api/yolo/people-count. No
+        authentication is enforced by this service.
+      servers:
+        - url: http://localhost:8501
+      responses:
+        '200':
+          description: Current people count and detection state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PeopleCount' }
+
+  /api/yolo/analyze-frame:
+    post:
+      tags: [AIService]
+      summary: Analyze one browser-camera or uploaded-video frame
+      description: >
+        Served by the FastAPI AI Service, reached by the frontend via the Vite
+        dev proxy at /ai/api/yolo/analyze-frame. No authentication is enforced
+        by this service.
+      servers:
+        - url: http://localhost:8501
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AnalyzeFrameInput' }
+      responses:
+        '200':
+          description: Detections for the analyzed frame
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalyzeFrameResult' }
+        '400':
+          description: Invalid/undecodable image data
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FastApiError' }

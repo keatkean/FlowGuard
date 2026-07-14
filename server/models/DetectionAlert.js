@@ -64,6 +64,13 @@ module.exports = (sequelize, DataTypes) => {
         zone_id: {
             type: DataTypes.INTEGER,
             allowNull: true
+        },
+        // Links the alert to the IncidentLog row created alongside it, so status/severity
+        // updates and false-alarm deletion can keep both records consistent. Nullable —
+        // alerts created before this field existed have no linked incident.
+        incident_log_id: {
+            type: DataTypes.INTEGER,
+            allowNull: true
         }
     }, {
         tableName: 'detection_alerts',
@@ -73,6 +80,7 @@ module.exports = (sequelize, DataTypes) => {
     DetectionAlert.associate = (models) => {
         DetectionAlert.belongsTo(models.Camera, { foreignKey: 'camera_id', as: 'camera' });
         DetectionAlert.belongsTo(models.MonitoringZone, { foreignKey: 'zone_id', as: 'zone' });
+        DetectionAlert.belongsTo(models.IncidentLog, { foreignKey: 'incident_log_id', as: 'incident' });
     };
 
     return DetectionAlert;
