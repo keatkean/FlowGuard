@@ -80,6 +80,17 @@ const URGENT_ALERT_STATUSES = [
   'Dispatched',
 ];
 
+// Distinguishes why the detection-alert fetch failed so the banner never blames
+// an "offline server" for auth or backend errors.
+const alertsErrorMessage = (err) => {
+  const status = err?.response?.status;
+  if (status === 401) return 'Detection alerts are unavailable: your session has expired. Please log in again.';
+  if (status === 403) return 'Detection alerts are unavailable: your account does not have permission to view them.';
+  if (status >= 500) return 'Detection alerts are unavailable: the server reported an internal error.';
+  if (status) return `Detection alerts are unavailable (HTTP ${status}).`;
+  return 'Detection alerts are unavailable: the server could not be reached.';
+};
+
 const alertTitle = (alert) => {
   const descriptor = `${alert.alert_type || ''} ${alert.object_class || ''}`;
 
@@ -104,7 +115,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [detectionAlerts, setDetectionAlerts] = useState([]);
-  const [alertsOffline, setAlertsOffline] = useState(false);
+  const [alertsError, setAlertsError] = useState('');
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -139,9 +150,9 @@ const Dashboard = () => {
     axios.get(`${API_BASE_URL}${ALERTS_URL}`, { headers: { Authorization: `Bearer ${token}` } })
       .then((res) => {
         setDetectionAlerts(Array.isArray(res.data) ? res.data : []);
-        setAlertsOffline(false);
+        setAlertsError('');
       })
-      .catch(() => setAlertsOffline(true));
+      .catch((err) => setAlertsError(alertsErrorMessage(err)));
   }, [isFM]);
 
   const urgentDetectionAlerts = detectionAlerts
@@ -180,7 +191,7 @@ const Dashboard = () => {
               </div>
               <Link to="/object-detection">Open live console</Link>
             </div>
-            {alertsOffline && <p className="dashboard-alert-offline">Detection alerts are unavailable while the Node.js server is offline.</p>}
+            {alertsError && <p className="dashboard-alert-offline">{alertsError}</p>}
             <div className="dashboard-alert-grid">
               {alertsToShow.map((alert) => (
                 <Link className="dashboard-alert-card" key={alert.id} to="/object-detection">
@@ -256,7 +267,7 @@ const Dashboard = () => {
         </section>
       </>
     );
-  }, [dashboard, urgentDetectionAlerts, alertsOffline]);
+  }, [dashboard, urgentDetectionAlerts, alertsError]);
 
   return (
     <div className="dashboard-layout">
