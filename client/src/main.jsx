@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom' 
+import { BrowserRouter } from 'react-router-dom'
 import { GoogleReCaptchaProvider } from 'react-google-recaptcha-v3'
+import './axiosSetup';
 import './css/Global.css'
 import './css/Footer.css'
 import './css/Home.css'

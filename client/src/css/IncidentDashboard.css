@@ -395,6 +395,35 @@
   box-shadow: 0 10px 24px rgba(37, 99, 235, 0.35);
 }
 
+/* --- Header action buttons (Log Incident + Support Tickets) --- */
+.inc-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-self: center;
+}
+
+/* --- "Support Tickets →" header button (violet = support, not incident) --- */
+.inc-support-btn {
+  background: linear-gradient(135deg, #7c3aed, #a855f7);
+  color: white;
+  border: 1px solid rgba(216, 180, 254, 0.35);
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.88rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.15s, box-shadow 0.15s;
+  box-shadow: 0 6px 18px rgba(124, 58, 237, 0.2);
+}
+
+.inc-support-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(124, 58, 237, 0.35);
+}
+
 /* --- Create modal (wider than detail modal) --- */
 .inc-create-modal {
   background: #1e293b;
@@ -674,12 +703,108 @@
   color: #fde68a;
 }
 
-/* ---- Table: horizontal scroll on narrow viewports ---- */
-.dashboard-main .table-container {
+/* ---- Table: horizontal scroll + fixed layout for balanced columns ----
+   Scoped to .inc-table / .inc-table-wrap (NOT .dashboard-main .management-table)
+   so these rules cannot leak into other pages' tables — all page CSS ends up
+   in one global bundle. */
+.inc-table-wrap {
   overflow-x: auto;
   overflow-y: hidden;
 }
 
-.dashboard-main .management-table {
-  min-width: 900px;
+.management-table.inc-table {
+  min-width: 880px;
+  table-layout: fixed;
+}
+
+/* Tighter side padding than the default 1.5rem so every header fits its
+   column at the 880px minimum (CONFIDENCE is the widest at ~89px). */
+.inc-table th,
+.inc-table td {
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+/* Column widths — total 100%
+   Order: TIMESTAMP | LOCATION | PERSON | SOURCE | CONFIDENCE | SEVERITY | STATUS | ACTIONS */
+.inc-table th:nth-child(1) { width: 12.7%; }
+.inc-table th:nth-child(2) { width: 12.5%; }
+.inc-table th:nth-child(3) { width: 10.5%; }
+.inc-table th:nth-child(4) { width: 10%; }
+.inc-table th:nth-child(5) { width: 13.5%; }
+.inc-table th:nth-child(6) { width: 11%; }
+.inc-table th:nth-child(7) { width: 11.8%; }
+.inc-table th:nth-child(8) { width: 18%; }
+
+/* Timestamp: date on line 1, time on line 2 */
+.inc-table td:nth-child(1) {
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+/* ---- Sticky Actions column ----
+   Sticky cells need opaque backgrounds; each value below matches the
+   composited colour of the row state it sits on, so the column blends
+   in instead of reading as a separate block. */
+.inc-table th:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: #172032; /* rgba(30,41,59,.5) header tint over #0f172a */
+}
+
+.inc-table .actions-cell {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: #0f172a;
+  text-align: center;
+}
+
+/* Compact buttons so the group fits the sticky column on laptop widths */
+.inc-table th:last-child,
+.inc-table .actions-cell {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.inc-table .actions-cell .action-btn {
+  min-width: 64px;
+}
+
+.inc-table .actions-cell .action-button-group {
+  grid-template-columns: repeat(2, minmax(64px, 1fr));
+  max-width: none;
+  width: fit-content;
+  margin: 0 auto;
+}
+
+/*
+ * box-shadow on <th>/<td> is silently ignored by all browsers when
+ * border-collapse: collapse is set on the table — use a pseudo-element
+ * instead, which is a regular box and renders the shadow correctly.
+ */
+.inc-table th:last-child::before,
+.inc-table .actions-cell::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -24px;
+  width: 24px;
+  background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.55));
+  border-right: 3px solid #2d4875;
+  pointer-events: none;
+}
+
+.inc-table tr:hover .actions-cell {
+  background: #101a30; /* rgba(59,130,246,.03) hover tint over #0f172a */
+}
+
+.inc-table .inc-row-manual .actions-cell {
+  background: #181e2e; /* rgba(120,105,88,.09) manual tint over #0f172a */
+}
+
+.inc-table .inc-row-manual:hover .actions-cell {
+  background: #1e2230; /* rgba(120,105,88,.14) manual hover tint over #0f172a */
 }
