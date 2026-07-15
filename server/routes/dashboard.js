@@ -18,6 +18,7 @@ const {
   summarizeForDate,
   buildAttendanceWhere
 } = require('../services/attendanceSummary');
+const { buildAlertAnalytics } = require('../services/dashboardAnalytics');
 
 const ACTIVE_ALERT_STATUSES = ['Active', 'Acknowledged', 'Investigating', 'Escalated', 'Dispatched'];
 const HIGH_SEVERITIES = ['High', 'Critical'];
@@ -70,6 +71,16 @@ router.get('/summary', verifyToken, async (req, res) => {
         limit: 5
       }) : [];
 
+      // Aggregate-only operational analytics (per-day High/Critical counts + busiest
+      // zones over the last 7 SG days). FM-only; no individual alert rows, no personal
+      // or biometric fields. Failure here must never take down the whole summary.
+      let analytics = { alertTrend7Days: [], topAlertZones7Days: [] };
+      try {
+        analytics = await buildAlertAnalytics(DetectionAlert);
+      } catch (analyticsErr) {
+        console.error('Dashboard analytics error:', analyticsErr);
+      }
+
       return res.json({
         role: 'FM',
         summary: {
@@ -85,7 +96,8 @@ router.get('/summary', verifyToken, async (req, res) => {
           openIncidents,
           openSupportTickets
         },
-        recentHighPriorityAlerts: recentHighPriorityAlerts.map((alert) => (typeof alert.toJSON === 'function' ? alert.toJSON() : alert))
+        recentHighPriorityAlerts: recentHighPriorityAlerts.map((alert) => (typeof alert.toJSON === 'function' ? alert.toJSON() : alert)),
+        analytics
       });
     }
 

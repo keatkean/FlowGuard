@@ -152,12 +152,12 @@ const Attendance = () => {
                   <tr><td colSpan={isStaff ? 5 : 6} className="table-notice-state">Loading attendance summaries...</td></tr>
                 ) : records.length > 0 ? records.map((record) => (
                   <tr key={`${record.userId}-${record.date}`}>
-                    {!isStaff && <td className="cell-worker-name">{record.user?.name || 'Unknown Staff'}</td>}
-                    <td className="cell-timestamp">{record.date}</td>
-                    <td>{formatDateTime(record.firstCheckIn)}</td>
-                    <td>{formatDateTime(record.latestCheckOut)}</td>
-                    <td><span className={`presence-tag ${record.currentStatus === 'IN' ? 'on-site' : 'off-site'}`}>{record.currentStatus === 'IN' ? 'ON SITE' : 'OFF SITE'}</span></td>
-                    <td><span className={`status-badge ${record.punctuality === 'LATE' ? 'expired' : 'active'}`}>{formatStatus(record.punctuality)}</span></td>
+                    {!isStaff && <td className="cell-worker-name" data-label="Employee Name">{record.user?.name || 'Unknown Staff'}</td>}
+                    <td className="cell-timestamp" data-label="Date">{record.date}</td>
+                    <td data-label="First Check-In">{formatDateTime(record.firstCheckIn)}</td>
+                    <td data-label="Latest Check-Out">{formatDateTime(record.latestCheckOut)}</td>
+                    <td data-label="Current Status"><span className={`presence-tag ${record.currentStatus === 'IN' ? 'on-site' : 'off-site'}`}>{record.currentStatus === 'IN' ? 'ON SITE' : 'OFF SITE'}</span></td>
+                    <td data-label="Punctuality"><span className={`status-badge ${record.punctuality === 'LATE' ? 'expired' : 'active'}`}>{formatStatus(record.punctuality)}</span></td>
                   </tr>
                 )) : (
                   <tr>

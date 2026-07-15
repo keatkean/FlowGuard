@@ -133,19 +133,44 @@
 }
 
 @media (max-width: 768px) {
-  
-  /* 1. Stack header titles and the camera kiosk launcher button vertically */
+
+  /* 1. Stack the title above the toolbar, but keep the toolbar itself on ONE
+     row: date filter + Refresh + Launch Gate Terminal share a wrapping flex
+     row instead of each becoming a full-width stacked button. */
   .attendance-header {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
     gap: 16px;
     width: 100%;
   }
 
+  .attendance-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .attendance-actions select {
+    flex: 1 1 120px;
+    min-width: 120px;
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+
+  .attendance-actions input[type="date"] {
+    flex: 1 1 150px;
+    min-width: 150px;
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+
   .launch-terminal-btn {
-    width: 100%; 
+    flex: 1 1 auto;
+    min-height: 44px;
+    padding: 10px 14px;
     text-align: center;
-    padding: 12px; 
   }
 
   /* 2. Collapse the cards grid layout from 3 columns down to 1 single clean stack row */
@@ -182,10 +207,19 @@
   /* If cells are structured as flex items or containers inside Management.css */
   .management-table td {
     display: flex !important;
-    justify-content: flex-start !important; /* Pushes layout content blocks left */
+    justify-content: flex-start !important; /* field label (::before) then value, left-aligned */
     align-items: center !important;
+    gap: 12px !important;
     width: 100% !important;
     padding: 10px 14px !important;
+  }
+
+  /* The data-label injected by Management.css must not be stretched by the generic
+     margin-right:auto below (which is meant for the value spans, not the label). */
+  .management-table td::before {
+    text-align: left !important;
+    margin-right: 0 !important;
+    flex: 0 0 auto;
   }
 
   /* Clear any margin pushes or right alignments from badges or inner text spans */
@@ -196,5 +230,19 @@
     text-align: left !important;
     margin-left: 0 !important; /* Neutralizes code structures that push elements right */
     margin-right: auto !important; /* Locks structural anchor points to the left border */
+  }
+}
+
+/* --- Narrow phones (<= 430px): sensible toolbar fallback ---
+   The date filter takes the full first row; Refresh + Launch Gate Terminal
+   share the second row. Nothing stacks into a single tall column. */
+@media (max-width: 430px) {
+  .attendance-actions select,
+  .attendance-actions input[type="date"] {
+    flex: 1 1 100%;
+  }
+
+  .launch-terminal-btn {
+    flex: 1 1 45%;
   }
 }

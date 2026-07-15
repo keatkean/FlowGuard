@@ -5,7 +5,7 @@
 // module objects (Vitest auto-unwraps genuine MUI imports, so relying on
 // normal imports alone would prove nothing).
 import React from "react";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -122,9 +122,10 @@ describe("Runtime icon-bearing components", () => {
     mockAxios.get.mockResolvedValue({
       data: [{ id: 5, name: "Jane Tan", email: "jane@x.com", role: "Tenant", isActive: true, isEnrolled: false, createdAt: "2026-01-01" }],
     });
-    render(<MemoryRouter><Users /></MemoryRouter>);
-    await screen.findByText("Jane Tan");
-    const actions = screen.getByLabelText("Actions for Jane Tan");
+    const { container } = render(<MemoryRouter><Users /></MemoryRouter>);
+    // Rendered in both the table and the card list — scope to the desktop table.
+    await screen.findAllByText("Jane Tan");
+    const actions = within(container.querySelector(".users-table")).getByLabelText("Actions for Jane Tan");
     // One SVG per action button (View Logs / Suspend / Delete).
     expect(actions.querySelectorAll("svg").length).toBe(3);
   });

@@ -473,44 +473,168 @@
 }
 
 /* =========================================
-   MOBILE RESPONSIVENESS
+   RESPONSIVE USER CARDS — dedicated markup (.user-card-list).
+   Rendered from the same filteredUsers as the table and shown <= 1024px in
+   place of it. This is a purpose-built card DOM, NOT a CSS table-to-card
+   conversion, so no table-layout/percentage-column/min-width sizing leaks in
+   and there is no per-character wrapping.
    ========================================= */
-@media (max-width: 768px) {
-    .user-summary-grid,
-    .user-filter-bar {
+.user-card-list {
+    display: none; /* desktop/laptop use the table */
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.users-loading-state,
+.users-empty-state {
+    padding: 40px;
+    text-align: center;
+    color: #94a3b8;
+}
+
+@media (max-width: 1024px) {
+    /* Summary: two columns on tablet. Search spans the row; selects sit below. */
+    .user-summary-grid { grid-template-columns: repeat(2, 1fr); }
+    .user-filter-bar { grid-template-columns: 1fr 1fr; }
+    .user-filter-bar input[name="query"] { grid-column: 1 / -1; }
+
+    /* Swap representations: hide the table, show the cards. */
+    .users-desktop-table { display: none; }
+
+    .user-card-list {
+        display: grid;
         grid-template-columns: 1fr;
+        gap: 16px;
     }
 
-    .users-table tr {
-        margin-bottom: 20px;
+    .user-card {
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+        background: #1e293b;
         border: 1px solid #334155;
         border-radius: 12px;
-        background-color: #1e293b;
-        padding: 15px;
-        display: block;
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
     }
 
-    .users-table thead { display: none; }
-    .users-table td { 
-        display: flex; 
-        justify-content: space-between; 
-        padding: 10px 5px;
-        border: none;
+    .user-card-suspended { opacity: 0.7; }
+
+    /* --- Header: avatar + name + role/status badges --- */
+    .user-card-head {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
     }
 
-    .actions-cell {
-        justify-content: center; /* Keep centered on mobile too */
-        padding-top: 15px !important;
+    .user-card-identity {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
     }
 
-    .user-name-cell {
-        border-bottom: 1px solid #334155 !important;
-        padding-bottom: 15px !important;
-        justify-content: flex-start !important;
+    .user-card-name {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #f8fafc;
+        line-height: 1.25;
+        /* Names wrap on word boundaries — never per-character. */
+        overflow-wrap: break-word;
+        word-break: normal;
     }
 
-    .user-identity {
-        justify-content: flex-end;
+    .user-card-badges {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px 10px;
+    }
+
+    /* role-cell defaults to a column; keep the badge + description inline here. */
+    .user-card-badges .role-cell {
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+    }
+
+    /* --- Metadata: compact two-column grid, email spans the full width --- */
+    .user-card-meta {
+        margin: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) minmax(140px, 1fr);
+        gap: 12px 16px;
+    }
+
+    .user-card-field {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+    }
+
+    .user-card-field.field-email { grid-column: 1 / -1; }
+
+    .user-card-field dt {
+        font-size: 0.68rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #94a3b8;
+    }
+
+    .user-card-field dd {
+        margin: 0;
+        min-width: 0;
+        font-size: 0.92rem;
+        color: #e2e8f0;
+    }
+
+    /* Only the email needs to break inside a token; everything else wraps normally. */
+    .user-card-field .email-value {
+        overflow-wrap: anywhere;
+        word-break: normal;
+    }
+
+    /* --- Footer: equal-height action row (View Logs, Suspend/Reactivate, Delete) --- */
+    .user-card-footer { min-width: 0; }
+
+    .user-card-footer .action-button-group {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        width: 100%;
+    }
+
+    .user-card-footer .action-btn {
+        width: auto;
+        min-height: 44px;
+        font-size: 0.8rem;
+    }
+}
+
+/* =========================================
+   PHONE (<= 640px): single-column metadata; actions become a 2-col grid
+   with the destructive Delete spanning its own row below.
+   ========================================= */
+@media (max-width: 640px) {
+    .user-summary-grid { grid-template-columns: repeat(2, 1fr); }
+    .user-filter-bar { grid-template-columns: 1fr; }
+    .user-filter-bar input[name="query"] { grid-column: auto; }
+
+    .user-card-meta { grid-template-columns: 1fr; }
+    .user-card-field.field-email { grid-column: auto; }
+
+    .user-card-footer .action-button-group {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .user-card-footer .action-btn.action-danger {
+        grid-column: 1 / -1;
     }
 }
 
@@ -646,9 +770,10 @@
 }
 
 /* =========================================
-   LAPTOP RESPONSIVENESS (1366px and below)
+   LAPTOP RESPONSIVENESS (1025px - 1366px)
+   Keeps the full desktop table; the responsive card layout below owns <=1024px.
    ========================================= */
-@media (max-width: 1366px) and (min-width: 769px) {
+@media (max-width: 1366px) and (min-width: 1025px) {
     .users-table th,
     .users-table td {
         padding: 14px 12px;

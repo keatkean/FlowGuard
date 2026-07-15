@@ -1,5 +1,5 @@
 // client/src/components/Sidebar.jsx
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import LogoIcon from './LogoIcon';
 import { ROLES, roleLabel } from '../constants/roles';
@@ -45,6 +45,27 @@ const Sidebar = () => {
       saveScroll();
     };
   }, []);
+
+  // While the mobile drawer is open: Escape closes it, and body scrolling is locked
+  // so the page behind the overlay can't scroll under the user's finger. Both are
+  // fully reverted on close/unmount so desktop (where the drawer is always "open"
+  // visually but this state stays false) is never affected.
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setIsOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isOpen]);
 
   // Visibility helpers — keep these in lock-step with the route wrappers in App.jsx
   // so a user never sees a link that would only bounce them to the 403 page.

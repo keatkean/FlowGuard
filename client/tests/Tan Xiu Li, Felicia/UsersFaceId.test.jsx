@@ -3,7 +3,7 @@
 import React from "react";
 import fs from "node:fs";
 import path from "node:path";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -39,8 +39,13 @@ afterEach(() => {
 
 const renderUsers = async () => {
   render(<MemoryRouter><Users /></MemoryRouter>);
-  await screen.findByText("Enrolled Emma");
+  // User data now renders in both the desktop table and the responsive card
+  // list, so match all occurrences.
+  await screen.findAllByText("Enrolled Emma");
 };
+
+// Row-scoped queries target the desktop table representation.
+const table = () => within(document.querySelector(".users-table"));
 
 describe("User Management — Face ID badge", () => {
   test("shows Enrolled / Not Enrolled per user", async () => {
@@ -80,9 +85,9 @@ describe("User Management — compact role badges", () => {
     const tenantBadge = document.querySelector(".role-badge.role-tenant");
     expect(staffBadge.textContent).toBe("Staff");
     expect(tenantBadge.textContent).toBe("Tenant");
-    // Accessible visible description, not colour-only.
-    expect(screen.getByText("Worker")).toBeTruthy();
-    expect(screen.getByText("Unit Owner")).toBeTruthy();
+    // Accessible visible description, not colour-only (present in the table).
+    expect(table().getByText("Worker")).toBeTruthy();
+    expect(table().getByText("Unit Owner")).toBeTruthy();
   });
 });
 
@@ -90,7 +95,7 @@ describe("User Management — secure deletion flow", () => {
   test("self row has disabled Suspend and Delete controls", async () => {
     localStorage.setItem("userId", "25");
     await renderUsers();
-    const row = screen.getByLabelText("Actions for Enrolled Emma");
+    const row = table().getByLabelText("Actions for Enrolled Emma");
     const buttons = [...row.querySelectorAll("button")];
     const suspendBtn = buttons.find((b) => /Suspend/.test(b.textContent));
     const deleteBtn = buttons.find((b) => /Delete/.test(b.textContent));
@@ -100,7 +105,7 @@ describe("User Management — secure deletion flow", () => {
 
   test("a 409 linked-Staff conflict from the server stays visible in the modal", async () => {
     await renderUsers();
-    const row = screen.getByLabelText("Actions for Newbie Ng");
+    const row = table().getByLabelText("Actions for Newbie Ng");
     fireEvent.click([...row.querySelectorAll("button")].find((b) => /Delete/.test(b.textContent)));
     fireEvent.change(screen.getByPlaceholderText("Newbie Ng"), { target: { value: "Newbie Ng" } });
     mockAxios.delete.mockRejectedValueOnce({ response: { status: 409, data: { message: "This tenant still has 2 linked Staff account(s)." } } });
@@ -110,7 +115,7 @@ describe("User Management — secure deletion flow", () => {
 
   test("successful deletion refreshes the user list and shows the delete wording", async () => {
     await renderUsers();
-    const row = screen.getByLabelText("Actions for Newbie Ng");
+    const row = table().getByLabelText("Actions for Newbie Ng");
     fireEvent.click([...row.querySelectorAll("button")].find((b) => /Delete/.test(b.textContent)));
     expect(screen.getByText(/Permanently remove login access, Face ID enrolment and operational access/i)).toBeTruthy();
 

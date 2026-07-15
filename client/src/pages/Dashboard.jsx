@@ -22,6 +22,8 @@ import FactCheckIcon from '@mui/icons-material/FactCheck';
 import SettingsIcon from '@mui/icons-material/Settings';
 import Sidebar from '../components/Sidebar';
 import SafeMuiIcon from '../components/SafeMuiIcon';
+import AlertTrendChart from '../components/AlertTrendChart';
+import TopAlertZonesChart from '../components/TopAlertZonesChart';
 import '../css/Dashboard.css';
 import { API_BASE_URL } from '../constants/api';
 
@@ -205,6 +207,11 @@ const Dashboard = () => {
                 <div className="dashboard-alert-empty"><h2>No high-priority alerts</h2><p>Urgent operational alerts will appear here when active.</p></div>
               )}
             </div>
+          </section>
+
+          <section className="dashboard-analytics-grid" aria-label="Operational alert analytics">
+            <AlertTrendChart data={dashboard.analytics?.alertTrend7Days} />
+            <TopAlertZonesChart data={dashboard.analytics?.topAlertZones7Days} />
           </section>
         </>
       );

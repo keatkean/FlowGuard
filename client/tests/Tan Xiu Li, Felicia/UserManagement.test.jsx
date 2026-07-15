@@ -2,7 +2,7 @@
 import React from "react";
 import fs from "node:fs";
 import path from "node:path";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { vi, describe, test, expect, beforeEach } from "vitest";
 
@@ -54,14 +54,17 @@ describe("User Management — Add Tenant (FM)", () => {
     mockGet.mockResolvedValueOnce({
       data: [{ id: 5, name: "Jane Tan", email: "jane@x.com", role: "Tenant", isActive: true, isEnrolled: false, createdAt: new Date().toISOString(), locationStatus: "Off-Site" }],
     });
-    renderUsers();
-    await screen.findByText("Jane Tan");
-    expect(screen.getByRole("button", { name: /View Logs/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Suspend/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Delete/i })).toBeTruthy();
+    const { container } = renderUsers();
+    // Name now appears in both the desktop table and the responsive card list —
+    // scope the row-action assertions to the desktop table representation.
+    await screen.findAllByText("Jane Tan");
+    const table = within(container.querySelector(".users-table"));
+    expect(table.getByRole("button", { name: /View Logs/i })).toBeTruthy();
+    expect(table.getByRole("button", { name: /Suspend/i })).toBeTruthy();
+    expect(table.getByRole("button", { name: /Delete/i })).toBeTruthy();
     // Face ID enrolment stays in the enrolment flow / Settings, not here.
-    expect(screen.queryByRole("button", { name: /Face ID/i })).toBeNull();
-    const rowActions = screen.getByLabelText("Actions for Jane Tan");
+    expect(table.queryByRole("button", { name: /Face ID/i })).toBeNull();
+    const rowActions = table.getByLabelText("Actions for Jane Tan");
     expect(rowActions.querySelectorAll("button").length).toBe(3);
   });
 
@@ -93,9 +96,11 @@ describe("User Management — table layout", () => {
 
   test("'(You)' renders as ONE inline badge beside the name — it cannot split apart", async () => {
     const { container } = renderUsers();
-    await screen.findByText("Tan Xiu Li, Felicia");
+    await screen.findAllByText("Tan Xiu Li, Felicia");
 
-    const selfTags = container.querySelectorAll(".self-tag");
+    // Scope to the desktop table (the card list also renders a self badge).
+    const table = container.querySelector(".users-table");
+    const selfTags = table.querySelectorAll(".self-tag");
     expect(selfTags.length).toBe(1); // only the signed-in user's row
     // The whole "(You)" string lives in a single badge element, so the old
     // "(You" + ")" line-split cannot happen.
@@ -103,18 +108,20 @@ describe("User Management — table layout", () => {
     // Badge sits inside the same name cell as the personnel name.
     expect(selfTags[0].closest(".user-name-text")).not.toBeNull();
     // Other rows never get the badge.
-    expect(screen.getByText("Jane Tan").closest("tr").querySelector(".self-tag")).toBeNull();
+    expect(within(table).getByText("Jane Tan").closest("tr").querySelector(".self-tag")).toBeNull();
   });
 
   test("email and Face ID status remain visible for every row", async () => {
     const { container } = renderUsers();
-    await screen.findByText("Jane Tan");
-    expect(screen.getByText("felicia@flowguard.dev")).toBeTruthy();
-    expect(screen.getByText("jane.tan@very-long-company-domain.example.com")).toBeTruthy();
-    const faceIdBadges = [...container.querySelectorAll(".presence-tag")].map((el) => el.textContent.trim());
+    await screen.findAllByText("Jane Tan");
+    const table = container.querySelector(".users-table");
+    const t = within(table);
+    expect(t.getByText("felicia@flowguard.dev")).toBeTruthy();
+    expect(t.getByText("jane.tan@very-long-company-domain.example.com")).toBeTruthy();
+    const faceIdBadges = [...table.querySelectorAll(".presence-tag")].map((el) => el.textContent.trim());
     expect(faceIdBadges).toEqual(["Enrolled", "Not Enrolled"]);
-    // Joined dates stay visible too.
-    expect(container.querySelectorAll(".time-cell").length).toBe(2);
+    // Joined dates stay visible too (.time-cell is table-only).
+    expect(table.querySelectorAll(".time-cell").length).toBe(2);
   });
 
   test("table no longer forces a 1280px min-width (desktop fits without horizontal scroll)", () => {
@@ -125,8 +132,9 @@ describe("User Management — table layout", () => {
   });
 
   test("self row keeps suspend/delete restrictions (buttons disabled for yourself)", async () => {
-    renderUsers();
-    const selfRow = (await screen.findByText("Tan Xiu Li, Felicia")).closest("tr");
+    const { container } = renderUsers();
+    await screen.findAllByText("Tan Xiu Li, Felicia");
+    const selfRow = within(container.querySelector(".users-table")).getByText("Tan Xiu Li, Felicia").closest("tr");
     const rowButtons = [...selfRow.querySelectorAll("button")];
     const suspendBtn = rowButtons.find((b) => /Suspend/.test(b.textContent));
     const deleteBtn = rowButtons.find((b) => /Delete/.test(b.textContent));

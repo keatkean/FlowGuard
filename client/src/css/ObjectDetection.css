@@ -1331,3 +1331,52 @@
         text-align: left;
     }
 }
+
+/* =========================================
+   TABLET & MOBILE READABILITY / TOUCH (added — does not affect desktop >1024)
+   Object Detection + Detection Setup share this stylesheet. The top-level grids
+   already collapse at <=1180; these rules fix the remaining tablet/phone gaps:
+   the source-control row overflowing, the camera picker running off-screen, tiny
+   badge/label fonts, and sub-44px touch targets.
+   ========================================= */
+@media (max-width: 1024px) {
+    /* Source-mode buttons + camera picker must wrap instead of forcing one wide row. */
+    .od-source-controls {
+        flex-wrap: wrap;
+    }
+    .od-camera-picker {
+        margin-left: 0;
+    }
+
+    /* Raise the smallest badge/meta labels to a tablet-legible ~0.8rem floor. */
+    .od-card-heading > div > span,
+    .od-stream-badges span,
+    .od-detection-box span,
+    .od-incident-title > div > span,
+    .od-incident-meta span,
+    .od-btn-icon,
+    .od-live-alert-item strong,
+    .od-zone-summary-grid span,
+    .od-alert-count,
+    .od-alert-status-badge,
+    .od-btn-clear {
+        font-size: 0.8rem;
+    }
+}
+
+@media (max-width: 768px) {
+    /* Camera selection drops to its own full-width row so it can never run off the
+       edge of the card / viewport on a phone. */
+    .od-camera-picker {
+        width: 100%;
+        min-width: 0;
+        margin-left: 0;
+    }
+
+    /* Comfortable ~44px touch targets for the source-mode controls. */
+    .od-source-controls button,
+    .od-source-controls label {
+        min-height: 44px;
+        flex: 1 1 auto;
+    }
+}

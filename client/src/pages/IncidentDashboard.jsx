@@ -521,16 +521,16 @@ const IncidentDashboard = () => {
 
                   return (
                     <tr key={incident.id} className={rowClass || undefined}>
-                      <td style={{ fontFamily: 'monospace', color: '#cbd5e1', fontSize: '0.83rem' }}>
+                      <td data-label="Timestamp" style={{ fontFamily: 'monospace', color: '#cbd5e1', fontSize: '0.83rem' }}>
                         <div>{new Date(incident.createdAt).toLocaleDateString('en-SG')}</div>
                         <div>{new Date(incident.createdAt).toLocaleTimeString('en-SG')}</div>
                       </td>
-                      <td style={{ color: '#e2e8f0' }} title={incident.camera_location}>
+                      <td data-label="Location" style={{ color: '#e2e8f0' }} title={incident.camera_location}>
                         <span style={{ whiteSpace: 'pre-line', lineHeight: '1.45', overflowWrap: 'anywhere', wordBreak: 'break-all' }}>
                           {formatLocation(incident.camera_location)}
                         </span>
                       </td>
-                      <td>
+                      <td data-label="Person">
                         {incident.person_name ? (
                           <div className="inc-person-cell" title={incident.person_name}>
                             <div className="inc-person-initial">
@@ -542,27 +542,27 @@ const IncidentDashboard = () => {
                           <em style={{ color: '#64748b' }}>Unknown</em>
                         )}
                       </td>
-                      <td>
+                      <td data-label="Source">
                         <span className={sourceClass(incident.source)}>
                           {sourceLabel(incident.source)}
                         </span>
                       </td>
-                      <td style={{ fontFamily: 'monospace', color: '#94a3b8' }}>
+                      <td data-label="Confidence" style={{ fontFamily: 'monospace', color: '#94a3b8' }}>
                         {incident.confidence_score != null
                           ? `${(incident.confidence_score * 100).toFixed(1)}%`
                           : <em style={{ color: '#475569' }}>—</em>}
                       </td>
-                      <td>
+                      <td data-label="Severity">
                         <span className={severityClass(incident.severity)}>
                           {incident.severity}
                         </span>
                       </td>
-                      <td>
+                      <td data-label="Status">
                         <span className={statusClass(incident.resolutionStatus)}>
                           {incident.resolutionStatus}
                         </span>
                       </td>
-                      <td className="actions-cell">
+                      <td className="actions-cell" data-label="Actions">
                         <div className="action-button-group">
                           <button
                             className="action-btn action-neutral"

@@ -127,7 +127,10 @@
 
 .camera-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  /* minmax(0,1fr) keeps the 4-column desktop row but lets the cells shrink on
+     tablet widths (769-1180px, sidebar still present) instead of forcing a
+     600px minimum that overflowed the content area. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 20px;
 }
@@ -203,7 +206,7 @@
 }
 
 .cameras-main .camera-grid {
-  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -446,7 +449,7 @@
 
 .camera-inventory-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 24px;
 }
@@ -877,5 +880,20 @@
   .camera-row-actions {
     justify-content: flex-end;
     margin-left: 0;
+  }
+}
+
+/* Phone: enlarge the compact row/icon action buttons to a comfortable ~44px touch
+   target (desktop keeps the dense toolbar sizing). */
+@media (max-width: 768px) {
+  .camera-row-actions button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .camera-icon-btn {
+    width: 44px;
+    min-height: 44px;
   }
 }

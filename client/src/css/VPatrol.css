@@ -556,6 +556,17 @@
         object-fit: contain !important; /* keep the face overlay aligned on mobile too */
     }
 }
+
+/* Phone: the fixed hamburger (top ~15px, 46px tall) sits over the page. The scanner
+   pages set their own padding:30px on .vpatrol-main/.gate-main which otherwise wins
+   over .dashboard-main's mobile padding-top, hiding the header under the button. Restore
+   the clearance and tighten side padding for one-handed use. */
+@media (max-width: 768px) {
+    .vpatrol-main,
+    .gate-main {
+        padding: 84px 16px 16px;
+    }
+}
 /* Evaluation controls live on the dedicated Facial Evaluation page — the
    scanner pages are operator-only and no longer render mode pills. */
 .evaluation-config { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; margin-top: 12px; padding: 14px; border: 1px solid #334155; border-radius: 12px; background: #111827; }

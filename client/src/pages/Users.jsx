@@ -177,6 +177,37 @@ const Users = () => {
     </span>
   );
 
+  const renderFaceIdTag = (user) => (
+    <span className={`presence-tag ${user.isEnrolled ? 'on-site' : 'off-site'}`} title={user.isEnrolled ? 'A protected biometric template is enrolled' : 'No Face ID enrolled yet'}>
+      {user.isEnrolled
+        ? <><SafeMuiIcon icon={CheckCircleIcon} fontSize="small" aria-hidden="true" /> Enrolled</>
+        : <><SafeMuiIcon icon={CancelIcon} fontSize="small" aria-hidden="true" /> Not Enrolled</>}
+    </span>
+  );
+
+  const formatJoined = (user) => new Date(user.createdAt).toLocaleDateString('en-SG');
+
+  // Shared action controls so the desktop table and the responsive card list
+  // render the exact same handlers/labels — no duplicated business logic.
+  // Face ID enrol/re-enrol intentionally lives in the enrolment flow and
+  // Settings — never as a row/card action here.
+  const renderUserActions = (u, isSelf) => (
+    <div className="action-button-group" aria-label={`Actions for ${u.name}`}>
+      <button className="action-btn action-neutral" onClick={() => navigate(`/user-logs/${u.id}`)}>
+        <SafeMuiIcon icon={VisibilityIcon} fontSize="inherit" aria-hidden="true" />
+        View Logs
+      </button>
+      <button className={`action-btn ${u.isActive === false ? 'action-restore' : 'action-warning'} ${isSelf ? 'disabled-action' : ''}`} onClick={() => !isSelf && openModal(u, 'suspend')} disabled={isSelf}>
+        <SafeMuiIcon icon={u.isActive === false ? CheckCircleIcon : BlockIcon} fontSize="inherit" aria-hidden="true" />
+        {u.isActive === false ? 'Reactivate' : 'Suspend'}
+      </button>
+      <button className={`action-btn action-danger ${isSelf ? 'disabled-action' : ''}`} onClick={() => !isSelf && openModal(u, 'delete')} disabled={isSelf}>
+        <SafeMuiIcon icon={DeleteOutlineIcon} fontSize="inherit" aria-hidden="true" />
+        Delete
+      </button>
+    </div>
+  );
+
   return (
     <div className="dashboard-layout">
       <Sidebar />
@@ -285,73 +316,99 @@ const Users = () => {
             </select>
           </section>
 
-          <div className="table-wrapper">
-            {loading ? (
-              <p style={{ padding: '40px', color: '#94a3b8', textAlign: 'center' }}>Syncing with FlowGuard Database...</p>
-            ) : (
-              <table className="users-table">
-                <thead>
-                  <tr>
-                    <th>Personnel</th>
-                    <th>Role</th>
-                    <th>Email</th>
-                    <th>Status</th>
-                    <th>Face ID</th>
-                    <th>Joined</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredUsers.length === 0 ? (
-                    <tr><td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>No users match the current filters.</td></tr>
-                  ) : filteredUsers.map((u) => {
-                    const isSelf = String(u.id) === String(currentUserId);
-                    return (
-                      <tr key={u.id} className={u.isActive === false ? 'row-suspended' : ''}>
-                        <td className="user-name-cell" data-label="Personnel">
-                          <div className="user-identity">
-                            <div className="user-avatar-small">{u.name?.charAt(0).toUpperCase()}</div>
-                            <span className="user-name-text">
-                              <span className="user-name-value">{u.name}</span>
-                              {isSelf && <span className="self-tag">(You)</span>}
-                            </span>
-                          </div>
-                        </td>
-                        <td data-label="Role">{renderRoleBadge(u.role)}</td>
-                        <td className="access-cell email-cell" data-label="Email" title={u.email}>{u.email}</td>
-                        <td data-label="Status">{renderStatusBadge(u)}</td>
-                        <td data-label="Face ID">
-                          <span className={`presence-tag ${u.isEnrolled ? 'on-site' : 'off-site'}`} title={u.isEnrolled ? 'A protected biometric template is enrolled' : 'No Face ID enrolled yet'}>
-                            {u.isEnrolled ? <><SafeMuiIcon icon={CheckCircleIcon} fontSize="small" aria-hidden="true" /> Enrolled</> : <><SafeMuiIcon icon={CancelIcon} fontSize="small" aria-hidden="true" /> Not Enrolled</>}
+          {loading ? (
+            <p className="users-loading-state">Syncing with FlowGuard Database...</p>
+          ) : filteredUsers.length === 0 ? (
+            <p className="users-empty-state">No users match the current filters.</p>
+          ) : (
+            <>
+              {/* Desktop / laptop (>= 1025px): full data table. */}
+              <div className="table-wrapper users-desktop-table">
+                <table className="users-table">
+                  <thead>
+                    <tr>
+                      <th>Personnel</th>
+                      <th>Role</th>
+                      <th>Email</th>
+                      <th>Status</th>
+                      <th>Face ID</th>
+                      <th>Joined</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredUsers.map((u) => {
+                      const isSelf = String(u.id) === String(currentUserId);
+                      return (
+                        <tr key={u.id} className={u.isActive === false ? 'row-suspended' : ''}>
+                          <td className="user-name-cell" data-label="Personnel">
+                            <div className="user-identity">
+                              <div className="user-avatar-small">{u.name?.charAt(0).toUpperCase()}</div>
+                              <span className="user-name-text">
+                                <span className="user-name-value">{u.name}</span>
+                                {isSelf && <span className="self-tag">(You)</span>}
+                              </span>
+                            </div>
+                          </td>
+                          <td data-label="Role">{renderRoleBadge(u.role)}</td>
+                          <td className="access-cell email-cell" data-label="Email" title={u.email}>{u.email}</td>
+                          <td data-label="Status">{renderStatusBadge(u)}</td>
+                          <td data-label="Face ID">{renderFaceIdTag(u)}</td>
+                          <td className="time-cell" data-label="Joined">{formatJoined(u)}</td>
+                          <td className="actions-cell" data-label="Actions">{renderUserActions(u, isSelf)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Tablet / mobile (<= 1024px): dedicated responsive card list.
+                  Same filteredUsers, same handlers — a distinct DOM instead of
+                  a CSS table-to-card conversion. */}
+              <ul className="user-card-list" aria-label="User accounts">
+                {filteredUsers.map((u) => {
+                  const isSelf = String(u.id) === String(currentUserId);
+                  return (
+                    <li key={u.id} className={`user-card ${u.isActive === false ? 'user-card-suspended' : ''}`}>
+                      <div className="user-card-head">
+                        <div className="user-avatar-small">{u.name?.charAt(0).toUpperCase()}</div>
+                        <div className="user-card-identity">
+                          <span className="user-card-name">
+                            {u.name}
+                            {isSelf && <span className="self-tag">(You)</span>}
                           </span>
-                        </td>
-                        <td className="time-cell" data-label="Joined">{new Date(u.createdAt).toLocaleDateString('en-SG')}</td>
-                        <td className="actions-cell" data-label="Actions">
-                          {/* Face ID enrol/re-enrol intentionally lives in the
-                              enrolment flow (first-time) and Settings (self
-                              re-enrolment) — never as a row action here. */}
-                          <div className="action-button-group" aria-label={`Actions for ${u.name}`}>
-                            <button className="action-btn action-neutral" onClick={() => navigate(`/user-logs/${u.id}`)}>
-                              <SafeMuiIcon icon={VisibilityIcon} fontSize="inherit" aria-hidden="true" />
-                              View Logs
-                            </button>
-                            <button className={`action-btn ${u.isActive === false ? 'action-restore' : 'action-warning'} ${isSelf ? 'disabled-action' : ''}`} onClick={() => !isSelf && openModal(u, 'suspend')} disabled={isSelf}>
-                              <SafeMuiIcon icon={u.isActive === false ? CheckCircleIcon : BlockIcon} fontSize="inherit" aria-hidden="true" />
-                              {u.isActive === false ? 'Reactivate' : 'Suspend'}
-                            </button>
-                            <button className={`action-btn action-danger ${isSelf ? 'disabled-action' : ''}`} onClick={() => !isSelf && openModal(u, 'delete')} disabled={isSelf}>
-                              <SafeMuiIcon icon={DeleteOutlineIcon} fontSize="inherit" aria-hidden="true" />
-                              Delete
-                            </button>
+                          <div className="user-card-badges">
+                            {renderRoleBadge(u.role)}
+                            {renderStatusBadge(u)}
                           </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
+                        </div>
+                      </div>
+
+                      <dl className="user-card-meta">
+                        <div className="user-card-field field-email">
+                          <dt>Email</dt>
+                          <dd className="email-value">{u.email}</dd>
+                        </div>
+                        <div className="user-card-field">
+                          <dt>Face ID</dt>
+                          <dd>{renderFaceIdTag(u)}</dd>
+                        </div>
+                        <div className="user-card-field">
+                          <dt>Joined</dt>
+                          <dd>{formatJoined(u)}</dd>
+                        </div>
+                      </dl>
+
+                      <div className="user-card-footer">
+                        {renderUserActions(u, isSelf)}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
         </div>
       </main>
     </div>
