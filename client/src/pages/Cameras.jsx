@@ -99,6 +99,22 @@ export default function Cameras() {
     }
   };
 
+  const clearAllAlerts = async () => {
+    const openAlerts = alerts.filter((alert) => alert.status === 'Active');
+    if (openAlerts.length === 0) return;
+    try {
+      const results = await Promise.all(
+        openAlerts.map((alert) => axios.put(`${ALERTS_URL}/${alert.id}`, { status: 'Cleared' }, { headers }))
+      );
+      setAlerts((prev) => prev.map((alert) => {
+        const updated = results.find((res) => res.data.id === alert.id);
+        return updated ? updated.data : alert;
+      }));
+    } catch (err) {
+      console.error('Clear all alerts error:', err);
+    }
+  };
+
   return (
     <div className="dashboard-layout">
       <Sidebar />
@@ -205,9 +221,19 @@ export default function Cameras() {
                   <span className="camera-kicker">Live Alerts</span>
                   <h2>Smart Detection Events</h2>
                 </div>
-                <span className={`camera-alert-count ${activeAlerts.length === 0 ? 'clear' : ''}`}>
-                  {alertsOffline ? 'OFFLINE' : activeAlerts.length === 0 ? 'CLEAR' : `${activeAlerts.length} ACTIVE`}
-                </span>
+                <div className="camera-alert-heading-actions">
+                  <span className={`camera-alert-count ${activeAlerts.length === 0 ? 'clear' : ''}`}>
+                    {alertsOffline ? 'OFFLINE' : activeAlerts.length === 0 ? 'CLEAR' : `${activeAlerts.length} ACTIVE`}
+                  </span>
+                  <button
+                    type="button"
+                    className="camera-clear-all-btn"
+                    onClick={clearAllAlerts}
+                    disabled={activeAlerts.length === 0}
+                  >
+                    Clear All
+                  </button>
+                </div>
               </div>
 
               <div className="camera-alert-list">
@@ -215,7 +241,7 @@ export default function Cameras() {
                   <p className="camera-empty">No detection alerts recorded.</p>
                 )}
 
-                {alerts.slice(0, 6).map((alert) => {
+                {alerts.map((alert) => {
                   const alertClass = String(alert.object_class || '').toLowerCase();
                   const severity = alertClass.includes('critical')
                     ? 'critical'

@@ -4,6 +4,7 @@ import axios from 'axios';
 import Sidebar from '../components/Sidebar';
 import '../css/Dashboard.css';
 import '../css/Management.css'; 
+import { API_BASE_URL } from '../constants/api';
 
 const UserLogs = () => {
   const { id } = useParams(); 
@@ -17,7 +18,7 @@ const UserLogs = () => {
     const fetchLogs = async () => {
       try {
         // 🎯 Connected directly to our new server-side user bridge endpoint
-        const res = await axios.get(`/api/security/logs/user/${id}`, {
+        const res = await axios.get(`${API_BASE_URL}/api/security/logs/user/${id}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         

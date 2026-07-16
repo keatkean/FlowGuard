@@ -5,40 +5,27 @@ import NodeCard from '../components/NodeCard';
 import '../css/SystemHealth.css'; 
 
 const SystemHealth = () => {
-  
-  const machineryNodes = [
-    { id: 'N-01', name: 'Sector 4 Cold Storage', type: 'Temp/Humidity', status: 'Active', uptime: '99.9%' },
-    { id: 'N-02', name: 'Loading Bay AI CCTV', type: 'Visual Surveillance', status: 'Active', uptime: '100%' },
-    { id: 'N-03', name: 'Conveyor Belt B', type: 'Motor & Vibration', status: 'Warning', uptime: '92.4%' },
-    { id: 'N-04', name: 'Pest Detection Node 7', type: 'Infrared & Motion', status: 'Error', uptime: 'Offline' },
-    { id: 'N-05', name: 'HVAC System Central', type: 'Airflow Control', status: 'Active', uptime: '99.5%' },
-    { id: 'N-06', name: 'Packaging Arm Alpha', type: 'Robotics', status: 'Active', uptime: '98.2%' },
+  const capabilities = [
+    { id: 'FG-01', name: 'Facial Recognition Service', type: 'Identity matching and final same-person confirmation.', status: 'Integrated' },
+    { id: 'FG-02', name: 'Motion-Liveness Tracking', type: 'Lightweight face tracking and head-turn challenge verification.', status: 'PoC Ready' },
+    { id: 'FG-03', name: 'Object Detection Service', type: 'Camera-based object analysis for configured monitoring zones.', status: 'Demo Available' },
+    { id: 'FG-04', name: 'Access & Attendance', type: 'Gate access decisions, attendance transactions and security audit records.', status: 'Integrated' },
+    { id: 'FG-05', name: 'Smart Logistics', type: 'Bookings, Driver Passes, bay status and driver notifications.', status: 'PoC Ready' },
+    { id: 'FG-06', name: 'Helpdesk & Incident Support', type: 'Support-ticket escalation, security review and incident resolution.', status: 'Integrated' }
   ];
 
   return (
     <div className="system-health-page">
       <NavBar />
-      
       <main className="health-main">
         <header className="health-header">
-          <h1>Node Network Health</h1>
-          <p>Real-time telemetry and status of Harrison Food Factory infrastructure.</p>
+          <h1>Platform Overview</h1>
+          <p>Overview of the integrated services demonstrated by the FlowGuard proof of concept.</p>
         </header>
-
         <section className="node-grid">
-          {machineryNodes.map((node) => (
-            <NodeCard 
-              key={node.id}
-              id={node.id}
-              name={node.name}
-              type={node.type}
-              status={node.status}
-              uptime={node.uptime}
-            />
-          ))}
+          {capabilities.map((node) => <NodeCard key={node.id} {...node} />)}
         </section>
       </main>
-
       <Footer />
     </div>
   );

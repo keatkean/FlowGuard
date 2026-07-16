@@ -1,10 +1,11 @@
 import React from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
-import Home from './pages/home'; 
+import Home from './pages/Home';
 import SystemHealth from './pages/SystemHealth';
 import Contact from './pages/Contact';
 import Login from './pages/Login';
 import ForgotKey from './pages/ForgotKey';
+import ResetPassword from './pages/ResetPassword';
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import NotFound from "./pages/NotFound";
@@ -30,6 +31,7 @@ import GateScanner from './pages/GateScanner';
 import ObjectDetection from './pages/ObjectDetection';
 import DetectionSettings from './pages/DetectionSettings';
 import SecurityReview from './pages/SecurityReview';
+import FacialEvaluation from './pages/FacialEvaluation';
 import IncidentDashboard from './pages/IncidentDashboard';
 import SupportDashboard from './pages/SupportDashboard';
 import { ACCESS } from './constants/roles';
@@ -52,6 +54,7 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotKey />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/innovation" element={<AIInnovation />} />
         <Route path="/driver-portal" element={<DriverPortal />} />
 
@@ -129,6 +132,13 @@ function App() {
         <Route path="/security-review" element={
           <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
             <SecurityReview />
+          </ProtectedRoute>
+        } />
+        {/* Facial Evaluation Lab — FM-only, simulation-only (never mutates
+            production users, attendance or security logs). */}
+        <Route path="/facial-evaluation" element={
+          <ProtectedRoute allowedRoles={ACCESS.FM_ONLY}>
+            <FacialEvaluation />
           </ProtectedRoute>
         } />
         <Route path="/incidents" element={

@@ -7,7 +7,9 @@ import base64
 import threading
 import time
 from collections import defaultdict
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from typing import Optional
+import zone_rules
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from insightface.app import FaceAnalysis
@@ -32,6 +34,21 @@ except Exception as _yolo_err:
 
 load_dotenv()
 app = FastAPI()
+
+# --- Service-to-service authentication -------------------------------------
+# The Node backend (and only the Node backend) may call the facial-recognition
+# endpoints. It sends the shared secret in an X-AI-Service-Key header.
+# For local development the key may be left unset (a warning is printed and the
+# check is skipped) — never deploy without AI_SERVICE_KEY configured.
+_AI_SERVICE_KEY = os.getenv("AI_SERVICE_KEY", "")
+if not _AI_SERVICE_KEY:
+    print("⚠️  AI_SERVICE_KEY not set — face endpoints are UNPROTECTED (dev mode only).")
+
+def require_service_key(x_ai_service_key: str = Header(default=None, alias="X-AI-Service-Key")):
+    if not _AI_SERVICE_KEY:
+        return  # dev mode — no key configured
+    if x_ai_service_key != _AI_SERVICE_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing AI service key.")
 
 # 1. Initialize AI
 print("Loading InsightFace Engine...")
@@ -64,13 +81,15 @@ def load_authorized_faces():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('SELECT name, "faceVector" FROM users WHERE "faceVector" IS NOT NULL')
+        # Cache keys on the unique user ID; name is retained ONLY for developer
+        # logging — matching and API responses use user_id, never the name.
+        cur.execute('SELECT id, name, "faceVector" FROM users WHERE "faceVector" IS NOT NULL')
         rows = cur.fetchall()
-        
-        for name, embedding_json in rows:
+
+        for user_id, name, embedding_json in rows:
             raw_embedding = json.loads(embedding_json) if isinstance(embedding_json, str) else embedding_json
             embedding = np.array(raw_embedding, dtype=np.float32)
-            known_faces.append({"name": name, "embedding": embedding})
+            known_faces.append({"user_id": user_id, "name": name, "embedding": embedding})
             
         cur.close()
         conn.close()
@@ -96,7 +115,7 @@ def base64_to_cv2(base64_string):
     nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
     return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-@app.post("/api/encode-faces")
+@app.post("/api/encode-faces", dependencies=[Depends(require_service_key)])
 async def encode_faces(images: FaceImages):
     """Takes 3 images from React, extracts vectors, and averages them."""
     try:
@@ -128,12 +147,22 @@ async def encode_faces(images: FaceImages):
         raise HTTPException(status_code=500, detail="Failed to process facial images.")
 
 
+# CORS: the frontend no longer calls the face endpoints directly (they go through
+# the Node backend), but the YOLO stream endpoints are still browser-fetched in
+# development. Origins are restricted to an env-configured allowlist — never a
+# wildcard combined with credentials.
+_allowed_origins = [
+    o.strip() for o in os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",") if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],  
-    allow_headers=["*"],  
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # --- Phase 3 - The CCTV Scan Endpoint (With Head Turn Liveness) ---
@@ -159,30 +188,36 @@ def calculate_head_turn(kps):
 class RecognitionRequest(BaseModel):
     image: str
 
-@app.post("/user/recognize")
+@app.post("/user/recognize", dependencies=[Depends(require_service_key)])
 async def recognize(request: RecognitionRequest):
+    """Matches a temporary frame against the known-face cache and returns ONLY the
+    matched user ID + biometric telemetry. Role, account status, and the access
+    decision are resolved by the Node backend from PostgreSQL — the database is
+    the source of truth, not this cache."""
     try:
         header, encoded = request.image.split(",", 1)
         data = base64.b64decode(encoded)
         nparr = np.frombuffer(data, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     except Exception as e:
-        return {"error": "Invalid image data"}
+        raise HTTPException(status_code=400, detail="Invalid image data")
 
+    # Development telemetry: inference duration only — never images/templates.
+    _inference_started = time.time()
     live_faces = face_app.get(img)
-    
+    inference_ms = int((time.time() - _inference_started) * 1000)
+
     for face in live_faces:
-        best_name = "UNAUTHORIZED"
+        best_match = None
         highest_similarity = 0.0
         live_embedding = face.embedding / np.linalg.norm(face.embedding)
-        
+
         for known in known_faces:
-            sim = np.dot(live_embedding, known["embedding"])
+            sim = float(np.dot(live_embedding, known["embedding"]))
             if sim > highest_similarity:
-                highest_similarity = float(sim)
-                if sim > 0.45: 
-                    best_name = known["name"]
-        
+                highest_similarity = sim
+                best_match = known if sim > 0.45 else None
+
         bbox = face.bbox
         x = int(bbox[0])
         y = int(bbox[1])
@@ -192,21 +227,80 @@ async def recognize(request: RecognitionRequest):
         # 🎯 Calculate the Head Turn Ratio
         liveness_ratio = calculate_head_turn(face.kps)
 
-        # Return both the user, the box, and the 3D liveness ratio
+        # Name stays in the developer log only — never in the response.
+        if best_match:
+            print(f"Recognize: matched user #{best_match['user_id']} ({best_match['name']}) sim={highest_similarity:.3f}")
+
         return {
-            "user": {
-                "name": best_name,
-                "status": "AUTHORIZED" if best_name != "UNAUTHORIZED" else "DENIED",
-                "confidence": round(highest_similarity, 4)
-            },
+            "matchedUserId": best_match["user_id"] if best_match else None,
+            "confidence": round(highest_similarity, 4),
             "box": [x, y, width, height],
-            "liveness_ratio": liveness_ratio 
+            "liveness_ratio": liveness_ratio,
+            "faceDetected": True,
+            "inference_ms": inference_ms
         }
-        
-    return {"user": None, "box": None, "liveness_ratio": 0.5}
+
+    return {"matchedUserId": None, "confidence": 0.0, "box": None, "liveness_ratio": 0.5, "faceDetected": False, "inference_ms": inference_ms}
+
+# --- Lightweight face tracking (detection + keypoints ONLY, no identity) ----
+# Powers the scanners' real-time face box + head-turn movement sampling. It
+# reuses InsightFace's already-loaded detector at a smaller input size and
+# NEVER runs the embedding model, matches identities, touches the database,
+# or persists the frame. Safe transient telemetry only.
+_TRACK_DET_SIZE = int(os.getenv("TRACK_DET_SIZE", "256"))
+_TRACK_MAX_FACES = 2
+
+_NO_FACE_TRACK = {"faceDetected": False, "faceCount": 0, "box": None, "headTurnRatio": None}
+
+
+@app.post("/user/track", dependencies=[Depends(require_service_key)])
+async def track(request: RecognitionRequest):
+    try:
+        header, encoded = request.image.split(",", 1)
+        data = base64.b64decode(encoded)
+        nparr = np.frombuffer(data, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError("decode failed")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid image data")
+
+    det_model = face_app.models.get("detection")
+    if det_model is None:
+        raise HTTPException(status_code=503, detail="Face detector unavailable.")
+
+    _detect_started = time.time()
+    bboxes, kpss = det_model.detect(
+        img,
+        input_size=(_TRACK_DET_SIZE, _TRACK_DET_SIZE),
+        max_num=_TRACK_MAX_FACES,
+        metric="default",
+    )
+    inference_ms = int((time.time() - _detect_started) * 1000)
+
+    if bboxes is None or len(bboxes) == 0:
+        return {**_NO_FACE_TRACK, "inferenceMs": inference_ms}
+
+    # Largest face is the primary tracking subject.
+    areas = [(b[2] - b[0]) * (b[3] - b[1]) for b in bboxes]
+    primary = int(np.argmax(areas))
+    x1, y1, x2, y2 = bboxes[primary][:4]
+
+    head_turn_ratio = None
+    if kpss is not None and len(kpss) > primary:
+        head_turn_ratio = calculate_head_turn(kpss[primary])
+
+    return {
+        "faceDetected": True,
+        "faceCount": int(len(bboxes)),
+        "box": [int(x1), int(y1), int(x2 - x1), int(y2 - y1)],
+        "headTurnRatio": head_turn_ratio,
+        "inferenceMs": inference_ms,
+    }
+
 
 # Helper to refresh the list manually if a new staff joins
-@app.get("/refresh")
+@app.get("/refresh", dependencies=[Depends(require_service_key)])
 def refresh():
     load_authorized_faces()
     return {"message": "Staff list updated from database"}
@@ -238,6 +332,19 @@ _PERSON_CRITICAL_COUNT = int(os.getenv("PERSON_CRITICAL_COUNT", "2"))
 _PERSON_ALERT_COOLDOWN = int(os.getenv("PERSON_ALERT_COOLDOWN", "30"))
 _PROXIMITY_PX = 160      # centroid distance threshold (pixels at 640-wide frame)
 _NODE_URL = os.getenv("NODE_SERVER_URL", "http://localhost:5001")
+
+# A browser-submitted analyse-frame request may only claim to be one of these two
+# sources — never "SecurePi Edge Node", which is reserved for the authenticated
+# EDGE_INGEST_TOKEN route in server/routes/edgeDetectionAlerts.js. Keep in sync with
+# client/src/pages/ObjectDetection.jsx's ALERT_SOURCE_BY_MODE.
+_ALLOWED_BROWSER_SOURCES = {"Browser Webcam", "Uploaded Video"}
+
+
+def _normalize_browser_source(source):
+    """Whitelists a browser-supplied analyse-frame source; anything else (missing,
+    unrecognized, or an impersonation attempt) resolves to None so the Node alert
+    route falls back to its own default instead of trusting arbitrary client text."""
+    return source if source in _ALLOWED_BROWSER_SOURCES else None
 
 # Shared state written by detection thread, read by endpoints
 _frame_lock = threading.Lock()
@@ -339,6 +446,70 @@ def _refresh_zone_info():
     return _zone_threshold_sec, _zone_name_cache
 
 
+def _fetch_camera_zone_id(camera_id):
+    """(found, zone_id) — found=False means no such (non-deleted) camera row."""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT zone_id FROM cameras WHERE id = %s AND "deletedAt" IS NULL',
+            (camera_id,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        if row is None:
+            return False, None
+        return True, row[0]
+    finally:
+        conn.close()
+
+
+def _fetch_zone_row(zone_id):
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, zone_name, time_threshold, unattended_threshold_seconds, detection_enabled
+            FROM monitoring_zones
+            WHERE id = %s AND "deletedAt" IS NULL
+            """,
+            (zone_id,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        return row
+    finally:
+        conn.close()
+
+
+def resolve_zone_for_request(camera_id=None, zone_id=None):
+    """Resolves the exact Detection Setup rule for a selected camera/zone.
+
+    Thin DB-backed wrapper around zone_rules.resolve_zone_config (the actual branching
+    logic, unit tested in isolation — see ai-service/tests/test_zone_resolution.py).
+    When neither id is given, falls back to the legacy global-smallest-threshold cache
+    (_refresh_zone_info) so callers that never send an id (e.g. the background
+    webcam-loop thread) keep their old behaviour.
+    """
+    if camera_id is None and zone_id is None:
+        threshold_sec, zone_name = _refresh_zone_info()
+        return {
+            "applied_camera_id": None,
+            "applied_zone_id": None,
+            "applied_zone_name": zone_name,
+            "applied_threshold_seconds": threshold_sec,
+            "detection_enabled": True,
+            "zone_error": None,
+        }
+
+    try:
+        return zone_rules.resolve_zone_config(camera_id, zone_id, _fetch_camera_zone_id, _fetch_zone_row)
+    except Exception as e:
+        print(f"Zone resolution error: {e}")
+        return zone_rules.error_config(camera_id, zone_id, "lookup_failed")
+
+
 def _get_nearby_person(person_entries, ox, oy):
     """Returns (is_nearby, person_name) for the first person within _PROXIMITY_PX."""
     for box, pname in person_entries:
@@ -349,20 +520,24 @@ def _get_nearby_person(person_entries, ox, oy):
     return False, None
 
 
-def _fire_alert(class_name, zone_name, duration_sec, person_name=None):
+def _fire_alert(class_name, zone_name, duration_sec, person_name=None, severity=None, source=None):
     if not _REQUESTS_OK:
         return
     try:
+        payload = {
+            "zone_name": zone_name,
+            "camera_location": os.getenv("AI_CAMERA_LOCATION", "Webcam Feed"),
+            "status": "Active",
+            "object_class": class_name,
+            "duration_seconds": duration_sec,
+            "person_name": person_name,
+            "severity": severity
+        }
+        if source:
+            payload["source"] = source
         http_requests.post(
             f"{_NODE_URL}/api/detection-alerts",
-            json={
-                "zone_name": zone_name,
-                "camera_location": "Webcam Feed",
-                "status": "Active",
-                "object_class": class_name,
-                "duration_seconds": duration_sec,
-                "person_name": person_name
-            },
+            json=payload,
             headers={"x-service-key": os.getenv("AI_SERVICE_KEY", "")},
             timeout=5
         )
@@ -371,7 +546,7 @@ def _fire_alert(class_name, zone_name, duration_sec, person_name=None):
         print(f"Alert POST failed: {e}")
 
 
-def _maybe_fire_person_alert(person_count, zone_name):
+def _maybe_fire_person_alert(person_count, zone_name, source=None):
     """Create one warning/critical alert per cooldown window based on detected people."""
     if person_count <= 0:
         _person_alert_state["level"] = None
@@ -390,9 +565,10 @@ def _maybe_fire_person_alert(person_count, zone_name):
         if person_count > 1
         else f"{level}: Person Detected"
     )
+    severity = "Critical" if level == "Critical" else "Medium"
     threading.Thread(
         target=_fire_alert,
-        args=(label, zone_name, None, None),
+        args=(label, zone_name, None, None, severity, source),
         daemon=True
     ).start()
 
@@ -422,7 +598,7 @@ def _recognize_person_crop(frame, x1, y1, x2, y2):
         return "UNKNOWN", 0.0
 
 
-def _annotate_detection_frame(frame, recognize_faces=True):
+def _annotate_detection_frame(frame, recognize_faces=True, zone_config=None, source=None):
     global _people_count, _tracked_objects
 
     if not YOLO_AVAILABLE:
@@ -436,7 +612,15 @@ def _annotate_detection_frame(frame, recognize_faces=True):
         classes=_YOLO_CLASS_IDS,
         verbose=False
     )[0]
-    threshold_sec, zone_name = _refresh_zone_info()
+    if zone_config is None:
+        # No camera/zone id supplied (e.g. the background webcam-loop thread) — keep the
+        # legacy global-smallest-threshold behaviour, always enabled.
+        threshold_sec, zone_name = _refresh_zone_info()
+        detection_enabled = True
+    else:
+        threshold_sec = zone_config["applied_threshold_seconds"]
+        zone_name = zone_config["applied_zone_name"] or _zone_name_cache
+        detection_enabled = zone_config["detection_enabled"]
 
     person_boxes = []
     object_detections = []
@@ -554,14 +738,15 @@ def _annotate_detection_frame(frame, recognize_faces=True):
             else:
                 if obj['unattended_since'] is None and obj['person_last_seen'] is not None:
                     obj['unattended_since'] = now
-                if (obj['unattended_since'] is not None
+                if (detection_enabled
+                        and obj['unattended_since'] is not None
                         and not obj['alerted']
                         and now - obj['unattended_since'] >= threshold_sec):
                     obj['alerted'] = True
                     duration = int(now - obj['unattended_since'])
                     threading.Thread(
                         target=_fire_alert,
-                        args=(class_name, zone_name, duration, obj.get('last_person_name')),
+                        args=(class_name, zone_name, duration, obj.get('last_person_name'), None, source),
                         daemon=True
                     ).start()
                     cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 0, 220), 3)
@@ -570,7 +755,10 @@ def _annotate_detection_frame(frame, recognize_faces=True):
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 220), 2)
 
     _tracked_objects = {k: v for k, v in _tracked_objects.items() if k in seen_keys}
-    _maybe_fire_person_alert(people_count, zone_name)
+    # Detection Setup's "detection enabled" toggle only gates ALERT CREATION — YOLO still
+    # annotates/counts so the live console stays informative while a rule is paused.
+    if detection_enabled:
+        _maybe_fire_person_alert(people_count, zone_name, source)
     cv2.putText(frame, f"People: {people_count}", (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
     _people_count = people_count
@@ -813,8 +1001,21 @@ async def yolo_stream():
     )
 
 
+class AnalyzeFrameRequest(BaseModel):
+    image: str
+    # Selected Detection Setup camera/zone from the Object Detection page — optional and
+    # additive so older callers that only send `image` keep the previous global-fallback
+    # behaviour (see resolve_zone_for_request).
+    camera_id: Optional[int] = None
+    zone_id: Optional[int] = None
+    # Browser-reported alert source ("Browser Webcam" / "Uploaded Video") — whitelisted
+    # by _normalize_browser_source before it ever reaches the alert bridge, so a caller
+    # cannot claim the SecurePi edge source through this endpoint.
+    source: Optional[str] = None
+
+
 @app.post("/api/yolo/analyze-frame")
-async def yolo_analyze_frame(request: RecognitionRequest):
+async def yolo_analyze_frame(request: AnalyzeFrameRequest):
     """Analyze a browser-captured frame and return an annotated JPEG."""
     global _latest_frame, _detection_active, _camera_status
 
@@ -825,7 +1026,11 @@ async def yolo_analyze_frame(request: RecognitionRequest):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid image data")
 
-    annotated, people_count, detections = _annotate_detection_frame(img, recognize_faces=True)
+    zone_config = resolve_zone_for_request(request.camera_id, request.zone_id)
+    resolved_source = _normalize_browser_source(request.source)
+    annotated, people_count, detections = _annotate_detection_frame(
+        img, recognize_faces=True, zone_config=zone_config, source=resolved_source
+    )
     _detection_active = YOLO_AVAILABLE
     _camera_status = "browser_camera"
 
@@ -838,7 +1043,15 @@ async def yolo_analyze_frame(request: RecognitionRequest):
         "frame_width": int(img.shape[1]),
         "frame_height": int(img.shape[0]),
         "detection_active": _detection_active,
-        "camera_status": _camera_status
+        "camera_status": _camera_status,
+        # Additive debug fields — see resolve_zone_for_request for zone_error meanings
+        # (camera_not_found / camera_has_no_zone / zone_not_found / lookup_failed / None).
+        "applied_camera_id": zone_config["applied_camera_id"],
+        "applied_zone_id": zone_config["applied_zone_id"],
+        "applied_zone_name": zone_config["applied_zone_name"],
+        "applied_threshold_seconds": zone_config["applied_threshold_seconds"],
+        "zone_detection_enabled": zone_config["detection_enabled"],
+        "zone_error": zone_config["zone_error"]
     }
 
 

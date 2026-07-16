@@ -127,7 +127,10 @@
 
 .camera-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  /* minmax(0,1fr) keeps the 4-column desktop row but lets the cells shrink on
+     tablet widths (769-1180px, sidebar still present) instead of forcing a
+     600px minimum that overflowed the content area. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 20px;
 }
@@ -203,7 +206,7 @@
 }
 
 .cameras-main .camera-grid {
-  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -327,15 +330,49 @@
   color: #7f93b4;
   font-size: 0.68rem;
   font-weight: 900;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  margin-bottom: 4px;
+  margin-bottom: 5px;
 }
 
 .camera-panel-heading h2 {
   margin: 0;
-  color: #e5edf8;
-  font-size: 1.05rem;
+  color: #f1f5f9;
+  font-size: 1.08rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.camera-alert-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.camera-clear-all-btn {
+  flex-shrink: 0;
+  min-height: 30px;
+  border: 1px solid rgba(251, 113, 133, 0.4);
+  border-radius: 7px;
+  background: rgba(251, 113, 133, 0.1);
+  color: #fb7185;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  padding: 0 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.camera-clear-all-btn:hover:not(:disabled) {
+  background: rgba(251, 113, 133, 0.22);
+  border-color: rgba(251, 113, 133, 0.7);
+}
+
+.camera-clear-all-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .camera-zone-name {
@@ -412,7 +449,7 @@
 
 .camera-inventory-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 24px;
 }
@@ -603,8 +640,10 @@
   background: rgba(244, 63, 94, 0.14);
   color: #fb7185;
   padding: 3px 10px;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 900;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .camera-alert-count.clear {
@@ -628,7 +667,13 @@
   border: 1px solid #26334d;
   border-left: 3px solid #fb7185;
   border-radius: 8px;
-  padding: 11px 12px;
+  padding: 12px 14px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.camera-alert-item:hover {
+  border-color: #37456a;
+  background: #0d1322;
 }
 
 .camera-alert-item.warning {
@@ -653,14 +698,18 @@
 
 .camera-alert-top span {
   color: #f8fafc;
-  font-size: 0.84rem;
+  font-size: 0.85rem;
   font-weight: 800;
+  letter-spacing: 0.01em;
   text-transform: uppercase;
 }
 
 .camera-alert-top strong {
   color: #fb7185;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .camera-alert-item.warning .camera-alert-top strong {
@@ -680,19 +729,33 @@
   display: block;
   margin: 7px 0 0;
   color: #8fa4c3;
-  font-size: 0.76rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.camera-alert-item small {
+  color: #66799c;
+  font-size: 0.72rem;
 }
 
 .camera-alert-item button {
   width: 100%;
-  margin-top: 9px;
+  margin-top: 10px;
   min-height: 34px;
   border: 1px solid rgba(34, 197, 94, 0.38);
   border-radius: 7px;
   background: transparent;
   color: #22c55e;
+  font-size: 0.8rem;
   font-weight: 800;
+  letter-spacing: 0.01em;
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.camera-alert-item button:hover {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.6);
 }
 
 .camera-form-grid {
@@ -722,6 +785,28 @@
   color: #e5edf8;
   padding: 0 10px;
   outline: 0;
+}
+
+.camera-advanced-details {
+  margin-top: 14px;
+  border: 1px solid #26334d;
+  border-radius: 8px;
+  background: rgba(8, 13, 24, 0.68);
+}
+
+.camera-advanced-details summary {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  color: #9fb0cc;
+  font-size: 0.78rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.camera-advanced-details .camera-form-grid {
+  padding: 0 12px 12px;
 }
 
 .camera-form-error,
@@ -795,5 +880,20 @@
   .camera-row-actions {
     justify-content: flex-end;
     margin-left: 0;
+  }
+}
+
+/* Phone: enlarge the compact row/icon action buttons to a comfortable ~44px touch
+   target (desktop keeps the dense toolbar sizing). */
+@media (max-width: 768px) {
+  .camera-row-actions button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .camera-icon-btn {
+    width: 44px;
+    min-height: 44px;
   }
 }

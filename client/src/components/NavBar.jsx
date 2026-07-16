@@ -10,18 +10,14 @@ const NavBar = () => {
         <LogoIcon size={32} />
         <span>FlowGuard</span>
       </Link>
-      
       <div className="nav-right-section">
         <div className="nav-links">
-          <HashLink smooth to="/#mission">Mission</HashLink>
+          <HashLink smooth to="/#mission">Overview</HashLink>
+          <Link to="/innovation">Capabilities</Link>
+          <HashLink smooth to="/#how-it-works">How It Works</HashLink>
           <HashLink smooth to="/#technology">Technology</HashLink>
-          <HashLink smooth to="/#roadmap">Roadmap</HashLink>
-          <Link to="/contact">Contact</Link>
         </div>
-        
-        <Link to="/login" className="nav-login-btn">
-          Client Login
-        </Link>
+        <Link to="/login" className="nav-login-btn">Client Login</Link>
       </div>
     </nav>
   );

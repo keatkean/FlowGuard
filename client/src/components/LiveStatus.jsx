@@ -1,44 +1,41 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 
 const LiveStatus = () => {
-  const [temp, setTemp] = useState(4.2);
-  const [humidity, setHumidity] = useState(55);
-  const [occupancy, setOccupancy] = useState(1);
-
-  useEffect(() => {
-    // Simulate data flux every 3 seconds
-    const interval = setInterval(() => {
-      setTemp(prev => +(prev + (Math.random() * 0.4 - 0.2)).toFixed(1));
-      setHumidity(prev => Math.floor(prev + (Math.random() * 2 - 1)));
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const sensorData = [
-    { label: "Cold Room Temp", value: `${temp}°C`, status: temp > 5 ? "Warning" : "Optimal" },
-    { label: "Humidity Level", value: `${humidity}%`, status: "Stable" },
-    { label: "Loading Bay 01", value: occupancy === 1 ? "Occupied" : "Vacant", status: "Active" },
-    { label: "AI PPE Scanner", value: "99.8%", status: "Active" }
+  const capabilityData = [
+    {
+      label: "Access & Attendance",
+      value: "Facial enrolment, motion-liveness verification, gate attendance and access audit records.",
+      status: "Integrated"
+    },
+    {
+      label: "Object & Zone Monitoring",
+      value: "Camera inventory, configurable monitoring zones, detection thresholds and active alert review.",
+      status: "PoC Ready"
+    },
+    {
+      label: "Smart Logistics",
+      value: "Loading-bay bookings, Driver Passes, gate arrival/completion and driver notifications.",
+      status: "Demo Available"
+    },
+    {
+      label: "Operational Support",
+      value: "Security review, incident handling, AI-helpdesk transcripts and support-ticket resolution.",
+      status: "Integrated"
+    }
   ];
 
   return (
     <section className="live-status-section">
       <div className="status-header">
-        <h2 className="status-title">Live Facility Telemetry</h2>
-        <div className="live-indicator">
-          <div className="pulse-dot"></div>
-          REAL-TIME FEED
-        </div>
+        <h2 className="status-title">PoC Capability Snapshot</h2>
+        <div className="live-indicator">Academic Demo</div>
       </div>
-
       <div className="status-grid">
-        {sensorData.map((sensor, i) => (
-          <div key={i} className="sensor-card">
+        {capabilityData.map((sensor) => (
+          <div key={sensor.label} className="sensor-card">
             <span className="sensor-label">{sensor.label}</span>
-            <div className="sensor-value">{sensor.value}</div>
-            <span className={`sensor-tag ${sensor.status.toLowerCase()}`}>
-              {sensor.status}
-            </span>
+            <p className="sensor-value sensor-copy">{sensor.value}</p>
+            <span className="sensor-tag active">{sensor.status}</span>
           </div>
         ))}
       </div>

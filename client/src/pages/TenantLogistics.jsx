@@ -4,6 +4,7 @@ import Sidebar from '../components/Sidebar';
 import '../css/Dashboard.css';
 import '../css/Management.css';
 import '../css/Booking.css';
+import { API_BASE_URL } from '../constants/api';
 
 const BAYS = ['Bay A', 'Bay B'];
 const STATUSES = ['Pending', 'Confirmed', 'Arrived', 'Completed', 'Cancelled'];
@@ -25,6 +26,8 @@ const TenantLogistics = () => {
 
   // Booking form is hidden by default and opens in a modal (keeps the list roomy).
   const [isFormOpen, setIsFormOpen] = useState(false);
+  // Manual UPDATE evidence: when set, the modal edits this booking via PATCH /api/bookings/:id.
+  const [editingId, setEditingId] = useState(null);
   // Frontend-only filtering (backend has no booking filter endpoint).
   const [searchText, setSearchText] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
@@ -50,7 +53,7 @@ const TenantLogistics = () => {
     setLoading(true);
     setError('');
     try {
-      const res = await axios.get('/api/bookings/', authHeader);
+      const res = await axios.get(`${API_BASE_URL}/api/bookings/`, authHeader);
       setBookings(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error('Failed to fetch bookings:', err);
@@ -71,8 +74,33 @@ const TenantLogistics = () => {
 
   const onField = (e) => setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
-  const openForm = () => { setError(''); setForm(emptyForm); setIsFormOpen(true); };
-  const closeForm = () => setIsFormOpen(false);
+  const openForm = () => { setError(''); setForm(emptyForm); setEditingId(null); setIsFormOpen(true); };
+  const closeForm = () => { setIsFormOpen(false); setEditingId(null); };
+
+  // ISO/DB timestamp → value accepted by <input type="datetime-local">.
+  const toLocalInput = (v) => {
+    if (!v) return '';
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+
+  const openEdit = (b) => {
+    setError('');
+    setForm({
+      transport_company: b.transport_company || '',
+      license_plate: b.license_plate || '',
+      driver_phone: b.driver_phone || '',
+      driver_name: b.driver_name || '',
+      loading_bay: b.loading_bay || '',
+      slot_start: toLocalInput(b.slot_start),
+      slot_end: toLocalInput(b.slot_end),
+      notes: b.notes || ''
+    });
+    setEditingId(b.id);
+    setIsFormOpen(true);
+  };
 
   const describeWhatsapp = (wa) => {
     if (!wa) return '';
@@ -80,18 +108,25 @@ const TenantLogistics = () => {
     return wa.success ? ' (WhatsApp sent)' : ' (WhatsApp delivery pending)';
   };
 
-  const createBooking = async (e) => {
+  const submitBookingForm = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     setError('');
     try {
-      const res = await axios.post('/api/bookings/create', form, authHeader);
-      setNotice(`Booking created (status: Pending).${describeWhatsapp(res.data?.whatsapp)}`);
+      if (editingId) {
+        // Manual UPDATE — editable fields only; server enforces ownership + slot conflicts.
+        await axios.patch(`${API_BASE_URL}/api/bookings/${editingId}`, form, authHeader);
+        setNotice('Booking updated.');
+      } else {
+        const res = await axios.post(`${API_BASE_URL}/api/bookings/create`, form, authHeader);
+        setNotice(`Booking created (status: Pending).${describeWhatsapp(res.data?.whatsapp)}`);
+      }
       setForm(emptyForm);
       setIsFormOpen(false);
+      setEditingId(null);
       fetchBookings();
     } catch (err) {
-      const msg = err.response?.data?.error || 'Failed to create booking.';
+      const msg = err.response?.data?.error || (editingId ? 'Failed to update booking.' : 'Failed to create booking.');
       setError(msg);
     } finally {
       setSubmitting(false);
@@ -100,7 +135,7 @@ const TenantLogistics = () => {
 
   const updateStatus = async (id, status) => {
     try {
-      const res = await axios.patch(`/api/bookings/${id}/status`, { status }, authHeader);
+      const res = await axios.patch(`${API_BASE_URL}/api/bookings/${id}/status`, { status }, authHeader);
       setNotice(`Booking ${status}.${describeWhatsapp(res.data?.whatsapp)}`);
       fetchBookings();
     } catch (err) {
@@ -110,7 +145,7 @@ const TenantLogistics = () => {
 
   const cancelBooking = async (id) => {
     try {
-      const res = await axios.patch(`/api/bookings/${id}/cancel`, {}, authHeader);
+      const res = await axios.patch(`${API_BASE_URL}/api/bookings/${id}/cancel`, {}, authHeader);
       setNotice(`Booking cancelled.${describeWhatsapp(res.data?.whatsapp)}`);
       fetchBookings();
     } catch (err) {
@@ -128,7 +163,7 @@ const TenantLogistics = () => {
     setGateError('');
     try {
       const res = await axios.patch(
-        `/api/bookings/${encodeURIComponent(ref)}/gate-scan`,
+        `${API_BASE_URL}/api/bookings/${encodeURIComponent(ref)}/gate-scan`,
         { action, observedPlate: gatePlate.trim() || undefined },
         authHeader
       );
@@ -153,14 +188,6 @@ const TenantLogistics = () => {
     catch { return b.slot_start; }
   };
 
-  // --- Summary stats (from the full list) ---
-  const stats = {
-    total: bookings.length,
-    pending: bookings.filter(b => b.status === 'Pending').length,
-    bayA: bookings.filter(b => b.loading_bay === 'Bay A' && !CLOSED.includes(b.status)).length,
-    bayB: bookings.filter(b => b.loading_bay === 'Bay B' && !CLOSED.includes(b.status)).length,
-  };
-
   // Local YYYY-MM-DD of a booking's slot start (matches the date input + displayed Slot).
   const slotDateKey = (b) => {
     if (!b.slot_start) return '';
@@ -168,6 +195,15 @@ const TenantLogistics = () => {
     if (isNaN(d.getTime())) return String(b.slot_start).slice(0, 10);
     const p = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  };
+
+  // --- Compact summary stats ---
+  const todayKey = slotDateKey({ slot_start: new Date().toISOString() });
+  const stats = {
+    today: bookings.filter(b => slotDateKey(b) === todayKey).length,
+    open: bookings.filter(b => b.status === 'Pending' || b.status === 'Confirmed').length,
+    inProgress: bookings.filter(b => b.status === 'Arrived').length,
+    closed: bookings.filter(b => CLOSED.includes(b.status)).length,
   };
 
   // --- Frontend filtering ---
@@ -204,23 +240,23 @@ const TenantLogistics = () => {
         {notice && <div className="toast-notification">{notice}</div>}
         {error && !isFormOpen && <div className="error-banner" style={{ margin: '0 0 16px' }}>⚠️ {error}</div>}
 
-        {/* Summary cards */}
+        {/* Compact summary — today's load and the booking pipeline at a glance */}
         <div className="logistics-stats">
           <div className="logistics-stat-card">
-            <div className="stat-value">{stats.total}</div>
+            <div className="stat-value">{stats.today}</div>
             <div className="stat-label">Today's Bookings</div>
           </div>
           <div className="logistics-stat-card">
-            <div className="stat-value">{stats.pending}</div>
-            <div className="stat-label">Pending</div>
+            <div className="stat-value">{stats.open}</div>
+            <div className="stat-label">Pending / Confirmed</div>
           </div>
           <div className="logistics-stat-card">
-            <div className="stat-value">{stats.bayA}</div>
-            <div className="stat-label">Bay A Active</div>
+            <div className="stat-value">{stats.inProgress}</div>
+            <div className="stat-label">Arrived / In Progress</div>
           </div>
           <div className="logistics-stat-card">
-            <div className="stat-value">{stats.bayB}</div>
-            <div className="stat-label">Bay B Active</div>
+            <div className="stat-value">{stats.closed}</div>
+            <div className="stat-label">Completed / Cancelled</div>
           </div>
         </div>
 
@@ -278,28 +314,39 @@ const TenantLogistics = () => {
                   {filtered.map((b) => {
                     const nextStatus = STATUS_FLOW[b.status];
                     const isClosed = CLOSED.includes(b.status);
+                    const canEditOrCancel = !isClosed && (role === 'FM' || role === 'Tenant');
+                    const hasActions = (canManage && nextStatus) || canEditOrCancel;
                     return (
                       <tr key={b.id}>
-                        <td data-label="Ref" style={{ fontFamily: 'monospace' }}>{b.booking_ref}</td>
+                        <td data-label="Ref" className="booking-ref-cell">{b.booking_ref}</td>
                         <td data-label="Plate">{b.license_plate}</td>
-                        <td data-label="Company">{b.transport_company}</td>
-                        <td data-label="Driver">{b.driver_name || '—'}</td>
+                        <td data-label="Company" className="booking-wrap-cell">{b.transport_company}</td>
+                        <td data-label="Driver" className="booking-wrap-cell">{b.driver_name || '—'}</td>
                         <td data-label="Bay">{b.loading_bay}</td>
                         <td data-label="Slot">{fmtSlot(b)}</td>
                         <td data-label="Status"><span className={`status-badge ${String(b.status).toLowerCase()}`}>{b.status}</span></td>
-                        <td data-label="Actions">
-                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                            {canManage && nextStatus && (
-                              <button className="edit-btn" onClick={() => updateStatus(b.id, nextStatus)}>
-                                Mark {nextStatus}
-                              </button>
-                            )}
-                            {!isClosed && (role === 'FM' || role === 'Tenant') && (
-                              <button className="edit-btn" style={{ background: '#7f1d1d' }} onClick={() => cancelBooking(b.id)}>
-                                Cancel
-                              </button>
-                            )}
-                          </div>
+                        <td data-label="Actions" className="booking-actions-cell">
+                          {hasActions ? (
+                            <div className="booking-action-group" aria-label={`Actions for ${b.booking_ref}`}>
+                              {canManage && nextStatus && (
+                                <button className="edit-btn booking-action-btn booking-action-primary" onClick={() => updateStatus(b.id, nextStatus)}>
+                                  Mark {nextStatus}
+                                </button>
+                              )}
+                              {canEditOrCancel && (
+                                <button className="edit-btn booking-action-btn" onClick={() => openEdit(b)}>
+                                  Edit
+                                </button>
+                              )}
+                              {canEditOrCancel && (
+                                <button className="edit-btn booking-action-btn booking-action-danger" onClick={() => cancelBooking(b.id)}>
+                                  Cancel
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="booking-actions-none">—</span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -315,13 +362,13 @@ const TenantLogistics = () => {
           <div className="modal-overlay" onClick={closeForm}>
             <div className="modal-content booking-modal" onClick={(e) => e.stopPropagation()}>
               <div className="booking-modal-head">
-                <h2>Schedule New Delivery</h2>
+                <h2>{editingId ? 'Edit Booking' : 'Schedule New Delivery'}</h2>
                 <button className="modal-x" onClick={closeForm} aria-label="Close">✕</button>
               </div>
 
               {error && <div className="error-banner" style={{ margin: '0 0 14px' }}>⚠️ {error}</div>}
 
-              <form onSubmit={createBooking} className="dark-form">
+              <form onSubmit={submitBookingForm} className="dark-form">
                 <div className="form-group">
                   <label>Transport Company *</label>
                   <input name="transport_company" value={form.transport_company} onChange={onField} placeholder="e.g., NinjaVan" required />
@@ -360,7 +407,7 @@ const TenantLogistics = () => {
                 <div className="booking-modal-actions">
                   <button type="button" className="cancel-btn" onClick={closeForm}>Cancel</button>
                   <button type="submit" className="submit-booking-btn" disabled={submitting}>
-                    {submitting ? 'Creating...' : 'Create Booking'}
+                    {submitting ? 'Saving...' : editingId ? 'Save Changes' : 'Create Booking'}
                   </button>
                 </div>
               </form>

@@ -9,6 +9,13 @@ const findCameraByCode = (code, excludeId) => Camera.findOne({
     where: sequelize.where(sequelize.fn('LOWER', sequelize.col('camera_code')), code.toLowerCase())
 }).then((cam) => (cam && excludeId && cam.id === excludeId ? null : cam));
 
+// Enforces "one selected camera per Detection Setup rule": a zone that already has a
+// camera mapped to it cannot silently gain a second one. excludeId lets the SAME
+// camera keep (or re-save) its own zone_id without tripping this check.
+const findCameraByZone = (zoneId, excludeId) => Camera.findOne({
+    where: { zone_id: zoneId }
+}).then((cam) => (cam && excludeId && cam.id === excludeId ? null : cam));
+
 router.use(verifyToken);
 
 router.get('/', requireRole('FM', 'Staff'), async (req, res) => {
@@ -54,6 +61,10 @@ router.post('/', requireRole('FM'), async (req, res) => {
         if (zone_id !== undefined && zone_id !== null) {
             const zone = await MonitoringZone.findByPk(zone_id);
             if (!zone) return res.status(400).json({ error: 'Selected zone does not exist.' });
+            const zoneTaken = await findCameraByZone(zone_id);
+            if (zoneTaken) {
+                return res.status(409).json({ error: 'That zone already has a camera assigned. Unassign it before mapping another camera.' });
+            }
         }
 
         const normalizedCode = String(camera_code).trim();
@@ -108,6 +119,10 @@ router.put('/:id', requireRole('FM'), async (req, res) => {
         if (zone_id !== undefined && zone_id !== null) {
             const zone = await MonitoringZone.findByPk(zone_id);
             if (!zone) return res.status(400).json({ error: 'Selected zone does not exist.' });
+            const zoneTaken = await findCameraByZone(zone_id, camera.id);
+            if (zoneTaken) {
+                return res.status(409).json({ error: 'That zone already has a camera assigned. Unassign it before mapping another camera.' });
+            }
         }
 
         await camera.update({

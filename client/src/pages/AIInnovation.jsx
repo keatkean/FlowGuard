@@ -8,67 +8,47 @@ const AIInnovation = () => {
   return (
     <div className="ai-page-wrapper">
       <NavBar />
-      
       <main className="ai-main-content">
-        {/* Hero Section */}
         <header className="ai-hero">
-          <h1 className="gradient-text">FlowGuard Virtual Patrol</h1>
-          <p>
-            Transforming Harrison Food Factory with enterprise-grade computer vision. 
-            Automated, 24/7 facility monitoring without the manpower constraints.
-          </p>
+          <h1 className="gradient-text">FlowGuard AI Monitoring</h1>
+          <p>FlowGuard combines biometric access verification and configurable object monitoring to support continuous facility oversight.</p>
         </header>
-
-        {/* Conceptual "AI Vision" Showcase */}
         <section className="vision-showcase">
           <div className="vision-container">
             <div className="camera-feed mock-feed-1">
               <div className="bounding-box hygiene-box">
-                <span className="confidence-tag">PPE Compliant 98%</span>
+                <span className="confidence-tag">Authorised Access</span>
               </div>
-              <div className="feed-label">CAM-04: Production Line A</div>
+              <div className="feed-label">Illustrative PoC View - Monitoring Zone Active</div>
             </div>
-            
             <div className="camera-feed mock-feed-2">
               <div className="bounding-box alert-box">
-                <span className="confidence-tag alert-tag">ANOMALY: Spill Detected 89%</span>
+                <span className="confidence-tag alert-tag">Unattended Object Alert</span>
               </div>
-              <div className="feed-label">CAM-12: Loading Bay (Sector 2)</div>
+              <div className="feed-label">Illustrative PoC View - Unknown Person Alert</div>
             </div>
           </div>
         </section>
-
-        {/* Feature Grid */}
         <section className="ai-feature-grid">
           <div className="ai-feature-card">
-            <div className="feature-icon">👁️</div>
-            <h3>Always-On Virtual Patrol</h3>
-            <p>Our computer vision models analyze 128+ camera feeds in real-time, identifying safety hazards and unauthorized access instantly.</p>
+            <h3>Biometric Access Monitoring</h3>
+            <p>Recognises enrolled personnel, performs motion-liveness verification and records access outcomes.</p>
           </div>
-
           <div className="ai-feature-card">
-            <div className="feature-icon">🦺</div>
-            <h3>Hygiene & PPE Enforcement</h3>
-            <p>Automatically detect if personnel are missing hairnets, gloves, or high-vis jackets before they enter sterile food processing zones.</p>
+            <h3>Object & Zone Monitoring</h3>
+            <p>Applies configurable monitoring rules to camera-linked zones and surfaces active alerts.</p>
           </div>
-
           <div className="ai-feature-card">
-            <div className="feature-icon">🚨</div>
-            <h3>Predictive Incident Alerts</h3>
-            <p>Instead of reviewing footage after an accident, FlowGuard sends push notifications to floor managers seconds after an anomaly is detected.</p>
+            <h3>Operational Response</h3>
+            <p>Routes access events, alerts, attendance and support records to authorised operational dashboards.</p>
           </div>
         </section>
-
-        {/* Call to Action */}
         <section className="ai-cta-section">
           <h2>Ready to see it in action?</h2>
-          <p>Access the live telemetry and Virtual Patrol feeds from the Command Center.</p>
-          <Link to="/login" className="cta-button">
-            Launch Client Portal →
-          </Link>
+          <p>Access the authenticated proof-of-concept portal for role-protected operational workflows.</p>
+          <Link to="/login" className="cta-button">Launch Client Portal ?</Link>
         </section>
       </main>
-
       <Footer />
     </div>
   );

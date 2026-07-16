@@ -7,6 +7,7 @@ import Footer from '../components/Footer';
 import LogoIcon from '../components/LogoIcon';
 import PasswordInput from '../components/PasswordInput';
 import '../css/Login.css';
+import { API_BASE_URL } from '../constants/api';
 
 const Register = () => {
   const navigate = useNavigate();
@@ -41,7 +42,7 @@ const Register = () => {
         recaptchaToken: token 
       };
 
-      const res = await axios.post('/user/register', payload);
+      const res = await axios.post(`${API_BASE_URL}/user/register`, payload);
       console.log("Registration successful.");
       navigate('/login');
 

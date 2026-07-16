@@ -578,3 +578,165 @@
         padding: 50px 16px;
     }
 }
+/* Truth-safe PoC content additions */
+.hero-badge {
+    color: #34d399;
+    border: 1px solid rgba(52, 211, 153, 0.35);
+    background: rgba(52, 211, 153, 0.08);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 18px;
+}
+
+.hero-subheading {
+    color: #e2e8f0;
+    font-size: 1.35rem;
+    font-weight: 650;
+    max-width: 780px;
+    line-height: 1.5;
+    margin: 0 0 14px 0;
+}
+
+.hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 14px;
+}
+
+
+.section-subtitle-spaced {
+    margin-top: 12px;
+}
+
+.sensor-copy {
+    font-family: inherit;
+    font-size: 1rem;
+    line-height: 1.55;
+    color: #e2e8f0;
+    min-height: 78px;
+}
+
+.feature-list {
+    margin: 18px 0 0;
+    padding-left: 20px;
+    color: #cbd5e1;
+    line-height: 1.7;
+}
+
+.feature-list li::marker {
+    color: #34d399;
+}
+
+.step-index {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+    font-weight: 800;
+    margin-bottom: 18px;
+}
+
+.tech-stack-note {
+    max-width: 900px;
+    margin: 0 auto 24px;
+    color: #94a3b8;
+    text-align: center;
+    line-height: 1.6;
+    padding: 0 20px;
+}
+
+.demo-form-notice {
+    margin: 0;
+    padding: 12px 14px;
+    border: 1px solid rgba(52, 211, 153, 0.3);
+    background: rgba(52, 211, 153, 0.08);
+    color: #bbf7d0;
+    border-radius: 8px;
+    font-size: 0.9rem;
+}
+
+@media (max-width: 600px) {
+    .hero-actions {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .hero-button {
+        width: 100%;
+        max-width: 280px;
+        justify-content: center;
+    }
+}
+
+/* Homepage layout polish: four-card desktop rows */
+.features-section {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.module-grid,
+.workflow-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-items: stretch;
+}
+
+.module-card,
+.workflow-card {
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.module-card .feature-title,
+.workflow-card .feature-title {
+    min-height: 3.5rem;
+    display: flex;
+    align-items: flex-start;
+}
+
+.module-card .feature-description,
+.workflow-card .feature-description {
+    margin-bottom: 0;
+}
+
+.module-card .feature-list {
+    margin-top: 18px;
+}
+
+.workflow-card .step-index {
+    flex: 0 0 auto;
+}
+
+.hero-actions-single {
+    justify-content: center;
+}
+
+@media (max-width: 1099px) {
+    .module-grid,
+    .workflow-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 699px) {
+    .module-grid,
+    .workflow-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .module-card .feature-title,
+    .workflow-card .feature-title {
+        min-height: 0;
+    }
+}

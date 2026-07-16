@@ -1,16 +1,18 @@
 // Frontend tests — Facial Recognition & Access Management (Felicia)
-// Covers: page renders, manual upload validation, submit hits the correct backend
-// endpoint, and missing required images blocks submission.
+// Covers: page renders, Pi-primary camera source with webcam fallback, manual
+// upload validation, submit hits the correct backend endpoint, and missing
+// required images blocks submission.
 import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { vi, describe, test, expect, beforeEach } from "vitest";
+import { vi, describe, test, expect, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
 const { mockPost } = vi.hoisted(() => ({ mockPost: vi.fn(() => Promise.resolve({ data: {} })) }));
 vi.mock("axios", () => ({ default: { post: mockPost } }));
 
 import FaceEnrollment from "../../src/pages/FaceEnrollment";
+import { PI_CAMERA_STREAM_URL, CAMERA_STATUS_MESSAGES } from "../../src/constants/piCamera";
 
 const renderPage = () =>
   render(<MemoryRouter><FaceEnrollment /></MemoryRouter>);
@@ -18,16 +20,58 @@ const renderPage = () =>
 const imageFile = (name) => new File(["binary"], name, { type: "image/png" });
 const getFileInputs = () => document.querySelectorAll('input[type="file"]');
 
+const mockGetUserMedia = vi.fn(() => Promise.resolve({ getTracks: () => [] }));
+
 beforeEach(() => {
   mockPost.mockClear();
+  mockGetUserMedia.mockClear();
   localStorage.clear();
   localStorage.setItem("accessToken", "test-token");
   localStorage.setItem("userName", "Felicia");
 
-  // jsdom has no webcam — stub getUserMedia so startCamera() resolves cleanly.
+  // Default: Pi camera unreachable — the page falls back to the laptop webcam.
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("pi down")));
+
+  // jsdom has no webcam — stub getUserMedia so startWebcam() resolves cleanly.
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
-    value: { getUserMedia: vi.fn(() => Promise.resolve({ getTracks: () => [] })) },
+    value: { getUserMedia: mockGetUserMedia },
+  });
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("FaceEnrollment camera source (Pi primary, webcam fallback)", () => {
+  test("Pi Camera is the primary source when reachable — webcam never requested", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText(CAMERA_STATUS_MESSAGES.PI_CONNECTED)).toBeInTheDocument()
+    );
+    const preview = screen.getByAltText(/raspberry pi camera live preview/i);
+    expect(preview.getAttribute("src")).toBe(PI_CAMERA_STREAM_URL);
+    expect(mockGetUserMedia).not.toHaveBeenCalled();
+  });
+
+  test("automatically falls back to the laptop webcam when the Pi is unreachable", async () => {
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText(CAMERA_STATUS_MESSAGES.PI_UNAVAILABLE)).toBeInTheDocument()
+    );
+    expect(mockGetUserMedia).toHaveBeenCalled();
+    expect(screen.queryByAltText(/raspberry pi camera live preview/i)).toBeNull();
+  });
+
+  test("manual Pi/Webcam source switch is available in camera mode", async () => {
+    renderPage();
+    expect(screen.getByRole("button", { name: "Raspberry Pi Camera" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Laptop Webcam" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText(CAMERA_STATUS_MESSAGES.PI_UNAVAILABLE)).toBeInTheDocument()
+    );
   });
 });
 

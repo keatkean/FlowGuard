@@ -1,62 +1,33 @@
-# FlowGuard — Group Rubric Evidence Map (merged system)
+# Group Rubric Evidence Map
 
-Branch: `feature/smart-logistics-whatsapp`. Merged modules: Facial Recognition, Smart Logistics,
-Object Detection, AI Helpdesk, Incident Tracking. Each member owns at least one full-stack feature
-with CRUD (basic functions) + enhanced capabilities. **No real secrets are committed.**
+## Module 1 - Facial Recognition & Access Management (Felicia)
 
-Backend routes: `user`, `security`, `attendance`, `booking`, `cameras`, `zones`, `detectionAlerts`,
-`incident`, `support`. Tables: `users`, `bookings`, `attendance`, `security_logs`, `invites`,
-`cameras`, `monitoring_zones`, `detection_alerts`, `incident_logs`, `chat_transcripts`,
-`support_tickets`, `knowledge_base`.
+Manual CRUD: FM manual user create (`POST /user/manual-create`), Face ID enrol/re-enrol (`POST /user/enroll-face`), user/security/attendance/evaluation reads, suspend/reactivate, security review updates and transactional user off-boarding (`DELETE /user/:id`).
 
----
+Automatic processes: side-effect-free tracking, recognition with authoritative user status, Gate Scanner Attendance IN/OUT after final same-ID motion-liveness confirmation, V-Patrol access-event SecurityLog writes with Attendance unchanged, unknown/suspended SecurityLog handling and FM-only evaluation labels.
 
-## Felicia — Facial Recognition & Access Management (primary)
-Biometric access + security/attendance logging (not just user-account management).
+Limitations: motion liveness is head-turn verification, not complete anti-spoofing certification. Facial recognition does not create IncidentLog records.
 
-- **Manual CRUD:** face enrolment / re-enrolment (`POST /user/enroll-face`), user & security/attendance
-  log reads (`GET /api/security/logs`, `/api/attendance/logs`, `GET /user/`), security-review updates
-  (`PATCH /api/security/logs/:id/review`), suspend/reactivate (`PUT /user/suspend/:id`), PDPA
-  off-boarding (`DELETE /user/:id` — wipe `faceVector`, delete attendance, anonymise security logs).
-- **Auto:** face recognition creates Attendance (IN/OUT) and SecurityLog (access / intrusion) records.
-- **Secondary supporting feature — Smart Logistics:** Booking CRUD (`POST /api/bookings/create`,
-  `GET /api/bookings/`, `GET /api/bookings/:ref`, `PATCH /api/bookings/:id/status`,
-  `PATCH /api/bookings/:ref/gate-scan`, `PATCH /api/bookings/:id/cancel`) + Driver Pass QR + WhatsApp
-  notifications + FM gate scan + next-in-line.
+## Module 2 - Object Detection & Space Management (Charlisa)
 
-## Charlisa — Object Detection & Space Management
-- **Manual CRUD:** Camera CRUD (`/api/cameras`), MonitoringZone CRUD (`/api/zones`), DetectionAlert
-  read/update/manual-create (`/api/detection-alerts`).
-- **Auto:** YOLO creates DetectionAlert records and can seed IncidentLog; stale detection alerts are
-  purged on a 30-day schedule.
-- **Note (optional improvement):** a DetectionAlert manual delete/archive endpoint is a nice-to-have
-  if not already implemented (soft-delete `paranoid` is enabled on the model).
+Actual CRUD: Camera, MonitoringZone and DetectionAlert workflows exist through current models/routes. Camera supports inventory fields including notes and zone association. MonitoringZone supports configurable classes, unattended thresholds, cooldown, severity, assigned team and detection enable/disable. DetectionAlert supports active alert records, severity/source/confidence/snapshot/device metadata and nullable camera/zone links.
 
-## Lucas — AI Helpdesk & Facility Support
-- **Manual CRUD:** SupportTicket read/update/delete, KnowledgeBase CRUD (`/api/support`).
-- **Auto:** ChatTranscript is created from the chatbot; an unresolved/escalated chat auto-creates a
-  SupportTicket; transcripts are cleaned up on a 90-day schedule.
-- **Note (optional improvement):** a manual FM-created ticket endpoint is a nice-to-have if not
-  already implemented.
+Current YOLO workflow: object/person analysis can create DetectionAlert records for configured zones. DetectionAlert and IncidentLog are not database-linked; any incident seeding is an application workflow note only.
 
-## Gladwin — Incident Tracking & Resolution
-- **Manual CRUD:** IncidentLog create / read / update / delete (`/api/incident`).
-- **Auto:** AI / object detection / facial recognition can create incident records; resolution
-  lifecycle (`resolutionStatus`) is tracked; soft-delete (`paranoid`) retained for audit.
+Limitations: no documented current PPE, spill, pest, environmental telemetry, HVAC, production robotics or people-counting implementation is claimed here.
 
----
+## Module 3 - AI Helpdesk & Incident Support (Lucas / Gladwin)
 
-## Shared rubric evidence
-- **Testing:** `cd server && npm test`, `cd client && npm test -- --run`, `cd client && npm run build`
-  (see `docs/Tan Xiu Li, Felicia/test-results-summary.md` for Felicia's verified counts).
-- **Security / RBAC:** JWT + `requireRole` + React `ProtectedRoute`; FM/Tenant/Staff/Public matrix in
-  `design/md/rbac-flow.md`.
-- **System design:** `design/md/architecture.md`, `design/md/architecture-diagram.md`,
-  `design/md/er-diagram.md`, `design/md/*-flow.md`; PNGs in `design/png/`.
-- **No secrets committed** — all credentials are placeholders in `.env.example`.
-- After Mermaid edits, regenerate `design/png/er-diagram.png`, `design/png/architecture-diagram.png`,
-  and optionally `design/png/planned-deployment.png`.
+Helpdesk behavior: ChatTranscript stores chat sessions and messages; unresolved chats can auto-escalate to SupportTicket. FM can read tickets, update status (`Pending`, `In Progress`, `Resolved`), add resolution notes and maintain KnowledgeBase entries.
 
-> This is a group-level summary. Individual per-feature evidence for Felicia is in
-> `docs/Tan Xiu Li, Felicia/rubric-evidence-map.md`. Charlisa / Lucas / Gladwin CRUD claims are
-> documented from the merged models/routes; each owner should confirm their optional-improvement notes.
+Incident behavior: IncidentLog CRUD exists with camera location, status, person name, confidence score, severity, source, `resolutionStatus`, notes and paranoid soft-delete support.
+
+Limitations: no autonomous final decision-making and no ticket archive flow is claimed.
+
+## Module 4 - Smart Logistics & Loading-Bay Management (Felicia)
+
+Manual CRUD: create/read/update bookings, public Driver Pass lookup, gate scan status updates and status-based logical cancellation (`status = Cancelled`).
+
+Automatic processes: required-field validation, role/ownership enforcement, same-bay slot conflict detection, booking reference generation, Driver Pass link generation, mock-safe WhatsApp notification, arrival/completion timestamps, next-driver notification and cancellation notification.
+
+Limitations: manual cancellation does not populate `deletedAt`; the model supports paranoid soft deletion but the current UI workflow uses status-based cancellation.

@@ -8,6 +8,7 @@ import LogoIcon from '../components/LogoIcon';
 import PasswordInput from '../components/PasswordInput';
 import '../css/Login.css';
 import '../css/DriverPass.css';
+import { API_BASE_URL } from '../constants/api';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -28,14 +29,12 @@ const Login = () => {
 
     try {
       const token = await executeRecaptcha('login_submit');
-      
-      // 🎯 THE FIX: Get the IP dynamically so phones can talk to the laptop
-      const currentIP = window.location.hostname;
 
-      const res = await axios.post(`/user/login`, { 
-        email, 
+      // Shared API base: blank locally (Vite proxy), deployed Node URL in prod.
+      const res = await axios.post(`${API_BASE_URL}/user/login`, {
+        email,
         password,
-        recaptchaToken: token 
+        recaptchaToken: token
       });
 
       // Save credentials to local storage

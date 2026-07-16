@@ -14,6 +14,22 @@ module.exports = (sequelize, DataTypes) => {
       description: 'The exact name of the verified staff member'
     },
 
+    // --- AUTOMATIC RECOGNITION AUDIT FIELDS (additive, all nullable) ---
+    // Populated by the Node facial-recognition route. Audit metadata only —
+    // never a snapshot and never biometric template data.
+    matchedUserId: {
+      type: DataTypes.INTEGER,
+      allowNull: true // The unique User ID the recognition matched, when known
+    },
+    confidence: {
+      type: DataTypes.FLOAT,
+      allowNull: true // Recognition confidence at the time of the event
+    },
+    cameraLocation: {
+      type: DataTypes.STRING,
+      allowNull: true // Which gate/camera produced the event
+    },
+
     // --- MANUAL FM REVIEW WORKFLOW ---
     // FM staff triage suspicious/critical events through these fields.
     reviewStatus: {

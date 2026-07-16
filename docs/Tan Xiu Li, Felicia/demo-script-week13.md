@@ -1,52 +1,18 @@
-# FlowGuard — Week 13 Demo Script (Felicia)
+# Week 13 Demo Script - Felicia Evidence
 
-A ~8–10 minute walkthrough. Have three terminals ready.
+## Manual CRUD
 
-## 0. Start the services
-```bash
-# Terminal 1 — Frontend
-cd client && npm run dev -- --host      # http://localhost:5173
+1. Create an authorised user from User Management using `POST /user/manual-create`.
+2. Enrol or re-enrol Face ID from Face Enrollment using `POST /user/enroll-face`; explain `faceVector`, `isEnrolled`, EvaluationParticipant label assignment and AI cache refresh.
+3. Read users, security logs, attendance logs and evaluation participants from role-protected dashboards.
+4. Suspend/reactivate a user and update Security Review notes/status.
+5. Off-board a user with `DELETE /user/:id`; explain the transactional PDPA cleanup.
+6. Create, read, update and cancel a Smart Logistics booking; show cancellation as `status = Cancelled`.
 
-# Terminal 2 — Backend
-cd server && node index.js              # http://localhost:5001
+## Automatic Processes
 
-# Terminal 3 — AI service (InsightFace faces + YOLO) — port 8501
-cd ai-service && uvicorn main:app --host 0.0.0.0 --port 8501 --reload
-```
-- Seed the FM login once: `cd server && node seed.js` → `admin@harrison.com` / `Admin123!`.
-- WhatsApp stays **disabled** (`WHATSAPP_ENABLED=false`) → notifications are **simulated** (safe for demo).
-
-## 1. Open + log in as FM
-- Visit `http://localhost:5173`, log in as the FM admin.
-- Show the **role dashboard** (FM = "Master Command Center") and the full sidebar.
-
-## 2. Facial Recognition & Access
-- **Face Enrollment** — capture 3 angles (or upload) → confirm success (vector stored, AI cache refreshed).
-- **V-Patrol / Gate Scanner** — show live recognition: a known face logs access; an unknown face logs an intrusion.
-- **Security Review** — filter Pending Review, set a status + note (FM-only review workflow).
-- **User Management → Logs** — show a user's access history; mention PDPA off-board (wipes face vector, anonymises logs).
-
-## 3. Smart Logistics & Loading Bay
-- **Logistics → + New Booking** — fill company/plate/phone/bay/slot → create (status Pending).
-- Point out the **simulated WhatsApp** status in the toast/notice ("WhatsApp simulated — disabled").
-- Open the **Driver Pass QR** at `/driver-pass/<booking_ref>` (mobile-friendly page + QR).
-- **Gate Scan** (FM) — enter the ref → **Mark Arrived (Entry)**, then **Mark Completed (Exit)**.
-- If another booking exists for that bay, show the **next-in-line** notification firing on exit.
-- Show **Cancel** (soft-cancel) and the **filters** (search / status / bay / date).
-
-## 4. Role views (RBAC)
-- Log in as **Tenant**: sidebar = Dashboard, Daily Attendance, Logistics & Bays, My Staff, Settings.
-  Create a booking; open "My Staff" → Logs (own staff only). No monitoring/admin pages.
-- Log in as **Staff**: sidebar = Dashboard, Daily Attendance ("My Attendance"), Logistics & Bays, Settings.
-  Can create a booking, but **no Gate Scan** and **no Mark Arrived/Completed**.
-- Show a blocked route (e.g. Staff → `/vpatrol` or `/users` → **403 Clearance Denied**).
-
-## 5. Wrap up
-- Mention tests: **backend 79/79**, **frontend 70/70**, **build success**.
-- Mention deployment plan (Vercel / Render / Neon) and that the AI service runs locally for the demo.
-- Note: no real secrets committed; WhatsApp real-send is env-gated and off by default.
-
-### Fallbacks if hardware misbehaves
-- No webcam → use **manual upload** on Face Enrollment; V-Patrol shows a clear "camera unavailable" overlay.
-- AI offline → enrolment returns a clean "service offline" message (no crash).
-- Camera flaky at the gate → Gate Scan accepts the **booking reference** typed manually.
+1. Gate Scanner: tracking, first recognition, head-turn motion-liveness verification, final same-ID recognition, then Attendance IN/OUT.
+2. V-Patrol: same scanner policy, then access-event SecurityLog only; Attendance remains unchanged.
+3. Unknown/suspended/timeout/mismatch: fail closed and avoid false Attendance.
+4. Logistics: booking_ref and Driver Pass creation, mock-safe WhatsApp notification, gate entry Arrived timestamp, gate exit Completed timestamp and next-driver notification.
+5. Evaluation lab: internal FM validation with stable labels; no access grant and no image/vector storage.

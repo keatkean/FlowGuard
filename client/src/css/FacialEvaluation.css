@@ -1,0 +1,214 @@
+/* Facial Evaluation Lab - FM-only simulation & metrics page */
+
+.eval-main { color: #e2e8f0; }
+
+.eval-banner {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid #f59e0b;
+  color: #fbbf24;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin-bottom: 14px;
+}
+
+.eval-live-links {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  color: #94a3b8;
+  margin-bottom: 14px;
+}
+
+.eval-link-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #e2e8f0;
+  text-decoration: none;
+  font-size: 0.82rem;
+}
+.eval-link-btn:hover { border-color: #3b82f6; }
+
+.eval-tabs { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.eval-tab {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+.eval-tab.active { background: #1d4ed8; border-color: #3b82f6; color: #fff; }
+
+.eval-card {
+  background: #0b0f1a;
+  border: 1px solid #2d364f;
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+.eval-card h2 { margin: 0 0 6px; font-size: 1.1rem; }
+.eval-muted { color: #94a3b8; font-size: 0.83rem; }
+
+.eval-scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+.eval-scenario-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #111827;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+.eval-scenario-btn:hover { border-color: #3b82f6; }
+.eval-scenario-btn span { color: #94a3b8; font-size: 0.78rem; }
+
+.eval-result {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 14px;
+  background: #111827;
+}
+.eval-result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+.eval-result-grid dt { color: #94a3b8; font-size: 0.72rem; text-transform: uppercase; }
+.eval-result-grid dd { margin: 2px 0 0; font-weight: 700; }
+.eval-granted { color: #10b981; }
+.eval-denied { color: #ef4444; }
+.eval-action { color: #cbd5e1; font-size: 0.85rem; }
+.eval-result-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.eval-result-actions label { color: #94a3b8; font-size: 0.82rem; display: flex; gap: 6px; align-items: center; }
+
+.eval-primary-btn, .eval-secondary-btn, .eval-danger-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  border: 1px solid #334155;
+}
+.eval-primary-btn { background: #1d4ed8; border-color: #3b82f6; color: #fff; }
+.eval-secondary-btn { background: #1e293b; color: #e2e8f0; }
+.eval-danger-btn { background: rgba(239, 68, 68, 0.12); border-color: #ef4444; color: #f87171; }
+
+.eval-live-form { border: 1px dashed #334155; border-radius: 10px; padding: 12px; margin: 12px 0; }
+.eval-live-form h3 { margin: 0 0 8px; font-size: 0.95rem; }
+.eval-form-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+.eval-form-row label { display: flex; flex-direction: column; gap: 4px; color: #94a3b8; font-size: 0.75rem; }
+.eval-form-row input, .eval-form-row select,
+.eval-filter-bar input, .eval-filter-bar select,
+.eval-table input, .eval-table select {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 0.82rem;
+}
+.eval-notes-field { flex: 1; min-width: 140px; }
+
+.eval-filter-bar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin: 12px 0; }
+.eval-filter-bar label { display: flex; flex-direction: column; gap: 4px; color: #94a3b8; font-size: 0.75rem; }
+
+.eval-table-wrap { overflow-x: auto; }
+.eval-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.eval-table th, .eval-table td { border: 1px solid #2d364f; padding: 6px 10px; text-align: left; }
+.eval-table thead th { background: #111827; color: #94a3b8; }
+.eval-notes-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.eval-source-tag { padding: 2px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; }
+.eval-source-tag.live { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+.eval-source-tag.simulated { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+
+.eval-stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin: 12px 0; }
+.eval-stat {
+  background: #111827;
+  border: 1px solid #2d364f;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.eval-stat span { color: #94a3b8; font-size: 0.7rem; text-transform: uppercase; }
+.eval-stat strong { font-size: 1.05rem; }
+
+.eval-matrix th { text-align: center; }
+.eval-matrix td { text-align: center; min-width: 56px; }
+.eval-diagonal { background: rgba(16, 185, 129, 0.12); color: #34d399; font-weight: 700; }
+.eval-offdiag { background: rgba(239, 68, 68, 0.12); color: #f87171; font-weight: 700; }
+
+.legacy-warning { display: none; }
+.eval-card.nested { background: #111827; margin-top: 12px; }
+.eval-live-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 14px 0; }
+.eval-camera-box { margin: 10px 0; min-height: 160px; border: 1px dashed #334155; border-radius: 10px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #020617; }
+.eval-camera-box video { width: 100%; max-height: 220px; object-fit: contain; }
+.eval-upload-preview { display: block; max-width: 220px; max-height: 160px; object-fit: contain; border: 1px solid #334155; border-radius: 8px; margin-top: 10px; }
+.eval-map-list { display: grid; gap: 8px; margin-top: 12px; }
+.eval-map-row { display: grid; grid-template-columns: 70px 1fr auto; align-items: center; gap: 10px; padding: 8px 10px; background: #0b0f1a; border: 1px solid #2d364f; border-radius: 8px; }
+.eval-error { color: #fecdd3; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 8px 10px; }
+.eval-success { color: #bbf7d0; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 8px 10px; }
+.eval-table td .eval-secondary-btn, .eval-table td .eval-danger-btn { margin: 2px; }
+/* --- Guided simulation CRUD additions --- */
+.eval-guidance ul {
+    margin: 8px 0 0;
+    padding-left: 20px;
+    color: #b6c2d6;
+    font-size: 0.85rem;
+    line-height: 1.6;
+}
+
+.eval-capture-list {
+    list-style: none;
+    margin: 8px 0 12px;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.eval-capture-list li {
+    background: #111a2e;
+    border: 1px solid #27314f;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #94a3b8;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.eval-capture-list li.captured {
+    border-color: rgba(16, 185, 129, 0.45);
+    color: #34d399;
+}
+
+.eval-row-selected {
+    outline: 1px solid rgba(96, 165, 250, 0.5);
+}
+.image-eval-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin: 18px 0 26px; }
+.image-eval-card { min-width: 0; padding: 18px; border: 1px solid #334155; border-radius: 12px; background: rgba(15, 23, 42, 0.45); display: grid; gap: 12px; align-content: start; }
+.image-eval-card label { display: grid; gap: 6px; }
+.image-eval-preview { display: block; width: 100%; max-height: 240px; object-fit: contain; border-radius: 8px; background: #0f172a; }
+.image-eval-result { padding: 14px; border-radius: 10px; background: rgba(15, 23, 42, 0.7); }
+.image-eval-result h4 { margin: 10px 0 6px; }
+.eval-warning { padding: 12px; border-left: 4px solid #f59e0b; background: rgba(245, 158, 11, 0.1); color: #fde68a; }
+.eval-correct { color: #34d399; font-weight: 700; }
+.eval-incorrect { color: #fb7185; font-weight: 700; }
+@media (max-width: 900px) { .image-eval-grid { grid-template-columns: 1fr; } }

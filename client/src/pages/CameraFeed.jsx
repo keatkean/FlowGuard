@@ -1,6 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import '../css/CameraFeed.css';
+
+const HARDWARE_STREAM_PATTERN = /video_feed|mjpeg|mjpg/i;
+
+export function isHardwareStream(video) {
+  if (typeof video !== 'string' || !/^https?:\/\//i.test(video)) return false;
+  return HARDWARE_STREAM_PATTERN.test(video);
+}
 
 const RELEVANT_CAMERA_CLASSES = new Set([
   'person',
@@ -22,14 +29,22 @@ const RELEVANT_CAMERA_CLASSES = new Set([
 export default function CameraFeed({ cam }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const isHardware = isHardwareStream(cam.video);
+  const [hardwareStatus, setHardwareStatus] = useState('loading');
 
   useEffect(() => {
+    if (isHardware) return undefined;
+
     const interval = setInterval(() => {
       analyzeFrame();
     }, 2000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [isHardware]);
+
+  useEffect(() => {
+    if (isHardware) setHardwareStatus('loading');
+  }, [isHardware, cam.video]);
 
   const analyzeFrame = async () => {
     try {
@@ -127,6 +142,28 @@ export default function CameraFeed({ cam }) {
     });
   };
 
+  if (isHardware) {
+    return (
+      <div className="camera-feed-placeholder">
+        <img
+          src={cam.video}
+          alt={`${cam.id} live stream`}
+          className="camera-video"
+          onLoad={() => setHardwareStatus('live')}
+          onError={() => setHardwareStatus('error')}
+        />
+
+        <div className="camera-feed-hud">
+          <span>{cam.id}</span>
+        </div>
+
+        {hardwareStatus === 'error' && (
+          <div className="camera-feed-error">SecurePi feed unavailable</div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="camera-feed-placeholder">
       <video
@@ -140,7 +177,7 @@ export default function CameraFeed({ cam }) {
       />
 
       <div className="camera-feed-hud">
-        <span>2024-01-15 14:29:44 UTC</span>
+        <span>{new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC</span>
         <span>{cam.id}</span>
       </div>
 

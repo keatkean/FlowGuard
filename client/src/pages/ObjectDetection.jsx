@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
+import { getHardwareStreamUrl, getHardwareHealthUrl, getHardwarePeopleCountUrl } from '../utils/securepiStream';
 import '../css/Dashboard.css';
 import '../css/ObjectDetection.css';
 
@@ -10,10 +11,53 @@ const CAMERAS_URL = '/api/cameras';
 const ALERTS_URL = '/api/detection-alerts';
 const PEOPLE_URL = '/ai/api/yolo/people-count';
 const ANALYZE_FRAME_URL = '/ai/api/yolo/analyze-frame';
-const OPEN_ALERT_STATUSES = ['Active', 'Acknowledged', 'Dispatched'];
-const RESPONDERS_STORAGE_KEY = 'flowguard-response-teams';
+const OPEN_ALERT_STATUSES = ['Active', 'Acknowledged', 'Investigating', 'Escalated', 'Dispatched'];
+const SECUREPI_STREAM_URL = import.meta.env.VITE_SECUREPI_STREAM_URL || '';
+const SECUREPI_HEALTH_URL = import.meta.env.VITE_SECUREPI_HEALTH_URL || '';
+const SECUREPI_PEOPLE_COUNT_URL = import.meta.env.VITE_SECUREPI_PEOPLE_COUNT_URL || '';
+const SECUREPI_PEOPLE_COUNT_POLL_MS = 3000;
 
 const Icon = ({ name }) => <span className={`od-icon od-icon-${name}`} aria-hidden="true" />;
+
+const alertSource = (alert) => alert?.source || 'Object Detection';
+const isCrowdAlert = (alert) => /crowd/i.test(alert?.alert_type || '');
+const isUnattendedAlert = (alert) => /unattended/i.test(`${alert?.alert_type || ''} ${alert?.object_class || ''}`);
+const alertTitle = (alert) => {
+  if (!alert) return '';
+  if (isCrowdAlert(alert)) return 'Crowd density threshold exceeded';
+  if (isUnattendedAlert(alert)) return 'Unattended pallet/object detected';
+  const rawTitle = String(alert.object_class || alert.alert_type || 'Detection Alert').replace(/^(Critical|Warning):\s*/i, '');
+  return /detect/i.test(rawTitle) ? rawTitle : `${rawTitle} Detected`;
+};
+const alertTimestamp = (alert) => {
+  const raw = alert?.occurred_at || alert?.createdAt || alert?.timestamp;
+  if (!raw) return 'n/a';
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return 'n/a';
+  return date.toLocaleString('en-SG', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true });
+};
+
+// Sends the selected camera's stable id (and its zone, if assigned) so the AI service
+// loads THAT camera's Detection Setup rule instead of the legacy global-smallest-
+// threshold fallback. Exported (pure, no component state) so it's unit-testable without
+// needing a decoded <video> frame — see tests/.../ObjectDetectionSourceModes.test.jsx.
+export const buildAnalyzeFramePayload = (image, camera, source) => {
+  const payload = camera
+    ? { image, camera_id: camera.id, ...(camera.zone_id ? { zone_id: camera.zone_id } : {}) }
+    : { image };
+  return source ? { ...payload, source } : payload;
+};
+
+// Canonical alert-source label per sourceMode — the AI service whitelists these before
+// forwarding them into POST /api/detection-alerts, so keep values in sync with
+// ai-service/main.py's _ALLOWED_BROWSER_SOURCES.
+export const ALERT_SOURCE_BY_MODE = {
+  camera: 'Browser Webcam',
+  file: 'Uploaded Video',
+  hardware: 'SecurePi Edge Node',
+};
+
+export const resolveAlertSource = (sourceMode) => ALERT_SOURCE_BY_MODE[sourceMode] || 'Browser Webcam';
 
 const ObjectDetection = () => {
   const [zones, setZones] = useState([]);
@@ -22,22 +66,10 @@ const ObjectDetection = () => {
   const [alerts, setAlerts] = useState([]);
   const [peopleCount, setPeopleCount] = useState(0);
   const [detectionActive, setDetectionActive] = useState(false);
-
-  const [responders] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(RESPONDERS_STORAGE_KEY) || '[]');
-      if (Array.isArray(saved) && saved.length > 0) return saved;
-    } catch {
-      // Ignore invalid local storage and fall back to defaults.
-    }
-    return [
-      { id: 1, name: 'Security Team Alpha', team: 'Security', contact: 'ext. 201' },
-      { id: 2, name: 'Floor Supervisor', team: 'Operations', contact: 'ext. 118' },
-    ];
-  });
-  const [alertAssignments, setAlertAssignments] = useState({});
   const [workflowMessage, setWorkflowMessage] = useState('');
   const [alertActionBusy, setAlertActionBusy] = useState(false);
+  const [selectedAlertId, setSelectedAlertId] = useState(null);
+  const [alertsRefreshing, setAlertsRefreshing] = useState(false);
 
   const [streamError, setStreamError] = useState(false);
   const [aiOffline, setAiOffline] = useState(false);
@@ -50,6 +82,7 @@ const ObjectDetection = () => {
   const [sourceMode, setSourceMode] = useState('camera');
   const [uploadedVideoUrl, setUploadedVideoUrl] = useState('');
   const [uploadedVideoName, setUploadedVideoName] = useState('');
+  const [hardwareReloadKey, setHardwareReloadKey] = useState(0);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -81,7 +114,25 @@ const ObjectDetection = () => {
       .catch(() => setNodeOffline(true));
   }, []);
 
+  const handleRefreshAlerts = useCallback(() => {
+    setAlertsRefreshing(true);
+    axios.get(ALERTS_URL, { headers })
+      .then(res => { setAlerts(res.data); setNodeOffline(false); })
+      .catch(() => setNodeOffline(true))
+      .finally(() => setAlertsRefreshing(false));
+  }, []);
+
+  // Read by fetchPeopleCount to skip the browser-YOLO poll while SecurePi hardware mode
+  // owns peopleCount/detectionActive (see the hardware people-count effect below) — a
+  // ref (not a dependency) so the 5s interval set up on mount doesn't need to restart
+  // every time the user switches source mode.
+  const sourceModeRef = useRef('camera');
+  useEffect(() => {
+    sourceModeRef.current = sourceMode;
+  }, [sourceMode]);
+
   const fetchPeopleCount = useCallback(() => {
+    if (sourceModeRef.current === 'hardware') return;
     axios.get(PEOPLE_URL, { timeout: 8000 })
       .then(res => {
         aiHealthFailuresRef.current = 0;
@@ -99,6 +150,30 @@ const ObjectDetection = () => {
         }
       });
   }, []);
+
+  const monitoredCamera = useMemo(
+    () => cameras.find((cam) => String(cam.id) === String(selectedCameraId)) || null,
+    [cameras, selectedCameraId]
+  );
+  // Read by analyzeCurrentFrame (inside a useEffect keyed on [sourceMode, uploadedVideoUrl])
+  // so the analyse request always uses the currently-selected camera, even when the
+  // camera selection changes without that effect re-running.
+  const monitoredCameraRef = useRef(null);
+  useEffect(() => {
+    monitoredCameraRef.current = monitoredCamera;
+  }, [monitoredCamera]);
+  const hardwareStreamUrl = useMemo(
+    () => getHardwareStreamUrl(monitoredCamera, SECUREPI_STREAM_URL),
+    [monitoredCamera]
+  );
+  const hardwareHealthUrl = useMemo(
+    () => getHardwareHealthUrl(hardwareStreamUrl, SECUREPI_HEALTH_URL),
+    [hardwareStreamUrl]
+  );
+  const hardwarePeopleCountUrl = useMemo(
+    () => getHardwarePeopleCountUrl(hardwareStreamUrl, SECUREPI_PEOPLE_COUNT_URL),
+    [hardwareStreamUrl]
+  );
 
   useEffect(() => {
     fetchZones();
@@ -123,6 +198,9 @@ const ObjectDetection = () => {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
       }
+      if (videoRef.current && videoRef.current.srcObject) {
+        videoRef.current.srcObject = null;
+      }
     };
 
     const analyzeCurrentFrame = async () => {
@@ -140,9 +218,10 @@ const ObjectDetection = () => {
       canvas.height = Math.round(video.videoHeight * scale);
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       const image = canvas.toDataURL('image/jpeg', 0.35);
+      const payload = buildAnalyzeFramePayload(image, monitoredCameraRef.current, resolveAlertSource(sourceMode));
 
       try {
-        const res = await axios.post(ANALYZE_FRAME_URL, { image }, { timeout: 10000 });
+        const res = await axios.post(ANALYZE_FRAME_URL, payload, { timeout: 10000 });
         setDetections(res.data.detections ?? []);
         setPeopleCount(res.data.count ?? 0);
         setDetectionActive(res.data.detection_active ?? false);
@@ -163,6 +242,7 @@ const ObjectDetection = () => {
 
     const startBrowserCamera = async () => {
       try {
+        setDetections([]);
         setCameraStatus('requesting_browser_camera');
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -220,10 +300,18 @@ const ObjectDetection = () => {
       frameInterval = setInterval(analyzeCurrentFrame, 2200);
     };
 
+    const startHardwareStream = async () => {
+      setBrowserCameraError(false);
+      setDetections([]);
+      setDetectionActive(false);
+    };
+
     if (sourceMode === 'file') {
       startUploadedVideo();
-    } else {
+    } else if (sourceMode === 'camera') {
       startBrowserCamera();
+    } else if (sourceMode === 'hardware') {
+      startHardwareStream();
     }
 
     return () => {
@@ -236,9 +324,70 @@ const ObjectDetection = () => {
     if (uploadedVideoUrl) URL.revokeObjectURL(uploadedVideoUrl);
   }, [uploadedVideoUrl]);
 
+  // Hardware connection state reacts to the selected inventory camera changing
+  // without restarting the browser-camera/uploaded-video effect above.
   useEffect(() => {
-    localStorage.setItem(RESPONDERS_STORAGE_KEY, JSON.stringify(responders));
-  }, [responders]);
+    if (sourceMode !== 'hardware') return;
+    setStreamError(false);
+    setCameraReady(false);
+    setCameraStatus(hardwareStreamUrl ? 'connecting_securepi_edge' : 'securepi_stream_not_configured');
+  }, [sourceMode, hardwareStreamUrl]);
+
+  useEffect(() => {
+    if (sourceMode !== 'hardware' || !hardwareHealthUrl) return undefined;
+    let cancelled = false;
+    const checkHealth = () => {
+      axios.get(hardwareHealthUrl, { timeout: 3000 })
+        .then(() => {
+          if (cancelled) return;
+          setCameraStatus('securepi_edge_live');
+          setStreamError(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setCameraStatus('securepi_edge_offline');
+          setStreamError(true);
+        });
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [sourceMode, hardwareReloadKey, hardwareHealthUrl]);
+
+  // SecurePi runs its own onboard YOLO and reports live counts on /people-count — the
+  // browser never sees its frames, so without this poll the People Detected badge and
+  // Inference State card stay frozen at whatever the browser-camera poll last wrote.
+  // Only active in hardware mode (fetchPeopleCount above skips itself the rest of the
+  // time) so webcam/uploaded-video behaviour is unchanged.
+  useEffect(() => {
+    if (sourceMode !== 'hardware' || !hardwarePeopleCountUrl) return undefined;
+    let cancelled = false;
+    const pollHardwarePeopleCount = () => {
+      axios.get(hardwarePeopleCountUrl, { timeout: 3000 })
+        .then((res) => {
+          if (cancelled) return;
+          setPeopleCount(res.data.count ?? 0);
+          setDetectionActive(Boolean(res.data.detection_active));
+        })
+        .catch((err) => {
+          // Pi unreachable or its own status just went stale — treat as "no live data"
+          // rather than leaving a possibly-stale count/active state on screen.
+          if (cancelled) return;
+          console.error('[SecurePi people-count] request failed:', hardwarePeopleCountUrl, err);
+          setPeopleCount(0);
+          setDetectionActive(false);
+        });
+    };
+    pollHardwarePeopleCount();
+    const interval = setInterval(pollHardwarePeopleCount, SECUREPI_PEOPLE_COUNT_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [sourceMode, hardwarePeopleCountUrl]);
 
   const handleUpdateAlertStatus = async (id, status) => {
     setAlertActionBusy(true);
@@ -259,16 +408,38 @@ const ObjectDetection = () => {
     handleUpdateAlertStatus(id, 'Acknowledged');
   };
 
-  const handleDispatchAlert = (id) => {
-    if (!alertAssignments[id]) {
-      setWorkflowMessage('Select a responder before dispatching.');
-      return;
-    }
-    handleUpdateAlertStatus(id, 'Dispatched');
+  const handleInvestigateAlert = (id) => {
+    handleUpdateAlertStatus(id, 'Investigating');
+  };
+
+  const handleEscalateAlert = (id) => {
+    handleUpdateAlertStatus(id, 'Escalated');
   };
 
   const handleClearAlert = (id) => {
     handleUpdateAlertStatus(id, 'Cleared');
+  };
+
+  const handleClearAllAlerts = async () => {
+    const openAlerts = alerts.filter((a) => OPEN_ALERT_STATUSES.includes(a.status));
+    if (openAlerts.length === 0) return;
+    setAlertActionBusy(true);
+    setWorkflowMessage('');
+    try {
+      const results = await Promise.all(
+        openAlerts.map((a) => axios.put(`${ALERTS_URL}/${a.id}`, { status: 'Cleared' }, { headers }))
+      );
+      setAlerts((prev) => prev.map((a) => {
+        const updated = results.find((r) => r.data.id === a.id);
+        return updated ? updated.data : a;
+      }));
+      setWorkflowMessage('All active alerts cleared.');
+    } catch (err) {
+      console.error('Clear all alerts error:', err);
+      setWorkflowMessage('Could not clear all alerts. Check that the Node.js server is running.');
+    } finally {
+      setAlertActionBusy(false);
+    }
   };
 
   const handleVideoUpload = (event) => {
@@ -282,25 +453,29 @@ const ObjectDetection = () => {
     setDetections([]);
   };
 
-  const assignResponder = (alertId, responderId) => {
-    setAlertAssignments((prev) => ({ ...prev, [alertId]: responderId }));
-    setWorkflowMessage(responderId ? 'Responder assigned to this alert.' : 'Responder assignment removed.');
-  };
-
   const activeAlertCount = alerts.filter(a => OPEN_ALERT_STATUSES.includes(a.status)).length;
   const clearedAlertCount = alerts.filter(a => a.status === 'Cleared').length;
   const latestOpenAlert = useMemo(() => (
     alerts.find(alert => OPEN_ALERT_STATUSES.includes(alert.status)) || null
   ), [alerts]);
+  const displayedAlert = useMemo(() => {
+    const selected = selectedAlertId
+      ? alerts.find(alert => alert.id === selectedAlertId && OPEN_ALERT_STATUSES.includes(alert.status))
+      : null;
+    return selected || latestOpenAlert;
+  }, [alerts, selectedAlertId, latestOpenAlert]);
   const latestIncidentTitle = useMemo(() => {
-    if (!latestOpenAlert) return '';
-    const rawTitle = String(latestOpenAlert.object_class || 'Unknown Object')
-      .replace(/^(Critical|Warning):\s*/i, '');
-    return /detect/i.test(rawTitle) ? rawTitle : `${rawTitle} Detected`;
-  }, [latestOpenAlert]);
-  const selectedResponderId = latestOpenAlert ? alertAssignments[latestOpenAlert.id] || '' : '';
-  const selectedResponder = responders.find((responder) => String(responder.id) === String(selectedResponderId));
-  const monitoredCamera = cameras.find((cam) => String(cam.id) === String(selectedCameraId));
+    if (!displayedAlert) return '';
+    return alertTitle(displayedAlert);
+  }, [displayedAlert]);
+  const sourceTitle = sourceMode === 'hardware'
+    ? 'SecurePi Edge Live'
+    : sourceMode === 'file'
+      ? uploadedVideoName || 'Uploaded video file'
+      : 'Browser camera';
+  const sourceSubtitle = sourceMode === 'hardware'
+    ? 'Raspberry Pi AI Camera IMX500'
+    : 'YOLO frame analysis';
 
   return (
     <div className="dashboard-layout">
@@ -348,7 +523,7 @@ const ObjectDetection = () => {
           <div className="od-command-card amber">
             <span>Zones Tracked</span>
             <strong>{zones.length}</strong>
-            <small>CRUD managed watch zones</small>
+            <small>Managed in Detection Setup</small>
           </div>
           <div className="od-command-card green">
             <span>Inference State</span>
@@ -362,11 +537,11 @@ const ObjectDetection = () => {
             <div className="od-stream-header">
               <div>
                 <h2>Live Camera Feed</h2>
-                <p>{sourceMode === 'file' ? uploadedVideoName || 'Uploaded video file' : 'Browser camera'} - YOLO frame analysis</p>
+                <p>{sourceTitle} - {sourceSubtitle}</p>
               </div>
               <div className="od-stream-badges">
-                <span className={detectionActive ? 'active' : 'standby'}>
-                  {detectionActive ? 'YOLO ACTIVE' : 'YOLO STANDBY'}
+                <span className={sourceMode === 'hardware' && cameraReady ? 'active' : detectionActive ? 'active' : 'standby'}>
+                  {sourceMode === 'hardware' ? (cameraReady ? 'SECUREPI EDGE LIVE' : 'SECUREPI CONNECTING') : detectionActive ? 'YOLO ACTIVE' : 'YOLO STANDBY'}
                 </span>
                 <span>CAMERA: {cameraStatus.replace(/_/g, ' ').toUpperCase()}</span>
               </div>
@@ -384,6 +559,13 @@ const ObjectDetection = () => {
                 Upload Video
                 <input type="file" accept="video/*" onChange={handleVideoUpload} />
               </label>
+              <button
+                type="button"
+                className={sourceMode === 'hardware' ? 'active' : ''}
+                onClick={() => setSourceMode('hardware')}
+              >
+                SecurePi Hardware
+              </button>
               <select
                 className="od-input od-camera-picker"
                 value={selectedCameraId}
@@ -408,6 +590,17 @@ const ObjectDetection = () => {
               <div className="od-stream-placeholder">
                 Select a video file to run object detection on uploaded footage
               </div>
+            ) : sourceMode === 'hardware' && !hardwareStreamUrl ? (
+              <div className="od-stream-placeholder">
+                SecurePi stream not configured - set an http:// stream URL on the selected camera in Camera Inventory, or VITE_SECUREPI_STREAM_URL in client/.env.local
+              </div>
+            ) : sourceMode === 'hardware' && streamError ? (
+              <div className="od-stream-placeholder od-stream-placeholder-stack">
+                <span>SecurePi stream offline - check Pi power, hotspot network, and port 8001</span>
+                <button type="button" className="od-btn-primary" onClick={() => { setStreamError(false); setHardwareReloadKey((prev) => prev + 1); }}>
+                  Reconnect SecurePi
+                </button>
+              </div>
             ) : browserCameraError ? (
               <div className="od-stream-placeholder">
                 Browser camera blocked - allow camera permission and refresh this page
@@ -417,13 +610,35 @@ const ObjectDetection = () => {
                 Python AI service offline - start ai-service to enable stream
               </div>
             ) : (
-              <div className="od-video-stage">
-                <video ref={videoRef} autoPlay playsInline muted className="od-stream-img" />
+              <div className={`od-video-stage ${sourceMode === 'hardware' ? 'od-video-stage-hardware' : ''}`}>
+                {sourceMode === 'hardware' ? (
+                  <img
+                    key={hardwareReloadKey}
+                    src={hardwareReloadKey > 0
+                      ? `${hardwareStreamUrl}${hardwareStreamUrl.includes('?') ? '&' : '?'}t=${hardwareReloadKey}`
+                      : hardwareStreamUrl}
+                    className="od-stream-img od-stream-img-hardware"
+                    alt="SecurePi live hardware camera"
+                    onLoad={() => {
+                      setCameraReady(true);
+                      setCameraStatus('securepi_edge_live');
+                      setStreamError(false);
+                    }}
+                    onError={() => {
+                      setCameraReady(false);
+                      setCameraStatus('securepi_edge_offline');
+                      setStreamError(true);
+                    }}
+                  />
+                ) : (
+                  <video ref={videoRef} autoPlay playsInline muted className="od-stream-img" />
+                )}
                 {!cameraReady && (
                   <div className="od-camera-message">
-                    Starting camera...
+                    {sourceMode === 'hardware' ? 'Connecting to SecurePi stream...' : 'Starting camera...'}
                   </div>
                 )}
+                {sourceMode !== 'hardware' && (
                 <div className="od-detection-layer">
                   <div className="od-video-hud">
                     <span>{cameraStatus.replace(/_/g, ' ')}</span>
@@ -447,10 +662,13 @@ const ObjectDetection = () => {
                     );
                   })}
                 </div>
+                )}
                 <div className="od-video-footer">
-                  <span className={detectionActive ? 'live' : 'standby'}>{detectionActive ? 'LIVE' : 'STANDBY'}</span>
-                  <span>{sourceMode === 'file' ? 'Uploaded Video' : 'Browser Feed'} | {detections.length} Objects</span>
-                  <span>1080p</span>
+                  <span className={sourceMode === 'hardware' && cameraReady ? 'live' : detectionActive ? 'live' : 'standby'}>
+                    {sourceMode === 'hardware' && cameraReady ? 'LIVE' : detectionActive ? 'LIVE' : 'STANDBY'}
+                  </span>
+                  <span>{sourceMode === 'hardware' ? 'SecurePi Edge Live | IMX500 annotated stream' : sourceMode === 'file' ? 'Uploaded Video' : `Browser Feed | ${detections.length} Objects`}</span>
+                  <span>{sourceMode === 'hardware' ? 'MJPEG' : '1080p'}</span>
                 </div>
               </div>
             )}
@@ -461,68 +679,68 @@ const ObjectDetection = () => {
               <div className="od-incident-title">
                 <Icon name="alert" />
                 <div>
-                  <span className={latestOpenAlert ? 'critical' : 'clear'}>
-                    {latestOpenAlert ? latestOpenAlert.status : 'CLEAR'}
+                  <span className={displayedAlert ? 'critical' : 'clear'}>
+                    {displayedAlert ? displayedAlert.status : 'CLEAR'}
                   </span>
-                  <h2>{latestOpenAlert ? latestIncidentTitle : 'No Active Incident'}</h2>
-                  <p>{latestOpenAlert ? 'Incident console - resolution workflow' : 'Live alerts will appear here when created'}</p>
+                  <h2>{displayedAlert ? latestIncidentTitle : 'No Active Incident'}</h2>
+                  <p>{displayedAlert ? 'Incident console - resolution workflow' : 'Live alerts will appear here when created'}</p>
                 </div>
               </div>
 
-              {latestOpenAlert ? (
+              {displayedAlert ? (
                 <>
                   <div className="od-incident-body">
-                    <p>{latestOpenAlert.zone_name} - {latestOpenAlert.camera_location}</p>
+                    <p>{displayedAlert.zone_name} - {displayedAlert.camera_location}</p>
                     <div className="od-incident-meta">
-                      <span>Camera <strong>{latestOpenAlert.camera_location}</strong></span>
-                      <span>Status <strong>{latestOpenAlert.status}</strong></span>
-                      <span>Object <strong>{latestOpenAlert.object_class || 'Unknown Object'}</strong></span>
-                      <span>Responder <strong>{selectedResponder ? selectedResponder.name : 'Unassigned'}</strong></span>
-                      {latestOpenAlert.duration_seconds != null && (
-                        <span>Duration <strong>{latestOpenAlert.duration_seconds}s</strong></span>
+                      <span>Camera <strong>{displayedAlert.camera_location}</strong></span>
+                      <span>Status <strong>{displayedAlert.status}</strong></span>
+                      <span>Object <strong>{displayedAlert.object_class || 'Package-like object'}</strong></span>
+                      <span>Source <strong>{alertSource(displayedAlert)}</strong></span>
+                      <span>Severity <strong>{displayedAlert.severity || 'High'}</strong></span>
+                      <span>Timestamp <strong>{alertTimestamp(displayedAlert)}</strong></span>
+                      {displayedAlert.duration_seconds != null && (
+                        <span>Duration <strong>{displayedAlert.duration_seconds}s</strong></span>
                       )}
                     </div>
+                    {displayedAlert.snapshot_url && (
+                      <a className="od-snapshot-link" href={displayedAlert.snapshot_url} target="_blank" rel="noreferrer">
+                        View edge snapshot
+                      </a>
+                    )}
                   </div>
 
                   <div className="od-resolution-actions">
-                    <select
-                      className="od-responder-select"
-                      value={selectedResponderId}
-                      onChange={(event) => assignResponder(latestOpenAlert.id, event.target.value)}
-                    >
-                      <option value="">Assign responder...</option>
-                      {responders.map((responder) => (
-                        <option key={responder.id} value={responder.id}>
-                          {responder.name} - {responder.team}
-                        </option>
-                      ))}
-                    </select>
                     <button
                       type="button"
                       className="green"
-                      onClick={() => handleAcknowledgeAlert(latestOpenAlert.id)}
-                      disabled={alertActionBusy || latestOpenAlert.status !== 'Active'}
+                      onClick={() => handleAcknowledgeAlert(displayedAlert.id)}
+                      disabled={alertActionBusy || displayedAlert.status !== 'Active'}
                     >
                       Acknowledge
                     </button>
-                  </div>
-
-                  <div className="od-dispatch-actions">
                     <button
                       type="button"
                       className="dispatch"
-                      onClick={() => handleDispatchAlert(latestOpenAlert.id)}
-                      disabled={alertActionBusy || !selectedResponderId || latestOpenAlert.status === 'Dispatched'}
+                      onClick={() => handleInvestigateAlert(displayedAlert.id)}
+                      disabled={alertActionBusy || displayedAlert.status === 'Investigating'}
                     >
-                      Dispatch Team
+                      Mark Investigating
+                    </button>
+                    <button
+                      type="button"
+                      className="escalate"
+                      onClick={() => handleEscalateAlert(displayedAlert.id)}
+                      disabled={alertActionBusy || displayedAlert.status === 'Escalated'}
+                    >
+                      Escalate
                     </button>
                     <button
                       type="button"
                       className="resolve"
-                      onClick={() => handleClearAlert(latestOpenAlert.id)}
+                      onClick={() => handleClearAlert(displayedAlert.id)}
                       disabled={alertActionBusy}
                     >
-                      Mark Cleared
+                      Mark Resolved / Cleared
                     </button>
                   </div>
                   {workflowMessage && <p className="od-workflow-note">{workflowMessage}</p>}
@@ -535,37 +753,52 @@ const ObjectDetection = () => {
               )}
             </div>
 
-            <div className="od-card od-ops-card">
-              <div className="od-card-heading">
-                <div>
-                  <span>Console Focus</span>
-                  <h2>Setup Moved Off the Live Screen</h2>
-                </div>
-              </div>
-              <p>
-                Zone thresholds and response-team records now live on a dedicated setup page, so this console stays focused on the current incident.
-              </p>
-              <p className="od-limitation-note">
-                Stock-YOLO limitation: the AI engine analyzes one active source at a time (the browser camera or an uploaded file above) and does not yet switch physical camera streams per inventory selection. The camera picker labels which inventory record the current feed represents; a future custom-trained, multi-stream pipeline would be needed to route each camera's own live stream into detection.
-              </p>
-              <div className="od-ops-actions">
-                <Link className="od-btn-primary od-link-button" to="/detection-settings">Open Detection Setup</Link>
-                <Link className="od-btn-cancel od-link-button" to="/cameras">View Camera Wall</Link>
-              </div>
-            </div>
-
             <div className="od-alert-summary-card">
               <div className="od-card-heading">
                 <div>
-                  <span><Icon name="alert" /> Alert Handoff</span>
-                  <h2>Camera Page Handles Live Alerts</h2>
+                  <span><Icon name="alert" /> Active Alerts</span>
+                  <h2>Latest Detection Alerts</h2>
+                </div>
+                <div className="od-alert-heading-actions">
+                  <button
+                    type="button"
+                    className="od-refresh-btn"
+                    onClick={handleRefreshAlerts}
+                    disabled={alertsRefreshing}
+                    title="Refresh alerts"
+                  >
+                    {alertsRefreshing ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                  <button
+                    type="button"
+                    className="od-clear-all-btn"
+                    onClick={handleClearAllAlerts}
+                    disabled={alertActionBusy || activeAlertCount === 0}
+                  >
+                    Clear All
+                  </button>
                 </div>
               </div>
-              <p>
-                {activeAlertCount === 0
-                  ? 'No active alerts. Live alert review now lives on the Cameras page.'
-                  : `${activeAlertCount} open alert${activeAlertCount === 1 ? '' : 's'} ready for review on the Cameras page.`}
-              </p>
+              <div className="od-live-alert-list">
+                {alerts.filter((alert) => OPEN_ALERT_STATUSES.includes(alert.status)).map((alert) => (
+                  <button
+                    key={alert.id}
+                    type="button"
+                    className={`od-live-alert-item ${displayedAlert?.id === alert.id ? 'active' : ''}`}
+                    onClick={() => setSelectedAlertId(alert.id)}
+                  >
+                    <span>{alertTitle(alert)}</span>
+                    <strong>{alert.status}</strong>
+                    <small>{alert.zone_name} - {alert.camera_location}</small>
+                    <small>{alertSource(alert)}{alert.severity ? ` - ${alert.severity}` : ''}</small>
+                  </button>
+                ))}
+                {activeAlertCount === 0 && <p>No active alerts from Object Detection.</p>}
+              </div>
+              <div className="od-ops-actions">
+                <Link className="od-btn-primary od-link-button" to="/detection-settings">Detection Setup</Link>
+                <Link className="od-btn-cancel od-link-button" to="/camera-inventory">Camera Inventory</Link>
+              </div>
             </div>
           </div>
         </div>

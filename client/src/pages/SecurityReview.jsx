@@ -1,10 +1,44 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import Sidebar from '../components/Sidebar';
+import SecurityLogIcon from '../components/SecurityLogIcon';
 import '../css/Dashboard.css';
 import '../css/Management.css';
+import { API_BASE_URL } from '../constants/api';
+import { getLogTimestamp } from '../constants/securityTimeline';
 
 const REVIEW_STATUSES = ['Pending Review', 'False Positive', 'Escalated', 'Resolved'];
+
+const SG_TIME_ZONE = 'Asia/Singapore';
+
+// "12 Jul 2026" — Singapore calendar date of the event.
+const formatEventDate = (value) => {
+  const date = new Date(value);
+  if (!value || isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('en-SG', {
+    timeZone: SG_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric',
+  });
+};
+
+// "04:32 PM" — Singapore wall-clock time of the event.
+const formatEventTime = (value) => {
+  const date = new Date(value);
+  if (!value || isNaN(date.getTime())) return '';
+  return date
+    .toLocaleTimeString('en-SG', {
+      timeZone: SG_TIME_ZONE, hour: '2-digit', minute: '2-digit', hour12: true,
+    })
+    .replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
+};
+
+// YYYY-MM-DD key of the event in Singapore time (matches the <input type="date"> value).
+const sgDateKey = (value) => {
+  const date = new Date(value);
+  if (!value || isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: SG_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(date);
+};
 
 // FM-only manual review queue for suspicious / critical access logs produced
 // automatically by the V-Patrol facial-recognition engine.
@@ -12,6 +46,7 @@ const SecurityReview = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('Pending Review');
+  const [dateFilter, setDateFilter] = useState(''); // YYYY-MM-DD; empty = all dates (client-side)
   const [drafts, setDrafts] = useState({}); // { [logId]: { reviewStatus, reviewNotes } }
   const [savingId, setSavingId] = useState(null);
   const [notification, setNotification] = useState('');
@@ -22,7 +57,7 @@ const SecurityReview = () => {
     setLoading(true);
     try {
       const query = statusFilter === 'All' ? '?limit=100' : `?status=${encodeURIComponent(statusFilter)}&limit=100`;
-      const res = await axios.get(`/api/security/logs${query}`, {
+      const res = await axios.get(`${API_BASE_URL}/api/security/logs${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setLogs(Array.isArray(res.data) ? res.data : []);
@@ -58,7 +93,7 @@ const SecurityReview = () => {
 
     setSavingId(log.id);
     try {
-      await axios.patch(`/api/security/logs/${log.id}/review`,
+      await axios.patch(`${API_BASE_URL}/api/security/logs/${log.id}/review`,
         { reviewStatus, reviewNotes },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -77,6 +112,11 @@ const SecurityReview = () => {
     return 'status-badge inactive';
   };
 
+  // Client-side date filtering on top of the server-side review-status filter.
+  const visibleLogs = dateFilter
+    ? logs.filter((log) => sgDateKey(getLogTimestamp(log)) === dateFilter)
+    : logs;
+
   return (
     <div className="dashboard-layout">
       <Sidebar />
@@ -86,7 +126,7 @@ const SecurityReview = () => {
             <h1>Security Log Review</h1>
             <p>Manually triage suspicious access events flagged by the AI gantry</p>
           </div>
-          <div className="review-filter" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div className="review-filter" style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             <label htmlFor="statusFilter" style={{ color: '#94a3b8' }}>Filter:</label>
             <select
               id="statusFilter"
@@ -98,6 +138,26 @@ const SecurityReview = () => {
               <option value="All">All</option>
               {REVIEW_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
+            <label htmlFor="reviewDateFilter" style={{ color: '#94a3b8' }}>Filter by date:</label>
+            <input
+              id="reviewDateFilter"
+              type="date"
+              aria-label="Filter by date"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              style={{ padding: '8px', borderRadius: '6px', background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', colorScheme: 'dark' }}
+            />
+            {dateFilter && (
+              <button
+                type="button"
+                className="edit-btn"
+                style={{ margin: 0 }}
+                onClick={() => setDateFilter('')}
+                aria-label="Clear date filter"
+              >
+                Clear date
+              </button>
+            )}
           </div>
         </header>
 
@@ -122,15 +182,29 @@ const SecurityReview = () => {
                 <tr><td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
                   No logs match this filter.
                 </td></tr>
-              ) : logs.map((log) => {
+              ) : visibleLogs.length === 0 ? (
+                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
+                  No security events found for this date.
+                </td></tr>
+              ) : visibleLogs.map((log) => {
                 const draft = drafts[log.id] || {};
+                const eventTimestamp = getLogTimestamp(log);
+                const eventDate = formatEventDate(eventTimestamp);
+                const eventTime = formatEventTime(eventTimestamp);
                 return (
                   <tr key={log.id}>
                     <td data-label="Timestamp" style={{ fontFamily: 'monospace', color: '#cbd5e1' }}>
-                      {log.time || new Date(log.createdAt).toLocaleString('en-SG')}
+                      {eventDate ? (
+                        <>
+                          <div className="review-event-date">{eventDate}</div>
+                          <div className="review-event-time" style={{ color: '#94a3b8' }}>{eventTime}</div>
+                        </>
+                      ) : (
+                        log.time || '—'
+                      )}
                     </td>
                     <td data-label="Event">
-                      <strong>{log.icon} {log.type}</strong>
+                      <strong><SecurityLogIcon log={log} /> {log.type}</strong>
                       <div style={{ color: '#94a3b8', fontSize: '0.85em' }}>{log.desc}</div>
                     </td>
                     <td data-label="Personnel">{log.personnelName || <em style={{ color: '#64748b' }}>Unknown</em>}</td>

@@ -24,7 +24,21 @@ const app = express();
 app.use(express.json());
 app.use("/api/bookings", bookingRouter);
 
-const tokenFor = (role) => jwt.sign({ id: 7, role, email: `${role}@harrison.com` }, process.env.APP_SECRET);
+// verifyToken is now DB-backed: it re-reads the account via User.findByPk and
+// the DB role is authoritative. Each role therefore needs its own id, and the
+// mocked User table below is keyed by those ids. Tenant keeps id 7 so the
+// tenantId-scoping assertions (tenantId: 7) remain unchanged.
+const ID_BY_ROLE = { FM: 1, Staff: 9, Tenant: 7 };
+const DB_USERS = {
+  1: { id: 1, role: "FM", isActive: true },
+  7: { id: 7, role: "Tenant", isActive: true },
+  // managerId feeds resolveTenantId for Staff-created bookings (route-level findByPk).
+  9: { id: 9, role: "Staff", isActive: true, managerId: 50 },
+};
+const mockDbUsers = () =>
+  mockUser.findByPk.mockImplementation((id) => Promise.resolve(DB_USERS[id] || null));
+
+const tokenFor = (role) => jwt.sign({ id: ID_BY_ROLE[role], role, email: `${role}@harrison.com` }, process.env.APP_SECRET);
 
 const validBody = {
   transport_company: "NinjaVan",
@@ -34,7 +48,10 @@ const validBody = {
 };
 
 describe("Booking routes", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockDbUsers(); // re-arm the DB-backed auth lookup after clearing mocks
+  });
 
   test("POST /create rejects missing required fields (400)", async () => {
     const res = await request(app)
@@ -65,8 +82,8 @@ describe("Booking routes", () => {
   });
 
   test("Staff CAN create a booking, linked to their tenant/unit (managerId)", async () => {
-    // Staff token id = 7; their managerId (tenant) = 50
-    mockUser.findByPk.mockResolvedValue({ managerId: 50 });
+    // Staff token id = 9; DB_USERS[9].managerId (their tenant) = 50 — the same
+    // id-keyed findByPk serves both the auth lookup and resolveTenantId.
     mockBooking.create.mockResolvedValue({ id: 3, ...validBody, booking_ref: "FG-STF", status: "Pending" });
     const res = await request(app)
       .post("/api/bookings/create")
@@ -207,10 +224,29 @@ describe("Booking routes", () => {
     expect(res.status).toBe(200);
     expect(update).toHaveBeenCalledWith({ status: "Cancelled" });
   });
+
+  test("PATCH /:id/cancel still succeeds when the WhatsApp notify throws (non-fatal)", async () => {
+    const update = jest.fn().mockResolvedValue(true);
+    mockBooking.findByPk.mockResolvedValue({ id: 1, ...validBody, booking_ref: "FG-AAA", tenantId: 7, update });
+    const waSpy = jest.spyOn(whatsapp, "sendBookingCancelled").mockRejectedValueOnce(new Error("WhatsApp API down"));
+    try {
+      const res = await request(app)
+        .patch("/api/bookings/1/cancel")
+        .set("Authorization", `Bearer ${tokenFor("FM")}`);
+      expect(res.status).toBe(200);
+      expect(update).toHaveBeenCalledWith({ status: "Cancelled" });
+      expect(res.body.whatsapp).toBeNull();
+    } finally {
+      waSpy.mockRestore();
+    }
+  });
 });
 
 describe("Gate scan (entry/exit)", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockDbUsers(); // re-arm the DB-backed auth lookup after clearing mocks
+  });
 
   const bookingWith = (status, extra = {}) => ({
     id: 1, ...validBody, booking_ref: "FG-AAA", status,

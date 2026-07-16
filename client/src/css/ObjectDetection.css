@@ -379,12 +379,37 @@
     border-top: 1px dashed #2d364f;
 }
 
+.od-stream-placeholder-stack {
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+    padding: 20px;
+}
+
 .od-stream-img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
     opacity: 0.74;
+}
+
+.od-video-stage-hardware {
+    aspect-ratio: 4 / 3;
+    background: #02040a;
+}
+
+.od-stream-img-hardware {
+    object-fit: contain;
+    object-position: center;
+    padding: 10px 10px 52px;
+    box-sizing: border-box;
+    opacity: 0.9;
+}
+
+.od-video-stage-hardware .od-video-footer {
+    min-height: 42px;
+    background: rgba(5, 7, 13, 0.7);
 }
 
 .od-video-stage::after {
@@ -584,6 +609,15 @@
     text-transform: none;
 }
 
+.od-snapshot-link {
+    display: inline-flex;
+    margin-top: 12px;
+    color: #22d3ee;
+    font-size: 0.8rem;
+    font-weight: 750;
+    text-decoration: none;
+}
+
 .od-incident-empty {
     min-height: 112px;
     margin-top: 16px;
@@ -656,6 +690,7 @@
 }
 
 .od-resolution-actions .green,
+.od-resolution-actions .resolve,
 .od-dispatch-actions .resolve {
     border-color: rgba(34, 197, 94, 0.42);
     color: #22c55e;
@@ -665,6 +700,17 @@
     background: #f43f5e;
     border-color: #f43f5e;
     color: #fff;
+}
+
+.od-resolution-actions .dispatch {
+    border-color: rgba(245, 158, 11, 0.42);
+    color: #f59e0b;
+}
+
+.od-resolution-actions .escalate {
+    background: rgba(244, 63, 94, 0.13);
+    border-color: rgba(244, 63, 94, 0.48);
+    color: #fb7185;
 }
 
 .od-workflow-note {
@@ -890,6 +936,116 @@
     color: #8fa4c3;
     font-size: 0.86rem;
     line-height: 1.45;
+    text-align: center;
+}
+
+.od-alert-summary-card .od-card-heading {
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.od-alert-heading-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.od-clear-all-btn,
+.od-refresh-btn {
+    flex-shrink: 0;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 7px 14px;
+    cursor: pointer;
+}
+
+.od-clear-all-btn {
+    border: 1px solid #fb7185;
+    background: rgba(251, 113, 133, 0.1);
+    color: #fb7185;
+}
+
+.od-clear-all-btn:hover:not(:disabled) {
+    background: rgba(251, 113, 133, 0.2);
+}
+
+.od-refresh-btn {
+    border: 1px solid rgba(14, 165, 233, 0.45);
+    background: rgba(14, 165, 233, 0.1);
+    color: #22d3ee;
+}
+
+.od-refresh-btn:hover:not(:disabled) {
+    background: rgba(14, 165, 233, 0.2);
+}
+
+.od-clear-all-btn:disabled,
+.od-refresh-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.od-live-alert-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+    max-height: 320px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.od-live-alert-list:empty,
+.od-live-alert-list:has(> p:only-child) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 120px;
+}
+
+.od-live-alert-item {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 10px;
+    border: 1px solid #26334d;
+    border-left: 3px solid #fb7185;
+    border-radius: 8px;
+    background: #0a0f1d;
+    color: inherit;
+    padding: 10px 12px;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+}
+
+.od-live-alert-item:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.od-live-alert-item.active {
+    border-color: #fb7185;
+    background: #171226;
+    box-shadow: 0 0 0 1px #fb7185 inset;
+}
+
+.od-live-alert-item span {
+    color: #f8fafc;
+    font-size: 0.84rem;
+    font-weight: 800;
+}
+
+.od-live-alert-item strong {
+    color: #fb7185;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+}
+
+.od-live-alert-item small {
+    grid-column: 1 / -1;
+    color: #8fa4c3;
+    font-size: 0.76rem;
 }
 
 .od-ops-card p {
@@ -903,6 +1059,7 @@
     display: grid;
     grid-template-columns: 1fr;
     gap: 10px;
+    margin-top: 14px;
 }
 
 .od-settings-grid {
@@ -912,12 +1069,94 @@
     align-items: start;
 }
 
+.od-settings-grid-single {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 .od-settings-card {
-    min-height: 620px;
+    min-height: 0;
 }
 
 .od-zone-list.relaxed {
-    max-height: 430px;
+    max-height: none;
+}
+
+.od-rule-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 18px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid #202c44;
+}
+
+.od-rule-form .od-checkbox-row,
+.od-rule-form .od-advanced-details,
+.od-rule-form .od-form-error,
+.od-rule-form .od-btn-primary {
+    grid-column: 1 / -1;
+}
+
+.od-advanced-details {
+    border: 1px solid #26334d;
+    border-radius: 8px;
+    background: rgba(8, 13, 24, 0.68);
+}
+
+.od-advanced-details summary {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    color: #9fb0cc;
+    font-size: 0.78rem;
+    font-weight: 850;
+    cursor: pointer;
+}
+
+.od-advanced-details .od-input {
+    margin: 0 12px 10px;
+    width: calc(100% - 24px);
+}
+
+.od-zone-summary-list {
+    gap: 12px;
+}
+
+.od-zone-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.od-zone-summary-grid span {
+    color: #7086a6;
+    font-size: 0.72rem;
+    font-weight: 750;
+    text-transform: uppercase;
+}
+
+.od-zone-summary-grid strong {
+    display: block;
+    margin-top: 3px;
+    color: #e5edf8;
+    font-size: 0.82rem;
+    font-weight: 750;
+    text-transform: none;
+}
+
+.od-inline-map {
+    grid-template-columns: minmax(0, 1fr) 96px;
+    margin-top: 12px;
+}
+
+.od-zone-details {
+    margin-top: 12px;
+}
+
+.od-zone-details .od-zone-meta {
+    padding: 0 12px 10px;
 }
 
 .od-alert-count {
@@ -1074,7 +1313,10 @@
     .od-incident-meta,
     .od-resolution-actions,
     .od-dispatch-actions,
-    .od-alert-tabs {
+    .od-alert-tabs,
+    .od-rule-form,
+    .od-zone-summary-grid,
+    .od-inline-map {
         grid-template-columns: 1fr;
     }
 
@@ -1087,5 +1329,54 @@
 
     .od-video-footer span:last-child {
         text-align: left;
+    }
+}
+
+/* =========================================
+   TABLET & MOBILE READABILITY / TOUCH (added — does not affect desktop >1024)
+   Object Detection + Detection Setup share this stylesheet. The top-level grids
+   already collapse at <=1180; these rules fix the remaining tablet/phone gaps:
+   the source-control row overflowing, the camera picker running off-screen, tiny
+   badge/label fonts, and sub-44px touch targets.
+   ========================================= */
+@media (max-width: 1024px) {
+    /* Source-mode buttons + camera picker must wrap instead of forcing one wide row. */
+    .od-source-controls {
+        flex-wrap: wrap;
+    }
+    .od-camera-picker {
+        margin-left: 0;
+    }
+
+    /* Raise the smallest badge/meta labels to a tablet-legible ~0.8rem floor. */
+    .od-card-heading > div > span,
+    .od-stream-badges span,
+    .od-detection-box span,
+    .od-incident-title > div > span,
+    .od-incident-meta span,
+    .od-btn-icon,
+    .od-live-alert-item strong,
+    .od-zone-summary-grid span,
+    .od-alert-count,
+    .od-alert-status-badge,
+    .od-btn-clear {
+        font-size: 0.8rem;
+    }
+}
+
+@media (max-width: 768px) {
+    /* Camera selection drops to its own full-width row so it can never run off the
+       edge of the card / viewport on a phone. */
+    .od-camera-picker {
+        width: 100%;
+        min-width: 0;
+        margin-left: 0;
+    }
+
+    /* Comfortable ~44px touch targets for the source-mode controls. */
+    .od-source-controls button,
+    .od-source-controls label {
+        min-height: 44px;
+        flex: 1 1 auto;
     }
 }

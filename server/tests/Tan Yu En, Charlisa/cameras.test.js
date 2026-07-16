@@ -126,6 +126,20 @@ describe("POST /api/cameras", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/zone/i);
   });
+
+  test("zone already mapped to another camera returns 409 (one camera per rule)", async () => {
+    // The zone-exclusivity check runs before the camera_code duplicate check —
+    // an existing camera already holds this zone.
+    mockCamera.findOne.mockResolvedValue({ id: 42, zone_id: 5 });
+    mockMonitoringZone.findByPk.mockResolvedValue({ id: 5 });
+    const res = await request(app)
+      .post("/api/cameras")
+      .set("Authorization", `Bearer ${fmToken}`)
+      .send({ ...validPayload, zone_id: 5 });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/zone/i);
+    expect(mockCamera.create).not.toHaveBeenCalled();
+  });
 });
 
 describe("PUT /api/cameras/:id", () => {
@@ -157,6 +171,32 @@ describe("PUT /api/cameras/:id", () => {
       .set("Authorization", `Bearer ${fmToken}`)
       .send({ status: "Online" });
     expect(res.status).toBe(404);
+  });
+
+  test("mapping a camera to a zone already held by ANOTHER camera returns 409", async () => {
+    const instance = { id: 1, camera_code: "CAM-10", update: jest.fn().mockResolvedValue() };
+    mockCamera.findByPk.mockResolvedValue(instance);
+    mockMonitoringZone.findByPk.mockResolvedValue({ id: 5 });
+    mockCamera.findOne.mockResolvedValue({ id: 77, zone_id: 5 }); // a different camera holds zone 5
+    const res = await request(app)
+      .put("/api/cameras/1")
+      .set("Authorization", `Bearer ${fmToken}`)
+      .send({ zone_id: 5 });
+    expect(res.status).toBe(409);
+    expect(instance.update).not.toHaveBeenCalled();
+  });
+
+  test("a camera can re-save/keep its OWN zone_id (excludeId lets it through)", async () => {
+    const instance = { id: 1, camera_code: "CAM-10", update: jest.fn().mockResolvedValue() };
+    mockCamera.findByPk.mockResolvedValue(instance);
+    mockMonitoringZone.findByPk.mockResolvedValue({ id: 5 });
+    mockCamera.findOne.mockResolvedValue({ id: 1, zone_id: 5 }); // this camera itself
+    const res = await request(app)
+      .put("/api/cameras/1")
+      .set("Authorization", `Bearer ${fmToken}`)
+      .send({ zone_id: 5 });
+    expect(res.status).toBe(200);
+    expect(instance.update).toHaveBeenCalledWith(expect.objectContaining({ zone_id: 5 }));
   });
 });
 

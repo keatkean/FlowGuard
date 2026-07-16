@@ -1,0 +1,12 @@
+# SecurePi + FlowGuard loading bay preset.
+# Usage:
+#   python securePi.py @flowguard-loading-bay.args --headless
+
+--unattended-time 60
+--proximity 120
+--snapshot-dir alerts/loading-bay
+--bag-labels backpack handbag suitcase
+--flowguard-device-id securepi-loading-bay-01
+--flowguard-zone-name Loading Bay
+--flowguard-camera-location Loading Bay Camera 01
+--flowguard-severity High

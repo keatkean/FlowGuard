@@ -1,10 +1,31 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import BlockIcon from '@mui/icons-material/Block';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import CancelIcon from '@mui/icons-material/Cancel';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import Sidebar from '../components/Sidebar';
+import SafeMuiIcon from '../components/SafeMuiIcon';
 import PasswordInput from '../components/PasswordInput';
 import '../css/Dashboard.css';
 import '../css/Users.css';
+import { API_BASE_URL } from '../constants/api';
+
+// Compact badge + separate readable description — never one long combined label.
+const ROLE_META = {
+  FM: { badge: 'FM', description: 'Facilities Manager' },
+  Tenant: { badge: 'Tenant', description: 'Unit Owner' },
+  Staff: { badge: 'Staff', description: 'Worker' }
+};
+
+const emptyFilters = {
+  query: '',
+  role: 'All',
+  status: 'All',
+  faceId: 'All'
+};
 
 const Users = () => {
   const navigate = useNavigate();
@@ -12,20 +33,73 @@ const Users = () => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState({ isOpen: false, user: null, action: null });
-  const [notification, setNotification] = useState(location.state?.notice || "");
+  const [confirmText, setConfirmText] = useState('');
+  const [modalError, setModalError] = useState('');
+  const [notification, setNotification] = useState(location.state?.notice || '');
+  const [filters, setFilters] = useState(emptyFilters);
 
-  const token = localStorage.getItem("accessToken");
-  const currentUserId = localStorage.getItem("userId");
-  const role = localStorage.getItem("userRole");
+  const token = localStorage.getItem('accessToken');
+  const currentUserId = localStorage.getItem('userId');
+  const role = localStorage.getItem('userRole');
 
-  // Manual "Add Tenant" modal (FM only)
   const [addOpen, setAddOpen] = useState(false);
   const [newUser, setNewUser] = useState({ name: '', email: '', password: '' });
   const [addSubmitting, setAddSubmitting] = useState(false);
   const [addError, setAddError] = useState('');
 
-  const onNewField = (e) => setNewUser(prev => ({ ...prev, [e.target.name]: e.target.value }));
-  const openAdd = () => { setAddError(''); setNewUser({ name: '', email: '', password: '' }); setAddOpen(true); };
+  const fetchUsers = async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/user`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setUsers(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      console.error('Database sync failed:', error);
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  useEffect(() => {
+    if (!notification) return undefined;
+    const timer = setTimeout(() => setNotification(''), 4000);
+    return () => clearTimeout(timer);
+  }, [notification]);
+
+  const summary = useMemo(() => ({
+    total: users.length,
+    active: users.filter((u) => u.isActive !== false).length,
+    suspended: users.filter((u) => u.isActive === false).length,
+    enrolled: users.filter((u) => Boolean(u.isEnrolled)).length
+  }), [users]);
+
+  const filteredUsers = useMemo(() => users.filter((user) => {
+    const query = filters.query.trim().toLowerCase();
+    const matchesQuery = !query
+      || user.name?.toLowerCase().includes(query)
+      || user.email?.toLowerCase().includes(query);
+    const matchesRole = filters.role === 'All' || user.role === filters.role;
+    const matchesStatus = filters.status === 'All'
+      || (filters.status === 'Active' ? user.isActive !== false : user.isActive === false);
+    const matchesFaceId = filters.faceId === 'All'
+      || (filters.faceId === 'Enrolled' ? Boolean(user.isEnrolled) : !user.isEnrolled);
+    return matchesQuery && matchesRole && matchesStatus && matchesFaceId;
+  }), [users, filters]);
+
+  const onNewField = (e) => setNewUser((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  const onFilterChange = (e) => setFilters((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+
+  const openAdd = () => {
+    setAddError('');
+    setNewUser({ name: '', email: '', password: '' });
+    setAddOpen(true);
+  };
   const closeAdd = () => setAddOpen(false);
 
   const createTenant = async (e) => {
@@ -33,7 +107,7 @@ const Users = () => {
     setAddSubmitting(true);
     setAddError('');
     try {
-      await axios.post('/user/manual-create', newUser, { headers: { Authorization: `Bearer ${token}` } });
+      await axios.post(`${API_BASE_URL}/user/manual-create`, newUser, { headers: { Authorization: `Bearer ${token}` } });
       setAddOpen(false);
       setNotification(`Tenant account created for ${newUser.name}.`);
       fetchUsers();
@@ -44,115 +118,149 @@ const Users = () => {
     }
   };
 
-  const fetchUsers = async () => {
-    setLoading(true); 
-    try {
-      const response = await axios.get('/user', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (Array.isArray(response.data)) {
-        setUsers(response.data);
-      } else {
-        setUsers([]);
-      }
-    } catch (error) {
-      console.error("Database sync failed:", error);
-      setUsers([]); 
-    } finally {
-      setLoading(false); 
-    }
-  };
-
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
-  useEffect(() => {
-    if (!notification) return;
-    const timer = setTimeout(() => setNotification(""), 4000);
-    return () => clearTimeout(timer);
-  }, [notification]);
-
   const openModal = (user, action = 'suspend') => {
+    setConfirmText('');
+    setModalError('');
     setModal({ isOpen: true, user, action });
   };
 
   const closeModal = () => {
     setModal({ isOpen: false, user: null, action: null });
+    setConfirmText('');
+    setModalError('');
   };
 
   const handleConfirmAction = async () => {
     const { id, isActive, name } = modal.user;
+    setModalError('');
+
+    if (modal.action === 'delete' && confirmText !== name) {
+      setModalError(`Type ${name} to confirm permanent off-boarding.`);
+      return;
+    }
 
     try {
       if (modal.action === 'delete') {
-        await axios.delete(`/user/${id}`, {
+        await axios.delete(`${API_BASE_URL}/user/${id}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
-
-        setUsers(prevUsers => prevUsers.filter(u => u.id !== id));
+        await fetchUsers();
         setNotification(`${name} was permanently removed from FlowGuard.`);
         closeModal();
         return;
       }
 
-      await axios.put(`/user/suspend/${id}`, {}, {
+      await axios.put(`${API_BASE_URL}/user/suspend/${id}`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      
-      setUsers(prevUsers => 
-        prevUsers.map(u => u.id === id ? { ...u, isActive: !isActive } : u)
-      );
-      
+      setUsers((prevUsers) => prevUsers.map((u) => (u.id === id ? { ...u, isActive: !isActive } : u)));
       closeModal();
     } catch (error) {
-      alert(`Failed to ${modal.action === 'delete' ? 'remove' : 'update access for'} ${name}.`);
+      setModalError(error.response?.data?.message || error.response?.data?.error || `Failed to ${modal.action === 'delete' ? 'remove' : 'update access for'} ${name}.`);
       console.error(error);
-      closeModal();
     }
   };
+
+  const renderRoleBadge = (userRole) => {
+    const meta = ROLE_META[userRole] || { badge: String(userRole), description: '' };
+    return (
+      <div className="role-cell">
+        <span className={`role-badge role-${String(userRole).toLowerCase()}`}>{meta.badge}</span>
+        {meta.description && <span className="role-description">{meta.description}</span>}
+      </div>
+    );
+  };
+
+  const renderStatusBadge = (user) => (
+    <span className={`account-status-badge ${user.isActive === false ? 'suspended' : 'active'}`} role="status">
+      {user.isActive === false ? 'Suspended' : 'Active'}
+    </span>
+  );
+
+  const renderFaceIdTag = (user) => (
+    <span className={`presence-tag ${user.isEnrolled ? 'on-site' : 'off-site'}`} title={user.isEnrolled ? 'A protected biometric template is enrolled' : 'No Face ID enrolled yet'}>
+      {user.isEnrolled
+        ? <><SafeMuiIcon icon={CheckCircleIcon} fontSize="small" aria-hidden="true" /> Enrolled</>
+        : <><SafeMuiIcon icon={CancelIcon} fontSize="small" aria-hidden="true" /> Not Enrolled</>}
+    </span>
+  );
+
+  const formatJoined = (user) => new Date(user.createdAt).toLocaleDateString('en-SG');
+
+  // Shared action controls so the desktop table and the responsive card list
+  // render the exact same handlers/labels — no duplicated business logic.
+  // Face ID enrol/re-enrol intentionally lives in the enrolment flow and
+  // Settings — never as a row/card action here.
+  const renderUserActions = (u, isSelf) => (
+    <div className="action-button-group" aria-label={`Actions for ${u.name}`}>
+      <button className="action-btn action-neutral" onClick={() => navigate(`/user-logs/${u.id}`)}>
+        <SafeMuiIcon icon={VisibilityIcon} fontSize="inherit" aria-hidden="true" />
+        View Logs
+      </button>
+      <button className={`action-btn ${u.isActive === false ? 'action-restore' : 'action-warning'} ${isSelf ? 'disabled-action' : ''}`} onClick={() => !isSelf && openModal(u, 'suspend')} disabled={isSelf}>
+        <SafeMuiIcon icon={u.isActive === false ? CheckCircleIcon : BlockIcon} fontSize="inherit" aria-hidden="true" />
+        {u.isActive === false ? 'Reactivate' : 'Suspend'}
+      </button>
+      <button className={`action-btn action-danger ${isSelf ? 'disabled-action' : ''}`} onClick={() => !isSelf && openModal(u, 'delete')} disabled={isSelf}>
+        <SafeMuiIcon icon={DeleteOutlineIcon} fontSize="inherit" aria-hidden="true" />
+        Delete
+      </button>
+    </div>
+  );
 
   return (
     <div className="dashboard-layout">
       <Sidebar />
 
       <main className="dashboard-main">
-        {/* Security Modal Logic */}
         {modal.isOpen && (
           <div className="modal-overlay">
             <div className={`modal-content security-modal ${modal.action === 'delete' ? 'delete-variant' : ''}`}>
               <div className="modal-header">
-                <span className="modal-icon">{modal.user.isActive ? '⚠️' : '🔓'}</span>
+                <span className="modal-icon">{modal.action === 'delete' ? '!' : modal.user.isActive ? '!' : '+'}</span>
                 <h3>{modal.action === 'delete' ? 'Permanent Off-boarding' : 'Security Confirmation'}</h3>
               </div>
-              <p>
-                {modal.action === 'delete'
-                  ? <>Permanently remove <strong>{modal.user.name}</strong> from FlowGuard? This removes their login access and biometric profile from the database.</>
-                  : <>Are you sure you want to <strong>{modal.user.isActive ? 'Suspend' : 'Reactivate'}</strong> access for <strong>{modal.user.name}</strong>?</>}
-              </p>
+              {modal.action === 'delete' ? (
+                <>
+                  <p>
+                    Permanently remove login access, Face ID enrolment and operational access for this user (<strong>{modal.user.name}</strong>)?
+                  </p>
+                  <p className="delete-warning-copy">
+                    Attendance records will be deleted, linked security logs will remain anonymised, and operational bookings will be safely unlinked where applicable.
+                  </p>
+                  <label className="confirm-name-field">
+                    Type the user's full name to confirm
+                    <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder={modal.user.name} />
+                  </label>
+                </>
+              ) : (
+                <p>
+                  Are you sure you want to <strong>{modal.user.isActive ? 'Suspend' : 'Reactivate'}</strong> access for <strong>{modal.user.name}</strong>?
+                </p>
+              )}
+              {modalError && <div className="modal-error" role="alert">{modalError}</div>}
               <div className="modal-actions">
                 <button className="cancel-btn" onClick={closeModal}>Cancel</button>
-                <button 
+                <button
                   className={`confirm-btn ${modal.action === 'delete' ? 'delete-btn' : modal.user.isActive ? 'suspend-btn' : 'reactivate-btn'}`}
                   onClick={handleConfirmAction}
+                  disabled={modal.action === 'delete' && confirmText !== modal.user.name}
                 >
-                  {modal.action === 'delete' ? 'Confirm Deletion' : `Confirm ${modal.user.isActive ? 'Suspension' : 'Reactivation'}`}
+                  {modal.action === 'delete' ? 'Permanently Delete' : `Confirm ${modal.user.isActive ? 'Suspension' : 'Reactivation'}`}
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Manual Add Tenant modal (FM only) */}
         {addOpen && (
           <div className="modal-overlay" onClick={closeAdd}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
-                <span className="modal-icon">➕</span>
+                <span className="modal-icon">+</span>
                 <h3>Add Tenant Account</h3>
               </div>
-              {addError && <div className="add-user-error">⚠️ {addError}</div>}
+              {addError && <div className="add-user-error">{addError}</div>}
               <form className="add-user-form" onSubmit={createTenant}>
                 <div>
                   <label>Full Name</label>
@@ -177,118 +285,130 @@ const Users = () => {
           </div>
         )}
 
-        {notification && (
-          <div className="users-toast">
-            {notification}
-          </div>
-        )}
+        {notification && <div className="users-toast">{notification}</div>}
 
         <div className="users-container">
-          {/* Header titles are wrapped to maintain consistency across the app */}
-          <header className="dashboard-header">
+          <header className="dashboard-header users-header">
             <div className="header-titles">
-              <h1>User Access Management</h1>
-              <p>Security oversight for personnel roles and factory presence</p>
+              <h1>User Management</h1>
+              <p>Manage user accounts, roles, Face ID enrolment and access status.</p>
             </div>
-            {role === 'FM' && (
-              <button className="add-user-btn" onClick={openAdd}>+ Add Tenant</button>
-            )}
+            {role === 'FM' && <button className="add-user-btn" onClick={openAdd}>+ Add Tenant</button>}
           </header>
 
-          <div className="table-wrapper">
-            {loading ? (
-              <p style={{ padding: '40px', color: '#94a3b8', textAlign: 'center' }}>
-                Syncing with FlowGuard Database...
-              </p>
-            ) : (
-              <table className="users-table">
-                <thead>
-                  <tr>
-                    <th>Personnel</th>
-                    <th>System Role</th>
-                    <th>Email Address</th> 
-                    <th>Physical Presence</th>
-                    <th>Joined Date</th> 
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.length === 0 ? (
-                    <tr>
-                      <td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
-                        No users found in database.
-                      </td>
-                    </tr>
-                  ) : (
-                    users.map((u) => {
-                      const isSelf = String(u.id) === String(currentUserId);
+          <section className="user-summary-grid" aria-label="User summary">
+            <div><span>Total Users</span><strong>{summary.total}</strong></div>
+            <div><span>Active</span><strong>{summary.active}</strong></div>
+            <div><span>Suspended</span><strong>{summary.suspended}</strong></div>
+            <div><span>Face ID Enrolled</span><strong>{summary.enrolled}</strong></div>
+          </section>
 
+          <section className="user-filter-bar" aria-label="User filters">
+            <input name="query" value={filters.query} onChange={onFilterChange} placeholder="Search name or email" aria-label="Search by name or email" />
+            <select name="role" value={filters.role} onChange={onFilterChange} aria-label="Filter by role">
+              <option>All</option><option>FM</option><option>Tenant</option><option>Staff</option>
+            </select>
+            <select name="status" value={filters.status} onChange={onFilterChange} aria-label="Filter by status">
+              <option>All</option><option>Active</option><option>Suspended</option>
+            </select>
+            <select name="faceId" value={filters.faceId} onChange={onFilterChange} aria-label="Filter by Face ID">
+              <option>All</option><option>Enrolled</option><option>Not Enrolled</option>
+            </select>
+          </section>
+
+          {loading ? (
+            <p className="users-loading-state">Syncing with FlowGuard Database...</p>
+          ) : filteredUsers.length === 0 ? (
+            <p className="users-empty-state">No users match the current filters.</p>
+          ) : (
+            <>
+              {/* Desktop / laptop (>= 1025px): full data table. */}
+              <div className="table-wrapper users-desktop-table">
+                <table className="users-table">
+                  <thead>
+                    <tr>
+                      <th>Personnel</th>
+                      <th>Role</th>
+                      <th>Email</th>
+                      <th>Status</th>
+                      <th>Face ID</th>
+                      <th>Joined</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredUsers.map((u) => {
+                      const isSelf = String(u.id) === String(currentUserId);
                       return (
                         <tr key={u.id} className={u.isActive === false ? 'row-suspended' : ''}>
                           <td className="user-name-cell" data-label="Personnel">
                             <div className="user-identity">
-                              <div className="user-avatar-small">
-                                {u.name.charAt(0).toUpperCase()}
-                              </div>
+                              <div className="user-avatar-small">{u.name?.charAt(0).toUpperCase()}</div>
                               <span className="user-name-text">
-                                {u.name} {isSelf && <span className="self-tag">(You)</span>}
+                                <span className="user-name-value">{u.name}</span>
+                                {isSelf && <span className="self-tag">(You)</span>}
                               </span>
                             </div>
                           </td>
-                          <td data-label="System Role">
-                            <span className={`role-badge role-${u.role.toLowerCase()}`}>
-                              {u.role === 'FM' ? 'Facilities Manager' : u.role === 'Tenant' ? 'Tenant' : 'Staff'}
-                            </span>
-                          </td>
-                          <td className="access-cell" data-label="Email Address">{u.email}</td>
-                          <td data-label="Presence">
-                            <div className={`presence-tag ${u.locationStatus === 'On-Site' ? 'on-site' : 'off-site'}`}>
-                              {u.locationStatus === 'On-Site' ? (
-                                <><span>📍</span> On-Site</>
-                              ) : (
-                                <><span>🏠</span> Off-Site</>
-                              )}
-                            </div>
-                          </td>
-                          <td className="time-cell" data-label="Joined Date">
-                            {new Date(u.createdAt).toLocaleDateString('en-SG')}
-                          </td>
-                          <td className="actions-cell" data-label="Actions">
-                            <div className="action-button-group" aria-label={`Actions for ${u.name}`}>
-                              <button 
-                                className="action-btn action-neutral"
-                                onClick={() => navigate(`/user-logs/${u.id}`)}
-                              >
-                                Logs
-                              </button>
-
-                              <button
-                                className={`action-btn ${u.isActive === false ? 'action-restore' : 'action-warning'} ${isSelf ? 'disabled-action' : ''}`}
-                                onClick={() => !isSelf && openModal(u, 'suspend')}
-                                disabled={isSelf}
-                                title={isSelf ? "Self-suspension restricted" : ""}
-                              >
-                                {u.isActive === false ? 'Reactivate' : 'Suspend'}
-                              </button>
-
-                              <button
-                                className={`action-btn action-danger ${isSelf ? 'disabled-action' : ''}`}
-                                onClick={() => !isSelf && openModal(u, 'delete')}
-                                disabled={isSelf}
-                                title={isSelf ? "Self-deletion restricted" : "Permanently delete user"}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
+                          <td data-label="Role">{renderRoleBadge(u.role)}</td>
+                          <td className="access-cell email-cell" data-label="Email" title={u.email}>{u.email}</td>
+                          <td data-label="Status">{renderStatusBadge(u)}</td>
+                          <td data-label="Face ID">{renderFaceIdTag(u)}</td>
+                          <td className="time-cell" data-label="Joined">{formatJoined(u)}</td>
+                          <td className="actions-cell" data-label="Actions">{renderUserActions(u, isSelf)}</td>
                         </tr>
                       );
-                    })
-                  )}
-                </tbody>
-              </table>
-            )}
-          </div>
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Tablet / mobile (<= 1024px): dedicated responsive card list.
+                  Same filteredUsers, same handlers — a distinct DOM instead of
+                  a CSS table-to-card conversion. */}
+              <ul className="user-card-list" aria-label="User accounts">
+                {filteredUsers.map((u) => {
+                  const isSelf = String(u.id) === String(currentUserId);
+                  return (
+                    <li key={u.id} className={`user-card ${u.isActive === false ? 'user-card-suspended' : ''}`}>
+                      <div className="user-card-head">
+                        <div className="user-avatar-small">{u.name?.charAt(0).toUpperCase()}</div>
+                        <div className="user-card-identity">
+                          <span className="user-card-name">
+                            {u.name}
+                            {isSelf && <span className="self-tag">(You)</span>}
+                          </span>
+                          <div className="user-card-badges">
+                            {renderRoleBadge(u.role)}
+                            {renderStatusBadge(u)}
+                          </div>
+                        </div>
+                      </div>
+
+                      <dl className="user-card-meta">
+                        <div className="user-card-field field-email">
+                          <dt>Email</dt>
+                          <dd className="email-value">{u.email}</dd>
+                        </div>
+                        <div className="user-card-field">
+                          <dt>Face ID</dt>
+                          <dd>{renderFaceIdTag(u)}</dd>
+                        </div>
+                        <div className="user-card-field">
+                          <dt>Joined</dt>
+                          <dd>{formatJoined(u)}</dd>
+                        </div>
+                      </dl>
+
+                      <div className="user-card-footer">
+                        {renderUserActions(u, isSelf)}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
         </div>
       </main>
     </div>

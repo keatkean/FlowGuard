@@ -424,3 +424,9 @@ test.jpg
 .env
 C:\Users\Admin\Downloads\FlowGuard\ai-service\.venv
 .claude
+
+# Environment files — never commit real secrets; keep sanitized examples.
+.env.*
+!.env.example
+server/.env
+client/.env.local

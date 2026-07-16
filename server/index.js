@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
@@ -6,10 +6,11 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Temporarily open CORS to allow phone/local-network testing.
-app.use(cors({
-    origin: '*'
-}));
+// Environment-based CORS allowlist (CLIENT_URL + ALLOWED_ORIGINS). When no
+// origins are configured it falls back to allow-all for local/LAN development -
+// configure CLIENT_URL (and optionally ALLOWED_ORIGINS) for any deployment.
+const { buildCorsOptions } = require('./middlewares/corsOptions');
+app.use(cors(buildCorsOptions()));
 
 // Simple Route
 app.get("/", (req, res) => {
@@ -25,6 +26,8 @@ const camerasRoute = require('./routes/cameras');
 app.use("/api/cameras", camerasRoute);
 const detectionAlertsRoute = require('./routes/detectionAlerts');
 app.use("/api/detection-alerts", detectionAlertsRoute);
+const edgeDetectionAlertsRoute = require('./routes/edgeDetectionAlerts');
+app.use("/api/edge", edgeDetectionAlertsRoute);
 const userRoute = require('./routes/user');
 app.use("/user", userRoute);
 const bookingRoutes = require('./routes/booking');
@@ -33,17 +36,24 @@ const securityRoutes = require('./routes/security');
 app.use('/api/security', securityRoutes);
 const attendanceRoutes = require('./routes/attendance');
 app.use('/api/attendance', attendanceRoutes);
+const dashboardRoutes = require('./routes/dashboard');
+app.use('/api/dashboard', dashboardRoutes);
+const facialRecognitionRoutes = require('./routes/facialRecognition');
+app.use('/api/facial-recognition', facialRecognitionRoutes);
 const supportRoutes = require('./routes/support');
 app.use('/api/support', supportRoutes);
 
-// Fallback handlers — MUST stay last, after every route is mounted.
+// Fallback handlers - MUST stay last, after every route is mounted.
 const { notFound, errorHandler } = require('./middlewares/errorHandlers');
-app.use(notFound);       // unknown route → 404 JSON
-app.use(errorHandler);   // anything thrown/forwarded → 500 JSON (no stack leak)
+app.use(notFound);       // unknown route -> 404 JSON
+app.use(errorHandler);   // anything thrown/forwarded -> 500 JSON (no stack leak)
 
 // Sync DB and Start Server
 const db = require('./models');
 const startCleanupCron = require('./cron/cleanupTranscripts');
+// Cloud-compatible binding: PORT (cloud) -> APP_PORT (local .env) -> 5001,
+// listening on 0.0.0.0 so deployed containers accept external traffic.
+const { resolvePort, resolveHost } = require('./config/serverConfig');
 
 async function startServer() {
     try {
@@ -58,15 +68,35 @@ async function startServer() {
         );
         const failedModels = [];
 
-        for (const name of modelNames) {
+        // Schema alteration is opt-in: set DB_SYNC_ALTER=true only when a model
+        // schema intentionally changed. Normal startup creates missing tables
+        // but never re-alters every existing table (and never uses force).
+        const alterSchema = process.env.DB_SYNC_ALTER === 'true';
+
+        // Visible startup progress: the HTTP listener only binds AFTER this
+        // loop, so a slow remote database must never look like a silent hang
+        // (the classic symptom is the Vite proxy timing out on 127.0.0.1:5001).
+        console.log(`Syncing ${modelNames.length} models (alter:${alterSchema}) - port ${resolvePort()} opens when this finishes...`);
+        const syncStart = Date.now();
+
+        for (const [i, name] of modelNames.entries()) {
+            // Heartbeat: if one model sync stalls (slow/unreachable DB), keep
+            // saying so instead of going quiet.
+            const heartbeat = setInterval(() => {
+                console.log(`  ... still syncing ${name} (${Math.round((Date.now() - syncStart) / 1000)}s elapsed) - check DB_HOST/network if this persists`);
+            }, 10000);
+            const modelStart = Date.now();
             try {
-                await db[name].sync({ alter: true });
-                console.log(`  ✔ Synced: ${name}`);
+                await db[name].sync({ alter: alterSchema });
+                console.log(`  OK [${i + 1}/${modelNames.length}] Synced: ${name} (${Date.now() - modelStart}ms)`);
             } catch (syncErr) {
                 failedModels.push(name);
-                console.error(`  ✖ Failed to sync ${name}:`, syncErr.message);
+                console.error(`  FAIL [${i + 1}/${modelNames.length}] Failed to sync ${name}:`, syncErr.message);
+            } finally {
+                clearInterval(heartbeat);
             }
         }
+        console.log(`Model sync finished in ${Math.round((Date.now() - syncStart) / 1000)}s.`);
 
         if (failedModels.length > 0) {
             console.warn(`\nWARNING: ${failedModels.length} model(s) failed to sync: ${failedModels.join(', ')}`);
@@ -76,10 +106,11 @@ async function startServer() {
         // Start PDPA 90-day transcript cleanup cron
         startCleanupCron(db);
 
-        let port = process.env.APP_PORT || 5000;
-        app.listen(port, '127.0.0.1', () => {
+        const port = resolvePort();
+        const host = resolveHost();
+        app.listen(port, host, () => {
             console.log("--------------------------------------------------");
-            console.log(`FlowGuard Server is FULLY READY on port ${port}`);
+            console.log(`FlowGuard Server is FULLY READY on ${host}:${port}`);
             console.log("--------------------------------------------------");
         });
     } catch (err) {

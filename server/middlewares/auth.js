@@ -1,29 +1,61 @@
 const jwt = require('jsonwebtoken');
 
-const verifyToken = (req, res, next) => {
+const verifyToken = async (req, res, next) => {
     // 1. Grab the token from the request header
     const authHeader = req.headers['authorization'];
-    
+
     // Tokens usually come in as "Bearer <token_string>", so we split it to just get the string
-    const token = authHeader && authHeader.split(' ')[1]; 
+    const token = authHeader && authHeader.split(' ')[1];
 
     // 2. If there is no token, kick them out
     if (!token) {
         return res.status(401).json({ message: "Access Denied. No security token provided." });
     }
 
+    // 3. Verify the token signature/expiry
+    let decoded;
     try {
-        // 3. Verify the token using your secret key
-        const decoded = jwt.verify(token, process.env.APP_SECRET);
-        
-        // 4. Attach the decoded user data (like their ID) to the request
-        req.user = decoded; 
-        
-        // 5. Let them through to the actual route!
-        next(); 
-
+        decoded = jwt.verify(token, process.env.APP_SECRET);
     } catch (err) {
         return res.status(403).json({ message: "Invalid or expired security token." });
+    }
+
+    try {
+        // 4. The DATABASE is authoritative, not the JWT payload. Every protected
+        //    request re-reads the account so that deletion, suspension, role
+        //    changes, and session revocation (tokenVersion bump on password
+        //    change/reset or suspension) take effect immediately — e.g. a
+        //    stolen/lost-device token dies the moment the account is secured.
+        //    Lazy-required so unit tests can jest.mock('../models'); suites that
+        //    stub the models without a User model keep the JWT-only behaviour.
+        const { User } = require('../models');
+        if (User && typeof User.findByPk === 'function') {
+            const account = await User.findByPk(decoded.id);
+            if (!account) {
+                return res.status(401).json({ message: "Account no longer exists. Session terminated." });
+            }
+            if (account.isActive === false) {
+                return res.status(403).json({ message: "Account suspended. Session terminated." });
+            }
+            const issuedVersion = Number(decoded.tokenVersion ?? 0);
+            const currentVersion = Number(account.tokenVersion ?? 0);
+            if (issuedVersion !== currentVersion) {
+                return res.status(401).json({ message: "Session revoked. Please log in again." });
+            }
+            req.user = {
+                id: account.id,
+                email: account.email,
+                role: account.role,          // DB role wins over whatever the JWT claims
+                tokenVersion: currentVersion
+            };
+        } else {
+            req.user = decoded;
+        }
+
+        next();
+    } catch (err) {
+        console.error("verifyToken account lookup failed:", err.message);
+        return res.status(500).json({ message: "Authentication service unavailable." });
     }
 };
 
